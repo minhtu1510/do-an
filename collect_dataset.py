@@ -16,7 +16,7 @@ Kiến trúc thu thập:
   │  Testbed Machine (attacker)             │
   │  ┌──────────┐    ┌────────────────────┐ │
   │  │ s7pwn    │───▶│ collect_dataset.py │ │
-  │  │ attacks  │    │  + tcpdump/scapy   │ │
+  │  │ attacks  │    │  + dumpcap/tshark  │ │
   │  └──────────┘    └────────────────────┘ │
   │         │                │              │
   │         ▼                ▼              │
@@ -34,7 +34,7 @@ Usage:
 
 Requirements:
   pip install scapy snap7 pandas
-  apt-get install tcpdump   (hoặc dùng Wireshark)
+  Wireshark/TShark or Dumpcap in PATH. tcpdump is only a Linux fallback.
 """
 
 from __future__ import annotations
@@ -50,12 +50,16 @@ import threading
 import csv
 import struct
 import signal
+import shlex
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 # Profinet DCP constants (Layer 2 - EtherType 0x8892)
 PROFINET_ETHERTYPE = 0x8892
@@ -145,34 +149,123 @@ def setup_directories(base_dir: str) -> Dict[str, Path]:
     return dirs
 
 # ══════════════════════════════════════════════════════════════════════
-#  PCAP CAPTURE via tcpdump / scapy
+#  PCAP CAPTURE via dumpcap / tshark / tcpdump
 # ══════════════════════════════════════════════════════════════════════
 
 class PcapCapture:
-    """Manages a background tcpdump process for packet capture."""
+    """Manages a background packet capture process.
+
+    Prefer dumpcap/tshark so Git Bash on Windows works with Wireshark/Npcap.
+    tcpdump remains a Linux fallback.
+    """
 
     def __init__(self, iface: str, output_file: str, bpf_filter: str = ""):
         self.iface       = iface
         self.output_file = output_file
         self.bpf_filter  = bpf_filter
         self._proc: Optional[subprocess.Popen] = None
+        self.backend = self._choose_backend()
+
+    @staticmethod
+    def _choose_backend() -> Optional[str]:
+        for name in ("dumpcap", "tshark", "tcpdump"):
+            if shutil.which(name):
+                return name
+        return None
+
+    @staticmethod
+    def _list_interfaces(backend: Optional[str]) -> str:
+        if not backend:
+            return ""
+        try:
+            result = subprocess.run(
+                [backend, "-D"],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                timeout=10,
+                check=False,
+            )
+            return result.stdout or ""
+        except Exception as exc:
+            return f"[cannot list interfaces with {backend}: {exc}]"
+
+    @staticmethod
+    def _interface_exists(iface: str, interfaces_output: str) -> bool:
+        if not interfaces_output:
+            return True
+        if iface.isdigit():
+            return any(line.strip().startswith(f"{iface}.") for line in interfaces_output.splitlines())
+        return iface in interfaces_output
+
+    @classmethod
+    def validate_or_exit(cls, iface: str) -> None:
+        backend = cls._choose_backend()
+        if not backend:
+            print("[ERROR] No capture backend found. Install Wireshark/TShark/Dumpcap or tcpdump.", file=sys.stderr)
+            sys.exit(2)
+        if not iface:
+            print("[ERROR] Capture interface is empty. Run 'tshark -D' or 'dumpcap -D' and pass --iface.", file=sys.stderr)
+            print(cls._list_interfaces(backend), file=sys.stderr)
+            sys.exit(2)
+        interfaces = cls._list_interfaces(backend)
+        if not cls._interface_exists(iface, interfaces):
+            print(f"[ERROR] Capture interface '{iface}' was not found by {backend}.", file=sys.stderr)
+            print(interfaces, file=sys.stderr)
+            sys.exit(2)
+
+    def _build_command(self) -> List[str]:
+        if self.backend == "dumpcap":
+            cmd = [self.backend, "-i", self.iface, "-w", self.output_file]
+            if self.bpf_filter:
+                cmd += ["-f", self.bpf_filter]
+            cmd += ["-q"]
+            return cmd
+        if self.backend == "tshark":
+            cmd = [self.backend, "-n", "-i", self.iface, "-w", self.output_file]
+            if self.bpf_filter:
+                cmd += ["-f", self.bpf_filter]
+            cmd += ["-q"]
+            return cmd
+        if self.backend == "tcpdump":
+            cmd = ["tcpdump", "-i", self.iface, "-w", self.output_file, "-n"]
+            if self.bpf_filter:
+                cmd += shlex.split(self.bpf_filter)
+            return cmd
+        raise RuntimeError("No capture backend found")
 
     def start(self) -> bool:
-        cmd = ["tcpdump", "-i", self.iface, "-w", self.output_file, "-n"]
-        if self.bpf_filter:
-            cmd += self.bpf_filter.split()
+        if not self.backend:
+            print("    [!] No capture backend found – aborting capture")
+            return False
+        interfaces = self._list_interfaces(self.backend)
+        if not self.iface or not self._interface_exists(self.iface, interfaces):
+            print(f"    [!] Invalid capture interface: {self.iface or '<empty>'}")
+            print("    [*] Available interfaces:")
+            print(interfaces)
+            return False
+
+        cmd = self._build_command()
         try:
             self._proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
             )
-            time.sleep(0.5)   # let tcpdump initialise
-            print(f"    [pcap] Capturing on {self.iface} → {self.output_file}")
+            time.sleep(0.8)   # let backend initialise
+            if self._proc.poll() is not None:
+                err = self._proc.stderr.read() if self._proc.stderr else ""
+                print(f"    [!] {self.backend} failed to start capture on {self.iface}")
+                if err:
+                    print(err.strip())
+                print("    [*] Available interfaces:")
+                print(interfaces)
+                return False
+            print(f"    [pcap] {self.backend} capturing on {self.iface} → {self.output_file}")
             return True
         except FileNotFoundError:
-            print("    [!] tcpdump not found – skipping packet capture")
-            print("        Install: sudo apt-get install tcpdump")
+            print(f"    [!] {self.backend} not found – skipping packet capture")
             return False
 
     def stop(self) -> int:
@@ -708,7 +801,7 @@ def run_collection(
     rack: int = 0,
     slot: int = 1,
     phases: List[str] = None,
-    iface: str = "eth0",
+    iface: str = "",
     base_dir: str = "dataset",
     window_s: float = 5.0,
     replay_file: str = "",
@@ -720,7 +813,12 @@ def run_collection(
     seed: Optional[int] = None,
 ) -> None:
 
-    phases = phases or list(ATTACK_PHASES.keys())
+    if phases is None:
+        phases = list(ATTACK_PHASES.keys())
+    if not phases:
+        print("[WARN] No phases selected; collection skipped.")
+        return
+    PcapCapture.validate_or_exit(iface)
     dirs   = setup_directories(base_dir)
     ts_run = datetime.now().strftime("%Y%m%d_%H%M%S")
     session_id = session_id or f"session_{ts_run}"
@@ -917,7 +1015,7 @@ if __name__ == "__main__":
     ap.add_argument("--target",  required=True,  help="PLC IP address")
     ap.add_argument("--rack",    type=int, default=0,    help="S7 rack (default 0)")
     ap.add_argument("--slot",    type=int, default=1,    help="S7 slot (default 1)")
-    ap.add_argument("--iface",   default="eth0",         help="Network interface for capture")
+    ap.add_argument("--iface",   default="",             help="Network interface for capture. Run 'tshark -D' or 'dumpcap -D'.")
     ap.add_argument("--output",  default="dataset",      help="Output base directory")
     ap.add_argument("--window",  type=float, default=5.0,help="Feature aggregation window (s)")
     ap.add_argument("--replay-file", default="",         help="Pre-captured .s7replay for replay phase")
@@ -931,6 +1029,7 @@ if __name__ == "__main__":
     ap.add_argument("--episodes-per-attack", type=int, default=3, help="Number of repeated randomized episodes per attack phase")
     ap.add_argument("--cooldown", type=float, default=3.0, help="Cooldown seconds between episodes")
     ap.add_argument("--seed", type=int, default=None, help="Random seed for reproducible episode parameters")
+    ap.add_argument("--enable-cpu-control", action="store_true", help="Allow cpu_control phase. Disabled by default for S7-1500 safety/security compatibility")
     ap.add_argument("--config",  default="",             help="Load config from JSON file")
     ap.add_argument("--list-phases", action="store_true",help="List all available phases and exit")
 
@@ -964,11 +1063,18 @@ if __name__ == "__main__":
     episodes_per_attack = int(cfg.get("episodes_per_attack", args.episodes_per_attack))
     cooldown_s = float(cfg.get("cooldown", args.cooldown))
     seed = cfg.get("seed", args.seed)
+    enable_cpu_control = bool(cfg.get("enable_cpu_control", args.enable_cpu_control))
 
     if args.phase.lower() == "all":
         phases = list(ATTACK_PHASES.keys())
     else:
         phases = [p.strip() for p in args.phase.split(",")]
+    if not enable_cpu_control and "cpu_control" in phases:
+        print("[WARN] cpu_control phase removed. Pass --enable-cpu-control only if PLC permits remote STOP/START.")
+        phases = [p for p in phases if p != "cpu_control"]
+    if not phases:
+        print("[WARN] No phases left to run after safety filtering.")
+        sys.exit(0)
 
     run_collection(
         target_ip=target_ip,

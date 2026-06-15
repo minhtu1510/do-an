@@ -4,15 +4,35 @@ import threading
 import socket
 import urllib.request
 import logging
+import os
+import re
+import sys
 
 # Nhúng module ghi log timeline (dùng để gán nhãn Pcap)
 from label_logger import log_event
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# CẤU HÌNH IP
-PLC_IP = "192.168.0.100"      
-IT_SERVER_IP = "192.168.0.10" 
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
+def load_testbed_value(name, default=""):
+    try:
+        with open("testbed.conf", "r", encoding="utf-8") as f:
+            for line in f:
+                match = re.match(rf"^\s*{re.escape(name)}\s*=\s*[\"']?([^\"'#]*)", line)
+                if match:
+                    return match.group(1).strip()
+    except OSError:
+        pass
+    return default
+
+
+# Deprecated standalone script: use run_day_bangtruyen.sh for real collection.
+PLC_IP = os.getenv("TARGET_IP") or load_testbed_value("TARGET_IP", "192.168.1.10")
+IT_SERVER_IP = os.getenv("IT_SERVER_IP") or load_testbed_value("IT_SERVER_IP", "")
 
 def simulate_hmi_plc_scada():
     logging.info("Bắt đầu luồng giao tiếp SCADA/HMI (Đọc/Ghi lệnh hợp lệ).")
@@ -35,6 +55,9 @@ def simulate_hmi_plc_scada():
 
 def generate_http_background_traffic():
     while True:
+        if not IT_SERVER_IP:
+            time.sleep(30)
+            continue
         try:
             url = f"http://{IT_SERVER_IP}/"
             # ===== GHI TIMELINE NHIỄU HTTP =====
@@ -49,6 +72,9 @@ def generate_http_background_traffic():
 
 def generate_tcp_background_traffic(port, protocol_name):
     while True:
+        if not IT_SERVER_IP:
+            time.sleep(30)
+            continue
         try:
             # ===== GHI TIMELINE NHIỄU TCP =====
             log_event("BACKGROUND_TRAFFIC", f"TCP_CONNECT_{protocol_name}_TO_PORT_{port}")
@@ -62,6 +88,7 @@ def generate_tcp_background_traffic(port, protocol_name):
 
 if __name__ == '__main__':
     logging.info("=== BẮT ĐẦU THU THẬP NGÀY 1 ===")
+    logging.warning("day1_benign.py là script mô phỏng cũ; dùng run_day_bangtruyen.sh cho bộ dữ liệu chính.")
     
     # Ghi nhận thời điểm bắt đầu
     log_event("SYSTEM", "START_DAY1_BENIGN_TRAFFIC")

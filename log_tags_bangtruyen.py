@@ -2,7 +2,7 @@
 """
 log_tags_bangtruyen.py  —  Poll tag PLC hệ thống Băng Truyền (Conveyor Belt)
 ==========================================================================
-Bảng tag PLC (Conveyor Belt S7-1200) — Tham chiếu từ bảng tag TIA Portal:
+Bảng tag PLC (Conveyor Belt S7-1500/S7-1200) — Tham chiếu từ bảng tag TIA Portal:
 
   I area (đầu vào vật lý):
     I0.0 = Start_1              (Nút khởi động)
@@ -29,15 +29,15 @@ Bảng tag PLC (Conveyor Belt S7-1200) — Tham chiếu từ bảng tag TIA Port
     M10.1 = Tag_10 (Bool)
     MD50  = Times_1 (DInt, ms)  (Bộ đếm thời gian tổng)
     MD54  = CD1     (Time, ms)  (Countdown timer vật 1)
-    MD56  = Tag_4   (Time, ms)  (Timer nội bộ 4)
+    MD56  = Tag_4   (Time, ms)  (DISABLED by default: overlaps MD54/MD58 if DInt)
     MD58  = CD2     (Time, ms)  (Countdown timer vật 2)
     MD62  = CD3     (Time, ms)  (Countdown timer vật 3)
     MW70  = Nhap    (Int)       (Giá trị đầu vào đếm thùng)
     MW74  = HienThi (Int)       (Giá trị hiển thị đếm)
 
 Cách dùng:
-  python log_tags_bangtruyen.py --target 192.168.210.211 --output logs/day1_bt_s1_tags.csv
-  python log_tags_bangtruyen.py --target 192.168.210.211 --interval 0.5 --output tags.csv
+  python log_tags_bangtruyen.py --target 192.168.1.10 --output logs/day1_bt_s1_tags.csv
+  python log_tags_bangtruyen.py --target 192.168.1.10 --interval 0.5 --output tags.csv
 """
 
 import argparse
@@ -52,6 +52,11 @@ try:
     from snap7.type import Areas
 except ImportError:
     from snap7.types import Areas
+
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
 
 # =============================================================================
@@ -107,10 +112,12 @@ M_BITS = {
 M_DWORDS = {
     'Times_1': 50,   # MD50 — Thời gian tổng
     'CD1':     54,   # MD54 — Countdown vật 1
-    'Tag_4':   56,   # MD56 — Timer nội bộ 4
     'CD2':     58,   # MD58 — Countdown vật 2
     'CD3':     62,   # MD62 — Countdown vật 3
 }
+
+# Tag_4/MD56 is intentionally not logged as a DInt by default because it overlaps
+# CD1=MD54 (bytes 54-57) and CD2=MD58 (bytes 58-61) if all are DInt/Time.
 
 # M area Word (2 bytes big-endian signed int)
 M_WORDS = {
@@ -137,6 +144,11 @@ NORMAL_CD_MS_MAX = 30_000    # 30 giây
 def build_header() -> list:
     cols = [
         'timestamp_ms',
+        'session_id',
+        'host_id',
+        'scenario_id',
+        'episode_id',
+        'day',
         'poll_seq',
         'plc_connected',
         'plc_mode',           # 1=RUN, 0=STOP/ERROR
@@ -190,11 +202,16 @@ def build_header() -> list:
 #  Poll một lần
 # =============================================================================
 
-def poll_once(client: snap7.client.Client, poll_seq: int) -> dict:
+def poll_once(client: snap7.client.Client, poll_seq: int, metadata: dict) -> dict:
     ts_start = int(time.time() * 1000)
     header = build_header()
     row = {col: 0 for col in header}
     row['timestamp_ms'] = ts_start
+    row['session_id']   = metadata.get('session_id', '')
+    row['host_id']      = metadata.get('host_id', '')
+    row['scenario_id']  = metadata.get('scenario_id', '')
+    row['episode_id']   = metadata.get('episode_id', '')
+    row['day']          = metadata.get('day', '')
     row['poll_seq']     = poll_seq
     row['q0_raw_hex']   = ''
     row['i0_raw_hex']   = ''
@@ -211,7 +228,7 @@ def poll_once(client: snap7.client.Client, poll_seq: int) -> dict:
             mode_str = str(mode)
             row['plc_mode'] = 1 if ("Run" in mode_str or mode_str == "8" or mode == 8) else 0
         except Exception:
-            row['plc_mode'] = 1  # Fallback: dùng BangTai làm proxy ở dưới
+            row['plc_mode'] = 0  # Conservative fallback: unknown state is not RUN
 
         # ── I area (Physical Input) ───────────────────────────────────────────
         try:
@@ -223,14 +240,17 @@ def poll_once(client: snap7.client.Client, poll_seq: int) -> dict:
             pass  # I area có thể không đọc được trên một số PLC
 
         # ── Q area (Physical Output) ──────────────────────────────────────────
-        q_data = client.read_area(Areas.PA, 0, Q_AREA_OFFSET, Q_AREA_SIZE)
-        row['q0_raw_hex'] = q_data.hex()
+        try:
+            q_data = client.read_area(Areas.PA, 0, Q_AREA_OFFSET, Q_AREA_SIZE)
+            row['q0_raw_hex'] = q_data.hex()
 
-        for name, (byte_off, bit_idx) in Q_BITS.items():
-            row[name] = 1 if get_bool(q_data, byte_off, bit_idx) else 0
+            for name, (byte_off, bit_idx) in Q_BITS.items():
+                row[name] = 1 if get_bool(q_data, byte_off, bit_idx) else 0
 
-        for name, offset in Q_BYTES_RAW.items():
-            row[name] = q_data[offset] if offset < len(q_data) else 0
+            for name, offset in Q_BYTES_RAW.items():
+                row[name] = q_data[offset] if offset < len(q_data) else 0
+        except Exception:
+            pass  # S7-1500 protection may block PA reads; keep M-area logging alive
 
         # ── M area ────────────────────────────────────────────────────────────
         m_data = client.read_area(Areas.MK, 0, M_AREA_OFFSET, M_AREA_SIZE)
@@ -324,7 +344,7 @@ def poll_once(client: snap7.client.Client, poll_seq: int) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(
-        description='PLC Tag Logger — Băng Truyền (Conveyor Belt) S7-1200',
+        description='PLC Tag Logger — Băng Truyền (Conveyor Belt) S7-1500/S7-1200',
         formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument('--target',   required=True, help='PLC IP address')
@@ -333,6 +353,11 @@ def main():
     parser.add_argument('--interval', type=float, default=0.5,
                         help='Poll interval (giây). Mặc định 0.5s = 2Hz')
     parser.add_argument('--output',   required=True)
+    parser.add_argument('--session-id', default='')
+    parser.add_argument('--host-id', default='')
+    parser.add_argument('--scenario-id', default='BENIGN_READER')
+    parser.add_argument('--episode-id', default='')
+    parser.add_argument('--day', default='')
     args = parser.parse_args()
 
     header = build_header()
@@ -348,6 +373,7 @@ def main():
 
     print(f"[LOG_TAGS_BT] PLC    : {args.target}  rack={args.rack} slot={args.slot}")
     print(f"[LOG_TAGS_BT] Output : {args.output}")
+    print(f"[LOG_TAGS_BT] Meta   : session={args.session_id} host={args.host_id} day={args.day}")
     print(f"[LOG_TAGS_BT] Poll   : {args.interval}s ({1/args.interval:.0f} Hz)")
     print(f"[LOG_TAGS_BT] Hệ thống: Băng Truyền (Conveyor Belt)")
     print(f"[LOG_TAGS_BT] Tags   : Q0.0(BangTai) | I0.0-I0.2 | M5-M10 | MD50-MD62 | MW70/74")
@@ -366,7 +392,13 @@ def main():
                     time.sleep(2)
                     continue
 
-            row = poll_once(client, poll_seq)
+            row = poll_once(client, poll_seq, {
+                'session_id': args.session_id,
+                'host_id': args.host_id,
+                'scenario_id': args.scenario_id,
+                'episode_id': args.episode_id,
+                'day': args.day,
+            })
             poll_seq += 1
             writer.writerow([row[col] for col in header])
             fh.flush()

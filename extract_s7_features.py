@@ -42,6 +42,8 @@ Timeline CSV hỗ trợ cột:
   start,end,label
 hoặc:
   start_time,end_time,label
+hoặc event timeline từ run_day_bangtruyen.sh:
+  attacker_timestamp_ms,scenario_label,action,session_id,host_id,episode_id,day,note
 Trong đó start/end có thể là epoch seconds hoặc epoch milliseconds.
 
 Yêu cầu:
@@ -887,16 +889,41 @@ def load_timeline(path: Optional[str]) -> List[TimelineLabel]:
         lower_map = {c.lower().strip(): c for c in reader.fieldnames}
         start_col = lower_map.get("start") or lower_map.get("start_time") or lower_map.get("start_timestamp")
         end_col = lower_map.get("end") or lower_map.get("end_time") or lower_map.get("end_timestamp")
-        label_col = lower_map.get("label") or lower_map.get("attack") or lower_map.get("class")
-        if not start_col or not end_col or not label_col:
-            raise ValueError("Timeline CSV cần cột start,end,label hoặc start_time,end_time,label")
+        label_col = lower_map.get("scenario_label") or lower_map.get("label") or lower_map.get("attack") or lower_map.get("class")
+        if start_col and end_col and label_col:
+            for row in reader:
+                s = normalize_epoch_ms(row.get(start_col))
+                e = normalize_epoch_ms(row.get(end_col))
+                lab = str(row.get(label_col, "")).strip()
+                if s >= 0 and e >= s and lab:
+                    labels.append(TimelineLabel(s, e, lab))
+            return labels
+
+        ts_col = lower_map.get("attacker_timestamp_ms") or lower_map.get("timestamp_ms") or lower_map.get("timestamp") or lower_map.get("time") or lower_map.get("ts")
+        action_col = lower_map.get("action") or lower_map.get("event")
+        episode_col = lower_map.get("episode_id") or lower_map.get("episode")
+        if not ts_col or not label_col or not action_col:
+            raise ValueError(
+                "Timeline CSV cần cột start,end,label hoặc event schema: "
+                "attacker_timestamp_ms,scenario_label,action"
+            )
+
+        active: Dict[Tuple[str, str], List[int]] = defaultdict(list)
         for row in reader:
-            s = normalize_epoch_ms(row.get(start_col))
-            e = normalize_epoch_ms(row.get(end_col))
+            ts_ms = normalize_epoch_ms(row.get(ts_col))
             lab = str(row.get(label_col, "")).strip()
-            if s >= 0 and e >= s and lab:
-                labels.append(TimelineLabel(s, e, lab))
-    return labels
+            action = str(row.get(action_col, "")).strip().upper()
+            episode = str(row.get(episode_col, "")).strip() if episode_col else ""
+            key = (lab, episode or lab)
+            if ts_ms < 0 or not lab:
+                continue
+            if action == "START":
+                active[key].append(ts_ms)
+            elif action == "END" and active.get(key):
+                start_ms = active[key].pop(0)
+                if ts_ms >= start_ms:
+                    labels.append(TimelineLabel(start_ms, ts_ms, lab))
+    return sorted(labels, key=lambda x: x.start_ms)
 
 
 def label_for_window(w_start_ms: int, w_end_ms: int, timeline: List[TimelineLabel], default_label: str) -> str:

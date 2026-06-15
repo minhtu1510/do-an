@@ -1,6 +1,18 @@
 #!/usr/bin/env python3
+"""Restore conveyor PLC Merker state safely.
+
+This tool is for the bang-truyen/conveyor tag map. It intentionally does not
+write PA/Q outputs and does not issue remote CPU STOP/START commands.
+"""
+
+from __future__ import annotations
+
 import argparse
+import os
+import re
 import time
+from pathlib import Path
+
 import snap7
 try:
     from snap7.type import Areas
@@ -8,109 +20,108 @@ except ImportError:
     from snap7.types import Areas
 from snap7.util import set_bool, set_dint
 
-def main():
-    parser = argparse.ArgumentParser(description="Tool kiểm tra và khôi phục trạng thái PLC S7-1200")
-    parser.add_argument("--target", default="192.168.1.10", help="Địa chỉ IP của PLC (Mặc định: 192.168.1.10)")
-    parser.add_argument("--rack", type=int, default=0, help="Rack (Mặc định: 0)")
-    parser.add_argument("--slot", type=int, default=1, help="Slot (Mặc định: 1)")
-    args = parser.parse_args()
 
-    print("=" * 60)
-    print(f"Bắt đầu kết nối và khôi phục PLC: {args.target} (rack={args.rack}, slot={args.slot})")
-    print("=" * 60)
+def load_testbed_conf(path: str) -> dict[str, str]:
+    values: dict[str, str] = {}
+    conf = Path(path)
+    if not conf.exists():
+        return values
+    pattern = re.compile(r'^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*["\']?([^"\'#]*)["\']?')
+    for line in conf.read_text(encoding='utf-8').splitlines():
+        match = pattern.match(line)
+        if match:
+            values[match.group(1)] = match.group(2).strip()
+    return values
 
-    c = snap7.client.Client()
+
+def write_dint(client: snap7.client.Client, offset: int, value: int) -> None:
+    buf = bytearray(4)
+    set_dint(buf, 0, int(value))
+    client.write_area(Areas.MK, 0, offset, buf)
+
+
+def restore(args: argparse.Namespace) -> int:
+    client = snap7.client.Client()
     try:
-        c.connect(args.target, args.rack, args.slot)
-        print("[+] Kết nối thành công tới PLC!")
-    except Exception as e:
-        print(f"[!] LỖI KẾT NỐI: Không thể kết nối tới PLC tại {args.target}. Lỗi: {e}")
-        print("[!] Vui lòng kiểm tra IP, dây mạng hoặc cấu hình GET/PUT trên PLC.")
-        return
+        print(f"[*] Connect PLC {args.target} rack={args.rack} slot={args.slot}")
+        client.connect(args.target, args.rack, args.slot)
+    except Exception as exc:
+        print(f"[!] Cannot connect PLC: {exc}")
+        print("[!] Check IP, rack/slot, network, Snap7, and PUT/GET access.")
+        return 2
 
-    # Bước 1: Kiểm tra và khởi động lại CPU nếu đang ở trạng thái STOP
     try:
-        state = c.get_cpu_state()
-        print(f"[*] Trạng thái CPU hiện tại: {state}")
-        
-        if "Stop" in str(state) or state == 4:
-            print("[*] Phát hiện CPU đang ở trạng thái STOP. Tiến hành khởi động...")
-            try:
-                c.plc_hot_start()
-                print("[+] Đã gửi lệnh PLC Hot Start (Khởi động nóng).")
-            except Exception as e_hot:
-                print(f"[!] Hot Start không thành công ({e_hot}). Đang thử Cold Start (Khởi động lạnh)...")
-                try:
-                    c.plc_cold_start()
-                    print("[+] Đã gửi lệnh PLC Cold Start thành công.")
-                except Exception as e_cold:
-                    print(f"[!] LỖI: Cả Hot/Cold Start đều thất bại: {e_cold}")
-                    print("[!] Vui lòng bật RUN thủ công qua TIA Portal nếu thiết bị chặn lệnh.")
-            
-            # Chờ 3 giây để CPU chuyển trạng thái
-            time.sleep(3)
-            new_state = c.get_cpu_state()
-            print(f"[+] Trạng thái CPU sau khi khởi động: {new_state}")
-        else:
-            print("[+] CPU đã ở trạng thái RUN/OK.")
-    except Exception as e_state:
-        print(f"[!] Không thể kiểm tra hoặc khởi động lại trạng thái CPU: {e_state}")
+        try:
+            state = str(client.get_cpu_state())
+            print(f"[*] CPU state: {state}")
+            if "Stop" in state or state == "4":
+                print("[!] CPU appears STOP. Start it manually in TIA/PLC panel; this tool will not issue CPU control.")
+        except Exception as exc:
+            print(f"[!] Cannot read CPU state: {exc}")
 
-    # Bước 2: Reset Q Output (Pha đầu ra vật lý)
-    try:
-        print("[*] Đang reset vùng nhớ đầu ra Q (PA Area)...")
-        c.write_area(Areas.PA, 0, 0, bytearray([0]))
-        print("[+] Reset Q Output thành công.")
-    except Exception as e_q:
-        print(f"[!] LỖI reset Q Output: {e_q} (Có thể PLC vẫn đang bị STOP)")
+        print("[*] Reset M5/M6 conveyor control and spoof bits")
+        m5 = client.read_area(Areas.MK, 0, 5, 1)
+        for bit in range(8):
+            set_bool(m5, 0, bit, False)
+        client.write_area(Areas.MK, 0, 5, m5)
 
-    # Bước 3: Đọc và Reset vùng nhớ M, đồng thời tạo xung kích hoạt START (M2.1)
-    try:
-        print("[*] Đang khôi phục vùng nhớ M (Merker) và tạo xung kích hoạt START...")
-        m = c.read_area(Areas.MK, 0, 0, 82)
-        
-        # Ghi các thông số khôi phục
-        set_bool(m, 2, 1, 1)    # START = 1 (Tạo xung bắt đầu chạy chu trình đèn)
-        set_bool(m, 2, 2, 0)    # STOP  = 0
-        set_bool(m, 28, 0, 0)   # s1 = 0
-        set_bool(m, 28, 1, 0)   # s4 = 0
-        set_bool(m, 28, 2, 0)   # s2 = 0
-        set_bool(m, 28, 3, 0)   # s3 = 0
-        
-        # Reset các bộ timer setpoint về giá trị an toàn mặc định
-        set_dint(m,  3, 30000)  # TimeR1 = 30s
-        set_dint(m,  8, 30000)  # TimeR2 = 30s
-        set_dint(m, 12,  3000)  # TimeY1 = 3s
-        set_dint(m, 16,  3000)  # TimeY2 = 3s
-        set_dint(m, 20, 25000)  # TimeG1 = 25s
-        set_dint(m, 24, 25000)  # TimeG2 = 25s
-        
-        c.write_area(Areas.MK, 0, 0, m)
-        print("[+] Đã set START = 1 và thiết lập lại toàn bộ setpoint timer.")
+        m6 = client.read_area(Areas.MK, 0, 6, 1)
+        set_bool(m6, 0, 0, False)  # Vat_3
+        set_bool(m6, 0, 1, False)  # S1
+        set_bool(m6, 0, 2, False)  # Tag_8
+        client.write_area(Areas.MK, 0, 6, m6)
 
-        # Chờ 1 giây để PLC nhận bit START trong vòng quét logic
-        time.sleep(1.0)
-        
-        # Reset START về 0 (nhả nút Start)
-        m = c.read_area(Areas.MK, 0, 0, 82)
-        set_bool(m, 2, 1, 0)    # START = 0
-        c.write_area(Areas.MK, 0, 0, m)
-        print("[+] Đã trả START = 0. Chu trình xung bắt đầu đã hoàn tất!")
-        print("[+] Đèn giao thông trên PLC sẽ bắt đầu hoạt động bình thường!")
+        print("[*] Restore conveyor timers")
+        write_dint(client, 50, args.times1_ms)
+        write_dint(client, 54, args.default_cd_ms)
+        write_dint(client, 58, args.default_cd_ms)
+        write_dint(client, 62, args.default_cd_ms)
+        print(f"[+] Times_1={args.times1_ms}, CD1/CD2/CD3={args.default_cd_ms}")
 
-    except Exception as e_m:
-        print(f"[!] LỖI ghi vùng nhớ M: {e_m}")
+        if args.start_pulse:
+            print("[*] Send START pulse on M5.0")
+            m5 = client.read_area(Areas.MK, 0, 5, 1)
+            set_bool(m5, 0, 0, True)
+            set_bool(m5, 0, 1, False)
+            client.write_area(Areas.MK, 0, 5, m5)
+            time.sleep(0.3)
+            m5 = client.read_area(Areas.MK, 0, 5, 1)
+            set_bool(m5, 0, 0, False)
+            client.write_area(Areas.MK, 0, 5, m5)
+            print("[+] START pulse completed")
 
+        return 0
+    except Exception as exc:
+        print(f"[!] Restore failed: {exc}")
+        return 3
     finally:
         try:
-            c.disconnect()
-            print("[+] Đã đóng kết nối PLC an toàn.")
-        except:
+            client.disconnect()
+        except Exception:
             pass
 
-    print("=" * 60)
-    print("HOÀN THÀNH QUÁ TRÌNH KHÔI PHỤC PLC!")
-    print("=" * 60)
 
-if __name__ == "__main__":
-    main()
+def main() -> int:
+    conf = load_testbed_conf('testbed.conf')
+    parser = argparse.ArgumentParser(description='Restore bang-truyen/conveyor PLC Merker state')
+    parser.add_argument('--target', default=os.getenv('TARGET_IP') or conf.get('TARGET_IP', '192.168.1.10'))
+    parser.add_argument('--rack', type=int, default=int(os.getenv('RACK') or conf.get('RACK', 0)))
+    parser.add_argument('--slot', type=int, default=int(os.getenv('SLOT') or conf.get('SLOT', 1)))
+    parser.add_argument('--default-cd-ms', type=int, default=int(os.getenv('DEFAULT_CD_MS') or conf.get('DEFAULT_CD_MS', 5000)))
+    parser.add_argument('--times1-ms', type=int, default=int(os.getenv('RESTORE_TIMES1_MS') or conf.get('RESTORE_TIMES1_MS', 0)))
+    parser.add_argument('--no-start-pulse', dest='start_pulse', action='store_false')
+    parser.set_defaults(start_pulse=(os.getenv('RESTORE_START_PULSE') or conf.get('RESTORE_START_PULSE', '1')) == '1')
+    args = parser.parse_args()
+
+    print('=' * 60)
+    print('Conveyor PLC restore')
+    print('=' * 60)
+    rc = restore(args)
+    print('=' * 60)
+    print('DONE' if rc == 0 else 'FAILED')
+    print('=' * 60)
+    return rc
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

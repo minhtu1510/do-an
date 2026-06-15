@@ -1,27 +1,69 @@
-import time
+import csv
 import os
+import sys
+import time
+from typing import Optional
 
-# ==========================================
-# ĐƯỜNG DẪN BẠN ĐIỀN ĐỂ LƯU FILE GÁN NHÃN DỮ LIỆU (GROUND TRUTH TIMELINE)
-# ==========================================
-LABEL_TXT_PATH = r"e:\Đồ án\code\iiot\dataset_labels_timeline.txt"
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-def log_event(label_type, action_detail):
+
+DEFAULT_LABEL_CSV_PATH = os.path.join(os.getcwd(), "labels", "legacy_timeline.csv")
+HEADER = [
+    "attacker_timestamp_ms",
+    "scenario_label",
+    "action",
+    "session_id",
+    "host_id",
+    "episode_id",
+    "day",
+    "note",
+]
+
+
+def _label_path() -> str:
+    return os.getenv("LABEL_CSV_PATH", DEFAULT_LABEL_CSV_PATH)
+
+
+def log_event(
+    label_type: str,
+    action_detail: str,
+    *,
+    action: str = "EVENT",
+    session_id: Optional[str] = None,
+    host_id: Optional[str] = None,
+    episode_id: Optional[str] = None,
+    day: Optional[str] = None,
+    note: Optional[str] = None,
+) -> None:
+    """Append one event to the unified timeline CSV schema.
+
+    Older standalone scripts call this with only label_type/action_detail. Those
+    rows are kept as EVENT records and should not be used as the main dataset
+    timeline. The publication collection path is run_day_bangtruyen.sh.
     """
-    Hàm này ghi thẳng thông tin Nhãn (Label) và Thời gian thực thi (Timestamp)
-    vào file TXT mà bạn điền ở trên, dùng để map (đối chiếu) với file PCAP sau này.
-    
-    :param label_type: Nhãn (Ví dụ: BENIGN, ATTACK_DOS, ATTACK_LOGIC)
-    :param action_detail: Chi tiết hành động (VD: HMI_READ, NMAP_SCAN)
-    """
-    time_str = time.strftime('%Y-%m-%d %H:%M:%S')
-    time_epoch = f"{time.time():.6f}"
-    
-    log_line = f"{time_str},{time_epoch},{label_type},{action_detail}\n"
-    
+    path = _label_path()
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    write_header = not os.path.exists(path)
+
+    row = {
+        "attacker_timestamp_ms": int(time.time() * 1000),
+        "scenario_label": str(label_type).strip().upper(),
+        "action": action.strip().upper(),
+        "session_id": session_id or os.getenv("SESSION_ID", "legacy_session"),
+        "host_id": host_id or os.getenv("HOST_ID", "legacy_host"),
+        "episode_id": episode_id or "",
+        "day": day or os.getenv("DAY", "legacy"),
+        "note": note if note is not None else action_detail,
+    }
+
     try:
-        # Mở file chế độ append ('a') để ghi nối tiếp các ngày
-        with open(LABEL_TXT_PATH, 'a', encoding='utf-8') as f:
-            f.write(log_line)
-    except Exception as e:
-        print(f"Lỗi khi ghi lịch sử vào text file: {e}")
+        with open(path, "a", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=HEADER)
+            if write_header:
+                writer.writeheader()
+            writer.writerow(row)
+    except Exception as exc:
+        print(f"Lỗi khi ghi timeline CSV: {exc}")

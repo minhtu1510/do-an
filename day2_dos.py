@@ -3,16 +3,36 @@ import random
 import threading
 import subprocess
 import logging
+import os
+import re
+import sys
 
 # Nhúng module ghi log timeline (ground truth)
 from label_logger import log_event
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
 # ==========================================
 # CẤU HÌNH IP
 # ==========================================
-PLC_IP = "192.168.0.100"
+def load_testbed_value(name, default=""):
+    try:
+        with open("testbed.conf", "r", encoding="utf-8") as f:
+            for line in f:
+                match = re.match(rf"^\s*{re.escape(name)}\s*=\s*[\"']?([^\"'#]*)", line)
+                if match:
+                    return match.group(1).strip()
+    except OSError:
+        pass
+    return default
+
+
+PLC_IP = os.getenv("TARGET_IP") or load_testbed_value("TARGET_IP", "192.168.1.10")
 TOOL_DIR = r"e:\Đồ án\code\iiot\s7pwn"  # Thư mục chứa công cụ của bạn
 
 # ==========================================
@@ -99,6 +119,7 @@ def attack_scheduler():
 
 if __name__ == '__main__':
     logging.info("=== BẮT ĐẦU KỊCH BẢN NGÀY 2: DOS VÀ SCAN ===")
+    logging.warning("day2_dos.py là script mô phỏng cũ; dùng run_day_bangtruyen.sh cho bộ dữ liệu chính.")
     log_event("SYSTEM", "START_DAY2_SCENARIOS")
     
     # 1. Bật duy trì lưu lượng chạy nền
