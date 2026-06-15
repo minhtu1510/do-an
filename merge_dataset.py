@@ -5,14 +5,16 @@ Build scientifically separated ICS/PLC IDS datasets.
 Outputs:
   1. Network IDS dataset: PCAP/window features only. PLC tag/process columns are
      not joined into this view.
-  2. Process Monitor dataset: PLC tag poll rows labeled by system state.
+  2. Process Monitor dataset: PLC tag data aggregated into fixed windows.
   3. Fusion dataset: optional, explicit network + process context view.
   4. Leakage-ablation dataset: optional, intentionally unsafe view for measuring
      how much performance is inflated by process/context/rule/identity leakage.
 
 The final supervised label is assigned here from timeline START/END events or
-intervals. Labels emitted by extract_s7_features.py are kept only as
-`extractor_label` audit metadata and are never authoritative.
+intervals. Window rows are labeled as attack when the fixed time window has any
+positive overlap with a non-benign attack interval. Labels emitted by
+extract_s7_features.py are kept only as `extractor_label` audit metadata and are
+never authoritative.
 """
 
 from __future__ import annotations
@@ -253,6 +255,28 @@ def label_for_time(ts_ms: int, intervals: Sequence[AttackInterval], session_id: 
     return LabelInfo("BENIGN", "BENIGN", f"{slug(session_id)}:BENIGN:{benign_chunk}", 0)
 
 
+def label_for_window(
+    window_start_ms: int,
+    window_ms: int,
+    intervals: Sequence[AttackInterval],
+    session_id: str,
+) -> LabelInfo:
+    """Paper-style window label: attack if any attack interval overlaps."""
+    window_end_ms = window_start_ms + window_ms
+    best: Optional[AttackInterval] = None
+    best_overlap = 0
+    for item in intervals:
+        overlap = max(0, min(window_end_ms, item.end_ms) - max(window_start_ms, item.start_ms))
+        if overlap > best_overlap:
+            best = item
+            best_overlap = overlap
+    if best is not None:
+        return LabelInfo(best.label, best.scenario_id, best.episode_id, 1)
+    benign_ts = window_start_ms + int(window_ms / 2)
+    benign_chunk = int(benign_ts // (10 * 60 * 1000)) if benign_ts >= 0 else 0
+    return LabelInfo("BENIGN", "BENIGN", f"{slug(session_id)}:BENIGN:{benign_chunk}", 0)
+
+
 def drop_transition_rows(
     df: pd.DataFrame,
     intervals: Sequence[AttackInterval],
@@ -339,8 +363,7 @@ def assign_network_labels(
     rows = []
     for _, row in df.iterrows():
         w_start = int(row["window_start_ms"])
-        mid = w_start + int(window_ms / 2)
-        system_info = label_for_time(mid, intervals, session_id)
+        system_info = label_for_window(w_start, window_ms, intervals, session_id)
         source = str(row.get("capture_source", row.get("capture_role", ""))).lower()
         role = str(row.get("capture_role", "")).lower()
         is_attacker_capture = source == "attacker" or role == "attacker"
@@ -414,26 +437,32 @@ def build_process_dataset(
 ) -> pd.DataFrame:
     proc = tags.copy()
     proc["window_start_ms"] = (proc["timestamp_ms"] // window_ms * window_ms).astype("int64")
-    labels = [label_for_time(int(ts), intervals, session_id) for ts in proc["timestamp_ms"]]
-    proc["label"] = [x.label for x in labels]
-    proc["label_system"] = proc["label"]
-    proc["label_network"] = "NA_PROCESS_VIEW"
-    proc["scenario_id"] = [x.scenario_id for x in labels]
-    proc["episode_id"] = [x.episode_id for x in labels]
-    proc["plc_under_attack"] = [x.under_attack for x in labels]
-    proc["session_id"] = session_id
-    proc["host_id"] = host_id
-    proc["capture_source"] = "process_logger"
-    proc["dataset_view"] = "process"
-    proc = drop_transition_rows(proc, intervals, "timestamp_ms", drop_transition_seconds)
-    return proc
+    proc_win = process_window_snapshot(proc, window_ms)
+    if proc_win.empty:
+        return proc_win
+    proc_win["window_end_ms"] = proc_win["window_start_ms"] + window_ms
+    labels = [label_for_window(int(w), window_ms, intervals, session_id) for w in proc_win["window_start_ms"]]
+    proc_win["label"] = [x.label for x in labels]
+    proc_win["label_system"] = proc_win["label"]
+    proc_win["label_network"] = "NA_PROCESS_VIEW"
+    proc_win["scenario_id"] = [x.scenario_id for x in labels]
+    proc_win["episode_id"] = [x.episode_id for x in labels]
+    proc_win["plc_under_attack"] = [x.under_attack for x in labels]
+    proc_win["session_id"] = session_id
+    proc_win["host_id"] = host_id
+    proc_win["capture_source"] = "process_logger"
+    proc_win["capture_role"] = "process_logger"
+    proc_win["dataset_view"] = "process"
+    proc_win["_window_mid_ms"] = proc_win["window_start_ms"] + int(window_ms / 2)
+    proc_win = drop_transition_rows(proc_win, intervals, "_window_mid_ms", drop_transition_seconds)
+    return proc_win.drop(columns=["_window_mid_ms"], errors="ignore")
 
 
 def process_window_snapshot(process_df: pd.DataFrame, window_ms: int) -> pd.DataFrame:
     if process_df.empty:
         return pd.DataFrame(columns=["window_start_ms"])
 
-    exclude = set(GROUP_META_COLS) | {"label", "timestamp_ms", "window_start_ms", "poll_seq"}
+    exclude = set(GROUP_META_COLS) | {"label", "timestamp_ms", "window_start_ms", "window_end_ms", "poll_seq"}
     numeric_cols = []
     for col in process_df.columns:
         if col in exclude:
@@ -457,6 +486,13 @@ def process_window_snapshot(process_df: pd.DataFrame, window_ms: int) -> pd.Data
     return grouped
 
 
+def process_features_for_fusion(process_df: pd.DataFrame, window_ms: int) -> pd.DataFrame:
+    proc_cols = [c for c in process_df.columns if str(c).startswith("proc__")]
+    if proc_cols and "window_start_ms" in process_df.columns:
+        return process_df[["window_start_ms", *proc_cols]].drop_duplicates("window_start_ms").copy()
+    return process_window_snapshot(process_df.copy(), window_ms)
+
+
 def build_fusion_dataset(
     network_df: pd.DataFrame,
     process_df: pd.DataFrame,
@@ -470,12 +506,12 @@ def build_fusion_dataset(
         return pd.DataFrame()
 
     net = drop_network_leakage_columns(network_df, keep_unsafe=keep_unsafe_network).copy()
-    proc_win = process_window_snapshot(process_df.copy(), window_ms)
+    proc_win = process_features_for_fusion(process_df, window_ms)
     fusion = pd.merge(net, proc_win, on="window_start_ms", how="left")
     proc_cols = [c for c in proc_win.columns if c != "window_start_ms"]
     fusion[proc_cols] = fusion[proc_cols].fillna(0)
 
-    labels = [label_for_time(int(w + window_ms / 2), intervals, session_id) for w in fusion["window_start_ms"]]
+    labels = [label_for_window(int(w), window_ms, intervals, session_id) for w in fusion["window_start_ms"]]
     fusion["label"] = [x.label for x in labels]
     fusion["label_system"] = fusion["label"]
     fusion["scenario_id"] = [x.scenario_id for x in labels]

