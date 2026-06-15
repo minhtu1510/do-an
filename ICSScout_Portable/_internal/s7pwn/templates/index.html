@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>S7Pwn Web GUI v{{ version }}</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            padding: 20px 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            color: #667eea;
+            font-size: 28px;
+        }
+
+        .status-bar {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+
+        .status-item {
+            padding: 8px 16px;
+            background: #f0f0f0;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+
+        .status-item.active {
+            background: #4caf50;
+            color: white;
+        }
+
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 10px;
+            padding: 25px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+
+        .card h2 {
+            color: #333;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #667eea;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+
+        .btn:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+        }
+
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-success {
+            background: #4caf50;
+        }
+
+        .btn-success:hover {
+            background: #45a049;
+        }
+
+        .btn-danger {
+            background: #f44336;
+        }
+
+        .btn-danger:hover {
+            background: #da190b;
+        }
+
+        .btn-small {
+            padding: 5px 12px;
+            font-size: 12px;
+        }
+
+        .input-group {
+            margin-bottom: 15px;
+        }
+
+        .input-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #555;
+            font-weight: 500;
+        }
+
+        .input-group input,
+        .input-group select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+
+        .input-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 10px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+
+        th {
+            background: #667eea;
+            color: white;
+            font-weight: 600;
+        }
+
+        tr:hover {
+            background: #f5f5f5;
+        }
+
+        .badge {
+            padding: 4px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .badge-success {
+            background: #4caf50;
+            color: white;
+        }
+
+        .badge-error {
+            background: #f44336;
+            color: white;
+        }
+
+        .badge-info {
+            background: #2196f3;
+            color: white;
+        }
+
+        .target-info {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+        }
+
+        .target-info p {
+            margin: 5px 0;
+            color: #1976d2;
+        }
+
+        .no-target {
+            background: #ffebee;
+            padding: 15px;
+            border-radius: 5px;
+            color: #c62828;
+            text-align: center;
+        }
+
+        .export-controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
+
+        .log-entry {
+            padding: 10px;
+            margin: 5px 0;
+            border-left: 3px solid #667eea;
+            background: #f9f9f9;
+            border-radius: 3px;
+            font-size: 13px;
+        }
+
+        .log-entry.error {
+            border-left-color: #f44336;
+            background: #ffebee;
+        }
+
+        .log-container {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .spinner {
+            display: none;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+            margin-left: 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .loading {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+
+        .full-width {
+            grid-column: 1 / -1;
+        }
+
+        .alert {
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .alert-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>S7Pwn Web GUI</h1>
+            <div class="status-bar">
+                <div class="status-item" id="deviceCount">Devices: 0</div>
+                <div class="status-item" id="plcCount">PLCs: 0</div>
+                <div class="status-item" id="targetStatus">No Target</div>
+                <a href="/topology" class="status-item" style="background: #667eea; color: white; text-decoration: none; cursor: pointer;">
+                    🗺️ Network Topology
+                </a>
+                <a href="/risk-assessment" class="status-item" style="background: #dc3545; color: white; text-decoration: none; cursor: pointer;">
+                    🛡️ Risk Assessment
+                </a>
+            </div>
+        </div>
+
+        <div class="main-grid">
+            <!-- Scan Panel -->
+            <div class="card">
+                <h2>Network Scan</h2>
+                <div class="input-row">
+                    <div class="input-group">
+                        <label>Timeout (s)</label>
+                        <input type="number" id="scanTimeout" value="3" min="1" max="10">
+                    </div>
+                    <div class="input-group">
+                        <label>Retries</label>
+                        <input type="number" id="scanRetries" value="2" min="1" max="5">
+                    </div>
+                    <div class="input-group">
+                        <label>&nbsp;</label>
+                        <button class="btn btn-success" onclick="performScan()">
+                            Scan Network
+                        </button>
+                    </div>
+                </div>
+                <div id="scanResults"></div>
+                <div class="export-controls">
+                    <button class="btn btn-small" onclick="exportData('scan', 'json')">Export JSON</button>
+                    <button class="btn btn-small" onclick="exportData('scan', 'csv')">Export CSV</button>
+                    <button class="btn btn-small" onclick="exportData('scan', 'html')">Export HTML</button>
+                </div>
+            </div>
+
+            <!-- Target Panel -->
+            <div class="card">
+                <h2>Target Configuration</h2>
+                <div id="currentTargetDisplay"></div>
+                <div class="input-group">
+                    <label>IP Address</label>
+                    <input type="text" id="targetIp" placeholder="192.168.1.100">
+                </div>
+                <div class="input-row">
+                    <div class="input-group">
+                        <label>Rack</label>
+                        <input type="number" id="targetRack" value="0" min="0">
+                    </div>
+                    <div class="input-group">
+                        <label>Slot</label>
+                        <input type="number" id="targetSlot" value="1" min="0">
+                    </div>
+                    <div class="input-group">
+                        <label>&nbsp;</label>
+                        <button class="btn" onclick="setTarget()">Set Target</button>
+                    </div>
+                </div>
+                <button class="btn btn-success" onclick="probeTarget()" style="margin-top: 15px; width: 100%;">
+                    Probe Target
+                </button>
+                <div id="probeResults"></div>
+            </div>
+
+            <!-- PLC List -->
+            <div class="card">
+                <h2>Discovered PLCs</h2>
+                <div id="plcList"></div>
+            </div>
+
+            <!-- Read/Write Operations -->
+            <div class="card">
+                <h2>Memory Operations</h2>
+                <div class="input-row">
+                    <div class="input-group">
+                        <label>Area</label>
+                        <select id="memArea">
+                            <option value="M">M (Merker)</option>
+                            <option value="I">I (Input)</option>
+                            <option value="Q">Q (Output)</option>
+                            <option value="DB">DB (Data Block)</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <label>Start Address</label>
+                        <input type="number" id="memStart" value="0" min="0">
+                    </div>
+                    <div class="input-group">
+                        <label>Size (bytes)</label>
+                        <input type="number" id="memSize" value="10" min="1" max="1024">
+                    </div>
+                </div>
+                <div class="input-group" id="dbNumberGroup" style="display: none;">
+                    <label>DB Number</label>
+                    <input type="number" id="dbNumber" value="1" min="1">
+                </div>
+                <div style="display: flex; gap: 10px; margin-top: 15px;">
+                    <button class="btn btn-success" onclick="readMemory()">Read Memory</button>
+                    <button class="btn btn-danger" onclick="showWriteDialog()">Write Memory</button>
+                </div>
+                <div id="memoryResults"></div>
+            </div>
+
+            <!-- Operation Log -->
+            <div class="card full-width">
+                <h2>Operation History</h2>
+                <div class="export-controls">
+                    <button class="btn btn-small" onclick="exportData('operations', 'json')">Export JSON</button>
+                    <button class="btn btn-small" onclick="exportData('operations', 'csv')">Export CSV</button>
+                    <button class="btn btn-small" onclick="exportData('operations', 'html')">Export HTML</button>
+                    <button class="btn btn-small btn-danger" onclick="clearOperations()">Clear Log</button>
+                </div>
+                <div class="log-container" id="operationLog"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global state
+        let currentTarget = null;
+        let plcList = [];
+        let operations = [];
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            updateStatus();
+            loadDevices();
+            loadOperations();
+
+            // Show/hide DB number field
+            document.getElementById('memArea').addEventListener('change', function() {
+                const dbGroup = document.getElementById('dbNumberGroup');
+                dbGroup.style.display = this.value === 'DB' ? 'block' : 'none';
+            });
+
+            // Auto-refresh status every 5 seconds
+            setInterval(updateStatus, 5000);
+        });
+
+        async function updateStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+
+                document.getElementById('deviceCount').textContent = `Devices: ${data.devices_count}`;
+                document.getElementById('plcCount').textContent = `PLCs: ${data.plc_count}`;
+
+                currentTarget = data.current_target;
+                updateTargetDisplay();
+            } catch (error) {
+                console.error('Failed to update status:', error);
+            }
+        }
+
+        function updateTargetDisplay() {
+            const display = document.getElementById('currentTargetDisplay');
+            const statusBar = document.getElementById('targetStatus');
+
+            if (currentTarget) {
+                display.innerHTML = `
+                    <div class="target-info">
+                        <p><strong>Current Target:</strong></p>
+                        <p>IP: ${currentTarget.ip}</p>
+                        <p>Rack: ${currentTarget.rack} | Slot: ${currentTarget.slot}</p>
+                    </div>
+                `;
+                statusBar.textContent = `Target: ${currentTarget.ip}`;
+                statusBar.classList.add('active');
+            } else {
+                display.innerHTML = '<div class="no-target">No target selected</div>';
+                statusBar.textContent = 'No Target';
+                statusBar.classList.remove('active');
+            }
+        }
+
+        async function performScan() {
+            const timeout = parseInt(document.getElementById('scanTimeout').value);
+            const retries = parseInt(document.getElementById('scanRetries').value);
+            const resultsDiv = document.getElementById('scanResults');
+
+            resultsDiv.innerHTML = '<div class="alert alert-success">Scanning network...</div>';
+
+            try {
+                const response = await fetch('/api/scan', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ timeout, retries })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    plcList = data.plc_list;
+                    resultsDiv.innerHTML = `<div class="alert alert-success">${data.message}</div>`;
+                    loadDevices();
+                    updateStatus();
+                    addOperationToLog('scan', true, `Found ${data.plc_list.length} PLCs`);
+                } else {
+                    resultsDiv.innerHTML = `<div class="alert alert-error">Error: ${data.error}</div>`;
+                    addOperationToLog('scan', false, data.error);
+                }
+            } catch (error) {
+                resultsDiv.innerHTML = `<div class="alert alert-error">Error: ${error.message}</div>`;
+                addOperationToLog('scan', false, error.message);
+            }
+        }
+
+        async function loadDevices() {
+            try {
+                const response = await fetch('/api/devices');
+                const data = await response.json();
+
+                if (data.success && data.plc_list.length > 0) {
+                    const listDiv = document.getElementById('plcList');
+                    let html = '<table><thead><tr><th>IP</th><th>Model</th><th>Rack/Slot</th><th>Action</th></tr></thead><tbody>';
+
+                    data.plc_list.forEach((plc, index) => {
+                        html += `
+                            <tr>
+                                <td>${plc.ip}</td>
+                                <td>${plc.model}</td>
+                                <td>${plc.rack}/${plc.slot}</td>
+                                <td>
+                                    <button class="btn btn-small" onclick="selectPLC('${plc.ip}', ${plc.rack}, ${plc.slot})">
+                                        Select
+                                    </button>
+                                </td>
+                            </tr>
+                        `;
+                    });
+
+                    html += '</tbody></table>';
+                    listDiv.innerHTML = html;
+                } else {
+                    document.getElementById('plcList').innerHTML = '<p style="color: #999;">No PLCs discovered yet. Run a scan first.</p>';
+                }
+            } catch (error) {
+                console.error('Failed to load devices:', error);
+            }
+        }
+
+        async function selectPLC(ip, rack, slot) {
+            try {
+                const response = await fetch('/api/target', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ip, rack, slot })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    currentTarget = data.target;
+                    updateTargetDisplay();
+                    updateStatus();
+                    addOperationToLog('set_target', true, `Target set to ${ip}`);
+                }
+            } catch (error) {
+                alert('Failed to set target: ' + error.message);
+            }
+        }
+
+        async function setTarget() {
+            const ip = document.getElementById('targetIp').value;
+            const rack = parseInt(document.getElementById('targetRack').value);
+            const slot = parseInt(document.getElementById('targetSlot').value);
+
+            if (!ip) {
+                alert('Please enter an IP address');
+                return;
+            }
+
+            await selectPLC(ip, rack, slot);
+        }
+
+        async function probeTarget() {
+            if (!currentTarget) {
+                alert('Please select a target first');
+                return;
+            }
+
+            const resultsDiv = document.getElementById('probeResults');
+            resultsDiv.innerHTML = '<div class="alert alert-success">Probing target...</div>';
+
+            try {
+                const response = await fetch('/api/probe', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    let html = '<div style="margin-top: 15px;"><strong>Probe Results:</strong><table>';
+                    for (const [key, value] of Object.entries(data.info)) {
+                        html += `<tr><td><strong>${key}</strong></td><td>${value}</td></tr>`;
+                    }
+                    html += '</table></div>';
+                    resultsDiv.innerHTML = html;
+                    addOperationToLog('probe', true, `Probed ${currentTarget.ip}`);
+                } else {
+                    resultsDiv.innerHTML = `<div class="alert alert-error">Error: ${data.error}</div>`;
+                    addOperationToLog('probe', false, data.error);
+                }
+            } catch (error) {
+                resultsDiv.innerHTML = `<div class="alert alert-error">Error: ${error.message}</div>`;
+                addOperationToLog('probe', false, error.message);
+            }
+        }
+
+        async function readMemory() {
+            if (!currentTarget) {
+                alert('Please select a target first');
+                return;
+            }
+
+            const area = document.getElementById('memArea').value;
+            const start = parseInt(document.getElementById('memStart').value);
+            const size = parseInt(document.getElementById('memSize').value);
+            const dbNumber = parseInt(document.getElementById('dbNumber').value) || 0;
+
+            const resultsDiv = document.getElementById('memoryResults');
+            resultsDiv.innerHTML = '<div class="alert alert-success">Reading memory...</div>';
+
+            try {
+                const response = await fetch('/api/read', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ area, start, size, db_number: dbNumber })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    let html = '<div style="margin-top: 15px;"><strong>Read Data:</strong><br>';
+                    html += `<code style="background: #f0f0f0; padding: 10px; display: block; margin-top: 10px; border-radius: 5px;">`;
+                    html += `[${data.data.join(', ')}]`;
+                    html += '</code></div>';
+                    resultsDiv.innerHTML = html;
+                    addOperationToLog('read', true, `Read ${area}${start} (${size} bytes)`);
+                } else {
+                    resultsDiv.innerHTML = `<div class="alert alert-error">Error: ${data.error}</div>`;
+                    addOperationToLog('read', false, data.error);
+                }
+            } catch (error) {
+                resultsDiv.innerHTML = `<div class="alert alert-error">Error: ${error.message}</div>`;
+                addOperationToLog('read', false, error.message);
+            }
+        }
+
+        function showWriteDialog() {
+            if (!currentTarget) {
+                alert('Please select a target first');
+                return;
+            }
+
+            const area = document.getElementById('memArea').value;
+            const start = parseInt(document.getElementById('memStart').value);
+            const dbNumber = parseInt(document.getElementById('dbNumber').value) || 0;
+
+            const dataStr = prompt('Enter byte values to write (comma-separated, e.g., 1,2,3,4,5):');
+            if (!dataStr) return;
+
+            try {
+                const data = dataStr.split(',').map(x => parseInt(x.trim()));
+                writeMemory(area, start, data, dbNumber);
+            } catch (error) {
+                alert('Invalid data format');
+            }
+        }
+
+        async function writeMemory(area, start, data, dbNumber) {
+            const resultsDiv = document.getElementById('memoryResults');
+            resultsDiv.innerHTML = '<div class="alert alert-success">Writing memory...</div>';
+
+            try {
+                const response = await fetch('/api/write', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ area, start, data, db_number: dbNumber })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    resultsDiv.innerHTML = `<div class="alert alert-success">${result.message}</div>`;
+                    addOperationToLog('write', true, `Write ${area}${start} (${data.length} bytes)`);
+                } else {
+                    resultsDiv.innerHTML = `<div class="alert alert-error">Error: ${result.error}</div>`;
+                    addOperationToLog('write', false, result.error);
+                }
+            } catch (error) {
+                resultsDiv.innerHTML = `<div class="alert alert-error">Error: ${error.message}</div>`;
+                addOperationToLog('write', false, error.message);
+            }
+        }
+
+        function addOperationToLog(type, success, details) {
+            const timestamp = new Date().toLocaleString();
+            operations.unshift({ timestamp, type, success, details });
+            updateOperationLog();
+        }
+
+        async function loadOperations() {
+            try {
+                const response = await fetch('/api/operations');
+                const data = await response.json();
+                if (data.success) {
+                    operations = data.operations.reverse();
+                    updateOperationLog();
+                }
+            } catch (error) {
+                console.error('Failed to load operations:', error);
+            }
+        }
+
+        function updateOperationLog() {
+            const logDiv = document.getElementById('operationLog');
+            if (operations.length === 0) {
+                logDiv.innerHTML = '<p style="color: #999;">No operations yet</p>';
+                return;
+            }
+
+            let html = '';
+            operations.slice(0, 50).forEach(op => {
+                const className = op.success ? '' : 'error';
+                const badge = op.success ? 'badge-success' : 'badge-error';
+                html += `
+                    <div class="log-entry ${className}">
+                        <span class="badge ${badge}">${op.type}</span>
+                        <strong>${op.timestamp}</strong> - ${JSON.stringify(op.details)}
+                    </div>
+                `;
+            });
+
+            logDiv.innerHTML = html;
+        }
+
+        function clearOperations() {
+            if (confirm('Clear all operation history?')) {
+                operations = [];
+                updateOperationLog();
+            }
+        }
+
+        async function exportData(type, format) {
+            try {
+                const response = await fetch('/api/export', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ type, format })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    alert(`Report exported successfully to:\n${data.filepath}`);
+                    addOperationToLog('export', true, `Exported ${type} as ${format}`);
+                } else {
+                    alert('Export failed: ' + data.error);
+                    addOperationToLog('export', false, data.error);
+                }
+            } catch (error) {
+                alert('Export failed: ' + error.message);
+                addOperationToLog('export', false, error.message);
+            }
+        }
+    </script>
+</body>
+</html>

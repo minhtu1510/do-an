@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "s7pwn"
+version = "1.0.0"
+description = "S7Pwn – Siemens PLC pentest CLI with Web GUI"
+requires-python = ">=3.9"
+dependencies = [
+  "python-snap7",
+  "scapy",
+  "wmi; platform_system == 'Windows'",
+  "pywin32; platform_system == 'Windows'",
+  "prompt_toolkit>=3.0.36",
+  "flask>=2.3.0",
+]
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+  {name = "S7Pwn Team"}
+]
+keywords = ["security", "pentesting", "plc", "siemens", "s7", "scada", "ics"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Information Technology",
+  "Topic :: Security",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
+
+[project.scripts]
+s7pwn = "s7pwn.cli:main"
+s7pwn-webgui = "s7pwn.web_gui:start_web_gui"
+
+[tool.setuptools]
+packages = ["s7pwn", "s7pwn.commands", "s7pwn.ext"]
+
+[tool.setuptools.package-data]
+s7pwn = ["device_map/*.json", "templates/*.html", "static/*"]

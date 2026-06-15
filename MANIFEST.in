@@ -1,0 +1,34 @@
+# Include documentation
+include README.md
+include FEATURES.md
+include QUICK_START.md
+include BUILD.md
+include LICENSE
+
+# Include configuration files
+include requirements.txt
+include pyproject.toml
+
+# Include device mapping data
+recursive-include s7pwn/device_map *.json
+
+# Include web templates and static files
+recursive-include s7pwn/templates *.html
+recursive-include s7pwn/static *
+
+# Include build scripts
+include build_exe.py
+include start_webgui.py
+include Dockerfile
+include docker-compose.yml
+
+# Exclude compiled Python files
+global-exclude *.pyc
+global-exclude *.pyo
+global-exclude __pycache__
+
+# Exclude build artifacts
+prune build
+prune dist
+prune *.egg-info
+prune reports

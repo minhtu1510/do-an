@@ -1,0 +1,636 @@
+{% extends "base.html" %}
+
+{% block title %}Packet Analyzer{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6">
+    <!-- Header -->
+    <div class="mb-6">
+        <h1 class="text-3xl font-bold text-white flex items-center">
+            <i class="fas fa-network-wired mr-3 text-indigo-500"></i>
+            Real-time Packet Analyzer
+        </h1>
+        <p class="text-slate-400 mt-2">Capture and analyze OT/ICS protocol traffic in real-time</p>
+    </div>
+
+    <!-- Control Panel -->
+    <div class="glass rounded-lg p-6 mb-6">
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <!-- Capture Controls -->
+            <div class="md:col-span-2">
+                <label class="block text-sm font-medium text-slate-300 mb-2">Capture Interface</label>
+                <select id="interface-select" class="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-indigo-500">
+                    <option value="">Auto-detect</option>
+                    <option value="eth0">eth0</option>
+                    <option value="eth1">eth1</option>
+                    <option value="wlan0">wlan0</option>
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-slate-300 mb-2">Duration (seconds)</label>
+                <input type="number" id="duration-input" value="300" min="10" max="3600"
+                       class="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-indigo-500">
+            </div>
+
+            <div class="flex items-end">
+                <button id="start-capture-btn" onclick="startCapture()"
+                        class="w-full gradient-bg text-white px-6 py-2 rounded-lg font-semibold hover:opacity-90 transition flex items-center justify-center">
+                    <i class="fas fa-play mr-2"></i>
+                    Start Capture
+                </button>
+                <button id="stop-capture-btn" onclick="stopCapture()" style="display: none;"
+                        class="w-full bg-red-500 text-white px-6 py-2 rounded-lg font-semibold hover:bg-red-600 transition flex items-center justify-center">
+                    <i class="fas fa-stop mr-2"></i>
+                    Stop
+                </button>
+            </div>
+        </div>
+
+        <!-- Capture Mode -->
+        <div class="mt-4">
+            <label class="block text-sm font-medium text-slate-300 mb-2">Capture Mode</label>
+            <div class="flex flex-wrap gap-2 mb-3">
+                <label class="flex items-center bg-indigo-600 px-4 py-2 rounded-lg cursor-pointer hover:bg-indigo-700">
+                    <input type="radio" name="capture-mode" value="ot-only" class="mr-2" checked onchange="toggleCaptureMode()">
+                    <span class="text-white font-medium">🏭 OT/ICS Protocols Only</span>
+                </label>
+                <label class="flex items-center bg-slate-700 px-4 py-2 rounded-lg cursor-pointer hover:bg-slate-600">
+                    <input type="radio" name="capture-mode" value="all" class="mr-2" onchange="toggleCaptureMode()">
+                    <span class="text-white font-medium">🌐 All Network Traffic</span>
+                </label>
+                <label class="flex items-center bg-slate-700 px-4 py-2 rounded-lg cursor-pointer hover:bg-slate-600">
+                    <input type="radio" name="capture-mode" value="custom" class="mr-2" onchange="toggleCaptureMode()">
+                    <span class="text-white font-medium">⚙️ Custom Filter</span>
+                </label>
+            </div>
+
+            <!-- Protocol Filters (OT Only Mode) -->
+            <div id="protocol-filters-section" class="mt-2">
+                <label class="block text-sm font-medium text-slate-400 mb-2">Select Protocols:</label>
+                <div class="flex flex-wrap gap-2">
+                    <label class="flex items-center bg-slate-700 px-4 py-2 rounded-lg cursor-pointer hover:bg-slate-600">
+                        <input type="checkbox" class="protocol-filter mr-2" value="S7" checked>
+                        <span class="protocol-badge protocol-s7">S7</span>
+                    </label>
+                    <label class="flex items-center bg-slate-700 px-4 py-2 rounded-lg cursor-pointer hover:bg-slate-600">
+                        <input type="checkbox" class="protocol-filter mr-2" value="Modbus TCP" checked>
+                        <span class="protocol-badge protocol-modbus">Modbus TCP</span>
+                    </label>
+                    <label class="flex items-center bg-slate-700 px-4 py-2 rounded-lg cursor-pointer hover:bg-slate-600">
+                        <input type="checkbox" class="protocol-filter mr-2" value="OPC UA" checked>
+                        <span class="protocol-badge protocol-opcua">OPC UA</span>
+                    </label>
+                    <label class="flex items-center bg-slate-700 px-4 py-2 rounded-lg cursor-pointer hover:bg-slate-600">
+                        <input type="checkbox" class="protocol-filter mr-2" value="DNP3">
+                        <span class="protocol-badge protocol-other">DNP3</span>
+                    </label>
+                    <label class="flex items-center bg-slate-700 px-4 py-2 rounded-lg cursor-pointer hover:bg-slate-600">
+                        <input type="checkbox" class="protocol-filter mr-2" value="EtherNet/IP">
+                        <span class="protocol-badge protocol-other">EtherNet/IP</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Custom Filter Input -->
+            <div id="custom-filter-section" class="mt-2" style="display: none;">
+                <label class="block text-sm font-medium text-slate-400 mb-2">BPF Filter Expression:</label>
+                <input type="text" id="custom-filter-input" placeholder="e.g., tcp port 80 or host 192.168.1.10"
+                       class="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white font-mono text-sm focus:ring-2 focus:ring-indigo-500">
+                <div class="text-xs text-slate-500 mt-1">
+                    Examples: <code class="bg-slate-800 px-1 rounded">tcp</code>,
+                    <code class="bg-slate-800 px-1 rounded">host 192.168.1.10</code>,
+                    <code class="bg-slate-800 px-1 rounded">port 80 or port 443</code>
+                </div>
+            </div>
+        </div>
+
+        <!-- Statistics -->
+        <div id="capture-stats" class="mt-4 grid grid-cols-4 gap-4" style="display: none;">
+            <div class="bg-slate-700/50 rounded-lg p-4">
+                <div class="text-slate-400 text-sm">Packets</div>
+                <div id="stat-packets" class="text-2xl font-bold text-white">0</div>
+            </div>
+            <div class="bg-slate-700/50 rounded-lg p-4">
+                <div class="text-slate-400 text-sm">Bytes</div>
+                <div id="stat-bytes" class="text-2xl font-bold text-white">0 B</div>
+            </div>
+            <div class="bg-slate-700/50 rounded-lg p-4">
+                <div class="text-slate-400 text-sm">Duration</div>
+                <div id="stat-duration" class="text-2xl font-bold text-white">00:00</div>
+            </div>
+            <div class="bg-slate-700/50 rounded-lg p-4">
+                <div class="text-slate-400 text-sm">Rate</div>
+                <div id="stat-rate" class="text-2xl font-bold text-white">0 pkt/s</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Packet Analyzer (3-pane layout like Wireshark) -->
+    <div class="grid grid-cols-1 gap-4">
+        <!-- Packet List Pane -->
+        <div class="glass rounded-lg overflow-hidden">
+            <div class="bg-slate-800 px-4 py-3 flex items-center justify-between border-b border-slate-700">
+                <div class="flex items-center">
+                    <i class="fas fa-list text-indigo-500 mr-2"></i>
+                    <span class="font-semibold">Packet List</span>
+                    <span id="packet-count" class="ml-2 text-sm text-slate-400">(0 packets)</span>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <button onclick="exportPCAP()" class="bg-slate-700 hover:bg-slate-600 px-3 py-1 rounded text-sm">
+                        <i class="fas fa-download mr-1"></i> Export PCAP
+                    </button>
+                    <button onclick="clearPackets()" class="bg-slate-700 hover:bg-slate-600 px-3 py-1 rounded text-sm">
+                        <i class="fas fa-trash mr-1"></i> Clear
+                    </button>
+                </div>
+            </div>
+
+            <div class="overflow-auto" style="max-height: 400px;">
+                <table class="w-full text-sm">
+                    <thead class="sticky top-0 bg-slate-800 border-b border-slate-700">
+                        <tr class="text-left text-slate-400">
+                            <th class="px-4 py-2 w-16">#</th>
+                            <th class="px-4 py-2 w-32">Time</th>
+                            <th class="px-4 py-2">Source</th>
+                            <th class="px-4 py-2">Destination</th>
+                            <th class="px-4 py-2 w-32">Protocol</th>
+                            <th class="px-4 py-2 w-20">Length</th>
+                            <th class="px-4 py-2">Info</th>
+                        </tr>
+                    </thead>
+                    <tbody id="packet-list" class="text-slate-300">
+                        <tr>
+                            <td colspan="7" class="text-center py-8 text-slate-500">
+                                <i class="fas fa-inbox text-4xl mb-2"></i>
+                                <p>No packets captured yet. Start capture to begin.</p>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Packet Details Pane -->
+        <div class="glass rounded-lg overflow-hidden">
+            <div class="bg-slate-800 px-4 py-3 flex items-center border-b border-slate-700">
+                <i class="fas fa-layer-group text-indigo-500 mr-2"></i>
+                <span class="font-semibold">Packet Details</span>
+            </div>
+
+            <div id="packet-details" class="p-4 overflow-auto" style="max-height: 300px;">
+                <div class="text-center py-8 text-slate-500">
+                    <i class="fas fa-mouse-pointer text-4xl mb-2"></i>
+                    <p>Select a packet to view details</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Hex/ASCII Viewer Pane -->
+        <div class="glass rounded-lg overflow-hidden">
+            <div class="bg-slate-800 px-4 py-3 flex items-center border-b border-slate-700">
+                <i class="fas fa-code text-indigo-500 mr-2"></i>
+                <span class="font-semibold">Hex Dump</span>
+            </div>
+
+            <div id="hex-viewer" class="p-4 overflow-auto hex-viewer" style="max-height: 250px;">
+                <div class="text-center py-8 text-slate-500">
+                    <i class="fas fa-file-code text-4xl mb-2"></i>
+                    <p>Select a packet to view hex dump</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let captureStartTime = null;
+let captureInterval = null;
+let packetCache = [];
+
+// Toggle capture mode sections
+function toggleCaptureMode() {
+    const mode = document.querySelector('input[name="capture-mode"]:checked').value;
+    const protocolSection = document.getElementById('protocol-filters-section');
+    const customSection = document.getElementById('custom-filter-section');
+
+    if (mode === 'ot-only') {
+        protocolSection.style.display = 'block';
+        customSection.style.display = 'none';
+    } else if (mode === 'all') {
+        protocolSection.style.display = 'none';
+        customSection.style.display = 'none';
+    } else if (mode === 'custom') {
+        protocolSection.style.display = 'none';
+        customSection.style.display = 'block';
+    }
+}
+
+// Start capture
+async function startCapture() {
+    const interface_sel = document.getElementById('interface-select').value;
+    const duration = parseInt(document.getElementById('duration-input').value);
+    const mode = document.querySelector('input[name="capture-mode"]:checked').value;
+
+    let filterExpression = null;
+    let protocols = [];
+
+    // Determine filter based on mode
+    if (mode === 'ot-only') {
+        // Use protocol filter
+        protocols = Array.from(document.querySelectorAll('.protocol-filter:checked'))
+            .map(cb => cb.value);
+        filterExpression = null; // Let backend build default OT filter
+    } else if (mode === 'all') {
+        // Capture ALL traffic
+        filterExpression = ""; // Empty filter = capture all
+        protocols = [];
+    } else if (mode === 'custom') {
+        // Use custom BPF filter
+        filterExpression = document.getElementById('custom-filter-input').value.trim();
+        if (!filterExpression) {
+            showToast('Please enter a custom filter expression', 'error');
+            return;
+        }
+        protocols = [];
+    }
+
+    try {
+        const result = await apiCall('/api/capture/start', {
+            method: 'POST',
+            body: JSON.stringify({
+                interface: interface_sel || null,
+                duration: duration,
+                protocols: protocols,
+                filter_expression: filterExpression
+            })
+        });
+
+        // UI updates
+        document.getElementById('start-capture-btn').style.display = 'none';
+        document.getElementById('stop-capture-btn').style.display = 'block';
+        document.getElementById('capture-stats').style.display = 'grid';
+
+        captureStartTime = new Date();
+        startCaptureTimer();
+
+        showToast('Packet capture started', 'success');
+
+        // Load packets periodically
+        loadPacketsPeriodically();
+
+    } catch (error) {
+        showToast('Failed to start capture: ' + error.message, 'error');
+    }
+}
+
+// Stop capture
+async function stopCapture() {
+    try {
+        const result = await apiCall('/api/capture/stop', {
+            method: 'POST'
+        });
+
+        document.getElementById('start-capture-btn').style.display = 'block';
+        document.getElementById('stop-capture-btn').style.display = 'none';
+
+        stopCaptureTimer();
+
+        showToast(`Capture stopped. ${result.statistics.total_packets} packets captured`, 'success');
+
+        // Final load
+        await loadPackets();
+
+    } catch (error) {
+        showToast('Failed to stop capture: ' + error.message, 'error');
+    }
+}
+
+// Start capture timer
+function startCaptureTimer() {
+    captureInterval = setInterval(updateCaptureStats, 1000);
+}
+
+// Stop capture timer
+function stopCaptureTimer() {
+    if (captureInterval) {
+        clearInterval(captureInterval);
+        captureInterval = null;
+    }
+}
+
+// Update capture statistics
+async function updateCaptureStats() {
+    try {
+        const result = await apiCall('/api/capture/status');
+
+        if (result.statistics) {
+            document.getElementById('stat-packets').textContent = result.statistics.total_packets.toLocaleString();
+            document.getElementById('stat-bytes').textContent = formatBytes(result.statistics.bytes_captured);
+
+            if (captureStartTime) {
+                const elapsed = Math.floor((new Date() - captureStartTime) / 1000);
+                const minutes = Math.floor(elapsed / 60);
+                const seconds = elapsed % 60;
+                document.getElementById('stat-duration').textContent =
+                    `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+
+                const rate = elapsed > 0 ? (result.statistics.total_packets / elapsed).toFixed(1) : 0;
+                document.getElementById('stat-rate').textContent = rate + ' pkt/s';
+            }
+        }
+    } catch (error) {
+        console.error('Failed to update stats:', error);
+    }
+}
+
+// Load packets periodically
+function loadPacketsPeriodically() {
+    const interval = setInterval(async () => {
+        try {
+            const result = await apiCall('/api/capture/status');
+            if (!result.capturing) {
+                clearInterval(interval);
+            } else {
+                await loadPackets();
+            }
+        } catch (error) {
+            clearInterval(interval);
+        }
+    }, 2000); // Update every 2 seconds
+}
+
+// Load packets
+async function loadPackets() {
+    try {
+        const result = await apiCall('/api/packets?limit=1000');
+
+        packetCache = result.packets;
+        renderPacketList(result.packets);
+
+        document.getElementById('packet-count').textContent = `(${result.total} packets)`;
+
+    } catch (error) {
+        console.error('Failed to load packets:', error);
+    }
+}
+
+// Render packet list
+function renderPacketList(packets) {
+    const tbody = document.getElementById('packet-list');
+
+    if (packets.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="7" class="text-center py-8 text-slate-500">
+                    No packets captured yet
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    tbody.innerHTML = packets.map((packet, idx) => {
+        const protocolClass = packet.protocol === 'S7' ? 'protocol-s7' :
+                             packet.protocol === 'Modbus TCP' ? 'protocol-modbus' :
+                             packet.protocol === 'OPC UA' ? 'protocol-opcua' :
+                             'protocol-other';
+
+        return `
+            <tr class="packet-row cursor-pointer hover:bg-slate-700/30" onclick="selectPacket(${packet.index}, this)">
+                <td class="px-4 py-2 text-slate-500">${packet.index + 1}</td>
+                <td class="px-4 py-2 text-slate-400 font-mono text-xs">${formatTimestamp(packet.timestamp)}</td>
+                <td class="px-4 py-2">${packet.src_ip}:${packet.src_port || ''}</td>
+                <td class="px-4 py-2">${packet.dst_ip}:${packet.dst_port || ''}</td>
+                <td class="px-4 py-2">
+                    <span class="protocol-badge ${protocolClass}">${packet.protocol}</span>
+                </td>
+                <td class="px-4 py-2 text-slate-400">${packet.size}</td>
+                <td class="px-4 py-2 text-slate-400 truncate">${packet.info || ''}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+// Select packet and show details
+async function selectPacket(index, clickedElement) {
+    try {
+        const result = await apiCall(`/api/packets/${index}`);
+        const packet = result.packet;
+
+        // Highlight selected row
+        document.querySelectorAll('.packet-row').forEach(row => {
+            row.classList.remove('bg-indigo-900/30');
+        });
+        if (clickedElement) {
+            clickedElement.classList.add('bg-indigo-900/30');
+        }
+
+        // Render packet details
+        renderPacketDetails(packet);
+
+        // Render hex dump
+        renderHexDump(packet.raw_hex);
+
+    } catch (error) {
+        console.error('Failed to load packet details:', error);
+        showToast('Failed to load packet details', 'error');
+    }
+}
+
+// Render packet details (dissected layers)
+function renderPacketDetails(packet) {
+    const detailsDiv = document.getElementById('packet-details');
+
+    if (!packet.dissected || packet.dissected.error) {
+        detailsDiv.innerHTML = `
+            <div class="text-slate-400">
+                <p>Error: ${packet.dissected?.error || 'Unable to dissect packet'}</p>
+            </div>
+        `;
+        return;
+    }
+
+    let html = '';
+
+    packet.dissected.layers.forEach((layer, layerIdx) => {
+        html += `
+            <details class="mb-2" ${layerIdx === 0 ? 'open' : ''}>
+                <summary class="cursor-pointer bg-slate-700/50 px-4 py-2 rounded-lg hover:bg-slate-700 font-semibold">
+                    <i class="fas fa-layer-group text-indigo-400 mr-2"></i>
+                    ${layer.name}
+                </summary>
+                <div class="ml-6 mt-2 space-y-1">
+        `;
+
+        for (const [key, value] of Object.entries(layer.fields)) {
+            if (Array.isArray(value)) {
+                html += `
+                    <div class="text-slate-300">
+                        <span class="text-indigo-400">${key}:</span>
+                    </div>
+                `;
+                value.forEach((item, idx) => {
+                    html += `
+                        <div class="ml-4 text-sm bg-slate-800/50 rounded p-2 mb-1">
+                            <div class="font-semibold text-slate-300">Item ${idx + 1}:</div>
+                    `;
+                    for (const [k, v] of Object.entries(item)) {
+                        html += `
+                            <div class="ml-4 text-slate-400">
+                                <span class="text-indigo-400">${k}:</span> ${v}
+                            </div>
+                        `;
+                    }
+                    html += `</div>`;
+                });
+            } else {
+                html += `
+                    <div class="text-slate-300">
+                        <span class="text-indigo-400">${key}:</span>
+                        <span class="text-slate-400">${value}</span>
+                    </div>
+                `;
+            }
+        }
+
+        html += `
+                </div>
+            </details>
+        `;
+    });
+
+    detailsDiv.innerHTML = html;
+}
+
+// Render hex dump
+function renderHexDump(hexString) {
+    const viewer = document.getElementById('hex-viewer');
+
+    if (!hexString) {
+        viewer.innerHTML = '<div class="text-slate-500">No data</div>';
+        return;
+    }
+
+    let html = '<div class="font-mono text-sm">';
+
+    // Parse hex string into bytes
+    const bytes = [];
+    for (let i = 0; i < hexString.length; i += 2) {
+        bytes.push(hexString.substr(i, 2));
+    }
+
+    // Render in rows of 16 bytes
+    for (let offset = 0; offset < bytes.length; offset += 16) {
+        const rowBytes = bytes.slice(offset, offset + 16);
+
+        // Offset
+        html += `<span class="text-slate-500">${offset.toString(16).padStart(4, '0')}  </span>`;
+
+        // Hex bytes
+        rowBytes.forEach((byte, idx) => {
+            html += `<span class="hex-byte text-slate-300">${byte}</span>`;
+            if (idx === 7) html += ' '; // Extra space in middle
+        });
+
+        // Padding if incomplete row
+        const padding = 16 - rowBytes.length;
+        html += ' '.repeat(padding * 3 + (padding > 8 ? 1 : 0));
+
+        // ASCII representation
+        html += ' <span class="hex-ascii">|';
+        rowBytes.forEach(byte => {
+            const charCode = parseInt(byte, 16);
+            const char = (charCode >= 32 && charCode <= 126) ? String.fromCharCode(charCode) : '.';
+            html += char;
+        });
+        html += '|</span><br>';
+    }
+
+    html += '</div>';
+    viewer.innerHTML = html;
+}
+
+// Export PCAP
+async function exportPCAP() {
+    try {
+        window.location.href = '/api/capture/export/pcap';
+        showToast('PCAP file downloaded', 'success');
+    } catch (error) {
+        showToast('Failed to export PCAP', 'error');
+    }
+}
+
+// Clear packets
+function clearPackets() {
+    packetCache = [];
+    document.getElementById('packet-list').innerHTML = `
+        <tr>
+            <td colspan="7" class="text-center py-8 text-slate-500">
+                No packets
+            </td>
+        </tr>
+    `;
+    document.getElementById('packet-details').innerHTML = `
+        <div class="text-center py-8 text-slate-500">
+            Select a packet to view details
+        </div>
+    `;
+    document.getElementById('hex-viewer').innerHTML = `
+        <div class="text-center py-8 text-slate-500">
+            Select a packet to view hex dump
+        </div>
+    `;
+    document.getElementById('packet-count').textContent = '(0 packets)';
+}
+
+// WebSocket: Real-time packet updates
+socket.on('new_packet', function(packet) {
+    // Add to cache
+    packetCache.push(packet);
+
+    // Update count
+    document.getElementById('packet-count').textContent = `(${packetCache.length} packets)`;
+
+    // Optionally re-render (for performance, maybe batch updates)
+    if (packetCache.length % 10 === 0) {
+        renderPacketList(packetCache.slice(-100)); // Show last 100
+    }
+});
+
+// Load available network interfaces
+async function loadInterfaces() {
+    try {
+        const result = await apiCall('/api/interfaces');
+        const select = document.getElementById('interface-select');
+
+        // Clear existing options except auto-detect
+        select.innerHTML = '<option value="">Auto-detect (Recommended)</option>';
+
+        // Add available interfaces
+        if (result.interfaces && result.interfaces.length > 0) {
+            result.interfaces.forEach(iface => {
+                if (iface.name) {  // Skip null/auto-detect
+                    const option = document.createElement('option');
+                    option.value = iface.name;
+                    option.textContent = iface.description || iface.name;
+                    select.appendChild(option);
+                }
+            });
+        }
+    } catch (error) {
+        console.error('Failed to load interfaces:', error);
+        // Keep default options if API fails
+    }
+}
+
+// On page load
+document.addEventListener('DOMContentLoaded', function() {
+    // Load available interfaces
+    loadInterfaces();
+
+    // Check if there's existing capture data
+    loadPackets().catch(() => {});
+});
+</script>
+{% endblock %}

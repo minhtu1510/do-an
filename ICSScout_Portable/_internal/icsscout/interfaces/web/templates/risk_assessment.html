@@ -1,0 +1,1071 @@
+{% extends "base.html" %}
+
+{% block title %}Risk Assessment{% endblock %}
+
+{% block extra_head %}
+<style>
+    .risk-card {
+        transition: transform 0.3s ease;
+    }
+    .risk-card:hover {
+        transform: translateY(-2px);
+    }
+    .risk-badge-critical {
+        background-color: #dc3545;
+        color: white;
+        padding: 5px 15px;
+        border-radius: 20px;
+        font-weight: bold;
+    }
+    .risk-badge-high {
+        background-color: #fd7e14;
+        color: white;
+        padding: 5px 15px;
+        border-radius: 20px;
+        font-weight: bold;
+    }
+    .risk-badge-medium {
+        background-color: #ffc107;
+        color: #000;
+        padding: 5px 15px;
+        border-radius: 20px;
+        font-weight: bold;
+    }
+    .risk-badge-low {
+        background-color: #28a745;
+        color: white;
+        padding: 5px 15px;
+        border-radius: 20px;
+        font-weight: bold;
+    }
+    .risk-badge-info {
+        background-color: #6b7280;
+        color: white;
+        padding: 5px 15px;
+        border-radius: 20px;
+        font-weight: bold;
+    }
+    .score-circle {
+        width: 150px;
+        height: 150px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 2.5rem;
+        font-weight: bold;
+        color: white;
+        margin: 0 auto;
+    }
+    .progress-bar-animated {
+        animation: progress-animation 1s ease-in-out;
+    }
+    @keyframes progress-animation {
+        from { width: 0%; }
+    }
+    .action-item {
+        padding: 15px;
+        margin-bottom: 10px;
+        border-left: 4px solid;
+        border-radius: 5px;
+    }
+    .action-immediate {
+        border-left-color: #dc3545;
+    }
+    .action-short {
+        border-left-color: #fd7e14;
+    }
+    .action-medium {
+        border-left-color: #ffc107;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Page Header -->
+<div class="mb-8">
+    <div class="flex justify-between items-center">
+        <div>
+            <h1 class="text-3xl font-bold text-white mb-2">
+                <i class="fas fa-shield-virus mr-3 text-red-500"></i>Risk Assessment Dashboard
+            </h1>
+            <p class="text-slate-400">Comprehensive security risk analysis and compliance assessment</p>
+        </div>
+        <button id="btnRunAssessment" class="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg transition shadow-lg">
+            <i class="fas fa-play mr-2"></i>Run Assessment
+        </button>
+    </div>
+</div>
+
+<!-- Loading State -->
+<div id="loadingState" class="hidden text-center py-20">
+    <i class="fas fa-spinner fa-spin text-6xl text-blue-500 mb-4"></i>
+    <p class="text-xl text-slate-300">Running risk assessment... This may take a minute.</p>
+</div>
+
+<!-- No Data State -->
+<div id="noDataState" class="text-center py-20">
+    <i class="fas fa-clipboard-list text-8xl text-slate-600 mb-6"></i>
+    <h3 class="text-2xl font-bold text-white mb-4">No Risk Assessment Data Available</h3>
+    <p class="text-slate-400 mb-6">Click "Run Assessment" to start a comprehensive security analysis</p>
+    <button onclick="runRiskAssessment()" class="bg-blue-600 hover:bg-blue-700 text-white px-8 py-4 rounded-lg text-lg transition shadow-lg">
+        <i class="fas fa-play mr-2"></i>Run Assessment Now
+    </button>
+</div>
+
+<!-- Progress Tracking -->
+<div id="progressState" class="hidden">
+    <div class="glass rounded-lg p-6 mb-6">
+        <h4 class="text-xl font-bold text-white mb-4">
+            <i class="fas fa-tasks mr-2"></i>Assessment Progress
+        </h4>
+
+        <!-- Progress Bar -->
+        <div class="w-full bg-slate-700 rounded-full h-8 mb-6">
+            <div id="overallProgress" class="bg-green-500 h-8 rounded-full transition-all duration-500 flex items-center justify-center text-white font-bold" style="width: 0%">
+                <span id="progressPercent">0%</span>
+            </div>
+        </div>
+
+        <!-- Progress Steps -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="space-y-2">
+                <div id="step-network-scan" class="glass p-3 rounded-lg flex justify-between items-center">
+                    <div><i class="fas fa-circle text-slate-500 mr-2"></i><strong>Network Scan</strong></div>
+                    <span class="text-slate-400 text-sm">Pending</span>
+                </div>
+                <div id="step-device-discovery" class="glass p-3 rounded-lg flex justify-between items-center">
+                    <div><i class="fas fa-circle text-slate-500 mr-2"></i><strong>Device Discovery</strong></div>
+                    <span class="text-slate-400 text-sm">Pending</span>
+                </div>
+                <div id="step-network-assessment" class="glass p-3 rounded-lg flex justify-between items-center">
+                    <div><i class="fas fa-circle text-slate-500 mr-2"></i><strong>Network Security Assessment</strong></div>
+                    <span class="text-slate-400 text-sm">Pending</span>
+                </div>
+                <div id="step-device-assessment" class="glass p-3 rounded-lg flex justify-between items-center">
+                    <div><i class="fas fa-circle text-slate-500 mr-2"></i><strong>Device Security Assessment</strong></div>
+                    <span class="text-slate-400 text-sm">Pending</span>
+                </div>
+            </div>
+            <div class="space-y-2">
+                <div id="step-vuln-scan" class="glass p-3 rounded-lg flex justify-between items-center">
+                    <div><i class="fas fa-circle text-slate-500 mr-2"></i><strong>Vulnerability Scan</strong></div>
+                    <span class="text-slate-400 text-sm">Pending</span>
+                </div>
+                <div id="step-vuln-assessment" class="glass p-3 rounded-lg flex justify-between items-center">
+                    <div><i class="fas fa-circle text-slate-500 mr-2"></i><strong>Vulnerability Assessment</strong></div>
+                    <span class="text-slate-400 text-sm">Pending</span>
+                </div>
+                <div id="step-compliance" class="glass p-3 rounded-lg flex justify-between items-center">
+                    <div><i class="fas fa-circle text-slate-500 mr-2"></i><strong>Compliance Check (IEC 62443)</strong></div>
+                    <span class="text-slate-400 text-sm">Pending</span>
+                </div>
+                <div id="step-report-gen" class="glass p-3 rounded-lg flex justify-between items-center">
+                    <div><i class="fas fa-circle text-slate-500 mr-2"></i><strong>Report Generation</strong></div>
+                    <span class="text-slate-400 text-sm">Pending</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Dashboard Content -->
+<div id="dashboardContent" class="hidden">
+    <!-- Overall Risk Score -->
+    <div class="glass rounded-lg p-6 mb-6">
+        <h2 class="text-2xl font-bold text-white mb-6 text-center">Overall Security Risk</h2>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
+            <div class="text-center">
+                <div id="overallRiskCircle" class="score-circle">
+                    <span id="overallRiskScore">0</span>
+                </div>
+                <h3 class="mt-4">
+                    <span id="overallRiskBadge" class="risk-badge-info">INFO</span>
+                </h3>
+            </div>
+            <div class="col-span-2">
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="glass p-4 rounded-lg">
+                        <h5 class="text-slate-400 text-sm mb-2"><i class="fas fa-server text-blue-500 mr-2"></i>Total Devices</h5>
+                        <h2 id="totalDevices" class="text-3xl font-bold text-white">0</h2>
+                    </div>
+                    <div class="glass p-4 rounded-lg">
+                        <h5 class="text-slate-400 text-sm mb-2"><i class="fas fa-exclamation-triangle text-yellow-500 mr-2"></i>Critical Findings</h5>
+                        <h2 id="criticalFindings" class="text-3xl font-bold text-white">0</h2>
+                    </div>
+                    <div class="glass p-4 rounded-lg">
+                        <h5 class="text-slate-400 text-sm mb-2"><i class="fas fa-exclamation-circle text-red-500 mr-2"></i>High Risk Devices</h5>
+                        <h2 id="criticalDevices" class="text-3xl font-bold text-white">0</h2>
+                    </div>
+                    <div class="glass p-4 rounded-lg">
+                        <h5 class="text-slate-400 text-sm mb-2"><i class="fas fa-calendar text-purple-500 mr-2"></i>Assessment Date</h5>
+                        <p id="assessmentDate" class="text-lg text-white">-</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Category Assessments -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+        <div class="glass rounded-lg p-6">
+            <h5 class="text-white font-semibold mb-3"><i class="fas fa-network-wired text-blue-500 mr-2"></i>Network Security</h5>
+            <div class="w-full bg-slate-700 rounded-full h-6 mb-3">
+                <div id="networkScore" class="h-6 rounded-full transition-all duration-500"></div>
+            </div>
+            <p class="text-slate-300 text-sm mb-1"><strong>Score:</strong> <span id="networkScoreText">0</span>/100</p>
+            <p class="text-slate-300 text-sm mb-2"><strong>Findings:</strong> <span id="networkFindings">0</span></p>
+            <span id="networkRiskBadge" class="risk-badge-info">INFO</span>
+        </div>
+
+        <div class="glass rounded-lg p-6">
+            <h5 class="text-white font-semibold mb-3"><i class="fas fa-microchip text-green-500 mr-2"></i>Device Security</h5>
+            <div class="w-full bg-slate-700 rounded-full h-6 mb-3">
+                <div id="deviceScore" class="h-6 rounded-full transition-all duration-500"></div>
+            </div>
+            <p class="text-slate-300 text-sm mb-1"><strong>Score:</strong> <span id="deviceScoreText">0</span>/100</p>
+            <p class="text-slate-300 text-sm mb-2"><strong>Findings:</strong> <span id="deviceFindings">0</span></p>
+            <span id="deviceRiskBadge" class="risk-badge-info">INFO</span>
+        </div>
+
+        <div class="glass rounded-lg p-6">
+            <h5 class="text-white font-semibold mb-3"><i class="fas fa-bug text-red-500 mr-2"></i>Vulnerabilities</h5>
+            <div class="w-full bg-slate-700 rounded-full h-6 mb-3">
+                <div id="vulnScore" class="h-6 rounded-full transition-all duration-500"></div>
+            </div>
+            <p class="text-slate-300 text-sm mb-1"><strong>Score:</strong> <span id="vulnScoreText">0</span>/100</p>
+            <p class="text-slate-300 text-sm mb-2"><strong>CVEs:</strong> <span id="vulnFindings">0</span></p>
+            <span id="vulnRiskBadge" class="risk-badge-info">INFO</span>
+        </div>
+
+        <div class="glass rounded-lg p-6">
+            <h5 class="text-white font-semibold mb-3"><i class="fas fa-check-circle text-yellow-500 mr-2"></i>Compliance</h5>
+            <div class="w-full bg-slate-700 rounded-full h-6 mb-3">
+                <div id="complianceScore" class="h-6 rounded-full transition-all duration-500 bg-yellow-500"></div>
+            </div>
+            <p class="text-slate-300 text-sm mb-1"><strong>Score:</strong> <span id="complianceScoreText">0</span>%</p>
+            <p class="text-slate-300 text-sm mb-2"><strong>IEC 62443:</strong> <span id="iecLevel">SL-0</span></p>
+            <span id="complianceRiskBadge" class="risk-badge-info">INFO</span>
+        </div>
+    </div>
+
+    <!-- Charts Row -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+        <div class="glass rounded-lg p-6">
+            <h5 class="text-white font-semibold mb-4"><i class="fas fa-chart-pie mr-2"></i>Findings by Severity</h5>
+            <canvas id="findingsChart"></canvas>
+        </div>
+        <div class="glass rounded-lg p-6">
+            <h5 class="text-white font-semibold mb-4"><i class="fas fa-chart-bar mr-2"></i>Risk by Category</h5>
+            <canvas id="categoryChart"></canvas>
+        </div>
+    </div>
+
+    <!-- Network Scan Summary -->
+    <div class="glass rounded-lg p-6 mb-6">
+        <h5 class="text-white font-semibold mb-4"><i class="fas fa-clipboard-check mr-2"></i>Detailed Assessment Results</h5>
+
+        <div class="mb-4">
+            <h6 class="text-blue-400 font-semibold mb-2"><i class="fas fa-network-wired mr-2"></i>Network Scan Summary</h6>
+            <div class="glass p-4 rounded-lg border border-blue-500 border-opacity-30">
+                <p class="text-slate-300"><strong>Devices Discovered:</strong> <span id="devicesFound">0</span></p>
+                <p class="text-slate-300"><strong>OT Protocols Detected:</strong> <span id="protocolsFound">-</span></p>
+                <p class="text-slate-300"><strong>Network Segments:</strong> <span id="segmentsFound">-</span></p>
+            </div>
+        </div>
+
+        <!-- OT Protocol Scan Results Table -->
+        <div class="mb-4">
+            <h6 class="text-green-400 font-semibold mb-2"><i class="fas fa-broadcast-tower mr-2"></i>OT Protocol Scan Results</h6>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm text-slate-300">
+                    <thead class="glass">
+                        <tr class="border-b border-slate-700">
+                            <th class="px-4 py-2 text-left">IP Address</th>
+                            <th class="px-4 py-2 text-left">Protocol</th>
+                            <th class="px-4 py-2 text-left">Port</th>
+                            <th class="px-4 py-2 text-left">Vendor</th>
+                            <th class="px-4 py-2 text-left">Model/Product</th>
+                            <th class="px-4 py-2 text-left">Serial Number</th>
+                            <th class="px-4 py-2 text-left">Firmware</th>
+                            <th class="px-4 py-2 text-left">Additional Info</th>
+                        </tr>
+                    </thead>
+                    <tbody id="otProtocolResultsBody">
+                        <tr><td colspan="8" class="px-4 py-8 text-center text-slate-500">No OT protocol scan data available</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Assessment Details Accordions -->
+        <div class="space-y-3">
+            <!-- Network Assessment -->
+            <details class="glass rounded-lg">
+                <summary class="cursor-pointer px-4 py-3 font-semibold text-white hover:bg-slate-700 rounded-lg">
+                    <i class="fas fa-shield-alt mr-2"></i>Network Security Assessment Details
+                </summary>
+                <div id="networkDetailsBody" class="px-4 py-3 text-slate-300">Loading...</div>
+            </details>
+
+            <!-- Device Assessment -->
+            <details class="glass rounded-lg">
+                <summary class="cursor-pointer px-4 py-3 font-semibold text-white hover:bg-slate-700 rounded-lg">
+                    <i class="fas fa-microchip mr-2"></i>Device Security Assessment Details
+                </summary>
+                <div id="deviceDetailsBody" class="px-4 py-3 text-slate-300">Loading...</div>
+            </details>
+
+            <!-- Vulnerability Assessment -->
+            <details class="glass rounded-lg">
+                <summary class="cursor-pointer px-4 py-3 font-semibold text-white hover:bg-slate-700 rounded-lg">
+                    <i class="fas fa-bug mr-2"></i>Vulnerability Assessment Details
+                </summary>
+                <div id="vulnDetailsBody" class="px-4 py-3 text-slate-300">Loading...</div>
+            </details>
+
+            <!-- Compliance Assessment -->
+            <details class="glass rounded-lg">
+                <summary class="cursor-pointer px-4 py-3 font-semibold text-white hover:bg-slate-700 rounded-lg">
+                    <i class="fas fa-check-circle mr-2"></i>Compliance Assessment Details
+                </summary>
+                <div id="complianceDetailsBody" class="px-4 py-3 text-slate-300">Loading...</div>
+            </details>
+        </div>
+    </div>
+
+    <!-- Critical Devices Table -->
+    <div class="glass rounded-lg p-6 mb-6">
+        <h5 class="text-white font-semibold mb-4"><i class="fas fa-server text-red-500 mr-2"></i>High Risk Devices</h5>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm text-slate-300" id="criticalDevicesTable">
+                <thead class="glass">
+                    <tr class="border-b border-slate-700">
+                        <th class="px-4 py-2 text-left">IP Address</th>
+                        <th class="px-4 py-2 text-left">Device Type</th>
+                        <th class="px-4 py-2 text-left">Vendor/Model</th>
+                        <th class="px-4 py-2 text-left">Risk Score</th>
+                        <th class="px-4 py-2 text-left">Risk Level</th>
+                        <th class="px-4 py-2 text-left">CVEs</th>
+                        <th class="px-4 py-2 text-left">Protection Level</th>
+                    </tr>
+                </thead>
+                <tbody id="criticalDevicesBody">
+                    <!-- Will be populated by JavaScript -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Action Plan -->
+    <div class="glass rounded-lg p-6 mb-6">
+        <h5 class="text-white font-semibold mb-4"><i class="fas fa-tasks text-green-500 mr-2"></i>Remediation Action Plan</h5>
+
+        <h6 class="text-red-400 font-semibold mt-4 mb-2"><i class="fas fa-fire mr-2"></i>IMMEDIATE Actions (Within 24 hours)</h6>
+        <div id="immediateActions"></div>
+
+        <h6 class="text-orange-400 font-semibold mt-6 mb-2"><i class="fas fa-exclamation-triangle mr-2"></i>SHORT TERM Actions (Within 1 week)</h6>
+        <div id="shortTermActions"></div>
+
+        <h6 class="text-yellow-400 font-semibold mt-6 mb-2"><i class="fas fa-clock mr-2"></i>MEDIUM TERM Actions (Within 1 month)</h6>
+        <div id="mediumTermActions"></div>
+    </div>
+
+    <!-- Export Buttons -->
+    <div class="glass rounded-lg p-6 text-center">
+        <h5 class="text-white font-semibold mb-4"><i class="fas fa-download mr-2"></i>Export Report</h5>
+        <div class="flex flex-wrap gap-3 justify-center">
+            <button onclick="exportReport('pdf')" class="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-lg transition shadow-lg">
+                <i class="fas fa-file-pdf mr-2"></i>Export PDF
+            </button>
+            <button onclick="exportReport('docx')" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg transition shadow-lg">
+                <i class="fas fa-file-word mr-2"></i>Export Word
+            </button>
+            <button onclick="exportReport('json')" class="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg transition shadow-lg">
+                <i class="fas fa-file-code mr-2"></i>Export JSON
+            </button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    let currentReportId = null;
+    let findingsChart = null;
+    let categoryChart = null;
+    const assessmentSteps = [
+        'network-scan',
+        'device-discovery',
+        'network-assessment',
+        'device-assessment',
+        'vuln-scan',
+        'vuln-assessment',
+        'compliance',
+        'report-gen'
+    ];
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', function() {
+        loadLatestReport();
+        document.getElementById('btnRunAssessment').addEventListener('click', runRiskAssessment);
+    });
+
+    function updateProgress(stepIndex, status = 'running') {
+        const step = assessmentSteps[stepIndex];
+        const element = document.getElementById(`step-${step}`);
+        if (!element) return;
+
+        const icon = element.querySelector('i');
+        const statusSpan = element.querySelector('span');
+
+        if (status === 'running') {
+            icon.className = 'fas fa-spinner fa-spin text-blue-500 mr-2';
+            statusSpan.textContent = 'Running...';
+            statusSpan.className = 'text-blue-400 text-sm';
+        } else if (status === 'complete') {
+            icon.className = 'fas fa-check-circle text-green-500 mr-2';
+            statusSpan.textContent = 'Complete';
+            statusSpan.className = 'text-green-400 text-sm';
+        } else if (status === 'error') {
+            icon.className = 'fas fa-times-circle text-red-500 mr-2';
+            statusSpan.textContent = 'Error';
+            statusSpan.className = 'text-red-400 text-sm';
+        }
+
+        // Update overall progress bar
+        const percent = Math.round(((stepIndex + 1) / assessmentSteps.length) * 100);
+        const progressBar = document.getElementById('overallProgress');
+        const progressPercent = document.getElementById('progressPercent');
+        if (progressBar && progressPercent) {
+            progressBar.style.width = percent + '%';
+            progressPercent.textContent = percent + '%';
+        }
+    }
+
+    async function runRiskAssessment() {
+        document.getElementById('loadingState').classList.add('hidden');
+        document.getElementById('noDataState').classList.add('hidden');
+        document.getElementById('dashboardContent').classList.add('hidden');
+        document.getElementById('progressState').classList.remove('hidden');
+
+        try {
+            // Step 1: Network scan (assumed already done)
+            updateProgress(0, 'running');
+            await new Promise(r => setTimeout(r, 500));
+            updateProgress(0, 'complete');
+
+            // Step 2: Device discovery with OT protocol scan
+            updateProgress(1, 'running');
+            try {
+                const otScanResponse = await fetch('/api/scanner/scan-ot-protocols', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
+
+                const otScanData = await otScanResponse.json();
+                if (otScanData.success) {
+                    console.log('OT protocol scan started:', otScanData);
+                    await new Promise(r => setTimeout(r, 3000));
+                } else {
+                    console.warn('OT protocol scan failed:', otScanData.error);
+                }
+            } catch (error) {
+                console.error('Error running OT protocol scan:', error);
+            }
+            updateProgress(1, 'complete');
+
+            updateProgress(2, 'running');
+            await new Promise(r => setTimeout(r, 300));
+            updateProgress(2, 'complete');
+
+            updateProgress(3, 'running');
+            await new Promise(r => setTimeout(r, 300));
+            updateProgress(3, 'complete');
+
+            updateProgress(4, 'running');
+            const response = await fetch('/api/risk/assess', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ include_vulnerability_scan: true })
+            });
+
+            const data = await response.json();
+            updateProgress(4, 'complete');
+
+            updateProgress(5, 'running');
+            await new Promise(r => setTimeout(r, 300));
+            updateProgress(5, 'complete');
+
+            updateProgress(6, 'running');
+            await new Promise(r => setTimeout(r, 300));
+            updateProgress(6, 'complete');
+
+            updateProgress(7, 'running');
+            if (data.success) {
+                currentReportId = data.report_id;
+                await loadReport(currentReportId);
+                updateProgress(7, 'complete');
+
+                setTimeout(() => {
+                    document.getElementById('progressState').classList.add('hidden');
+                    document.getElementById('dashboardContent').classList.remove('hidden');
+                }, 1000);
+            } else {
+                updateProgress(7, 'error');
+                showToast('Error: ' + (data.error || 'Unknown error'), 'error');
+                document.getElementById('progressState').classList.add('hidden');
+                document.getElementById('noDataState').classList.remove('hidden');
+            }
+        } catch (error) {
+            console.error('Error running assessment:', error);
+            showToast('Failed to run assessment: ' + error.message, 'error');
+            document.getElementById('progressState').classList.add('hidden');
+            document.getElementById('noDataState').classList.remove('hidden');
+        }
+    }
+
+    async function loadLatestReport() {
+        try {
+            const response = await fetch('/api/risk/reports');
+            const data = await response.json();
+
+            if (data.success && data.reports && data.reports.length > 0) {
+                currentReportId = data.reports[0].report_id;
+                await loadReport(currentReportId);
+            } else {
+                document.getElementById('noDataState').classList.remove('hidden');
+            }
+        } catch (error) {
+            console.error('Error loading reports:', error);
+            document.getElementById('noDataState').classList.remove('hidden');
+        }
+    }
+
+    async function loadReport(reportId) {
+        try {
+            const response = await fetch(`/api/risk/report/${reportId}`);
+            const data = await response.json();
+
+            if (data.success) {
+                displayReport(data.report);
+                document.getElementById('loadingState').classList.add('hidden');
+                document.getElementById('noDataState').classList.add('hidden');
+                document.getElementById('dashboardContent').classList.remove('hidden');
+            } else {
+                showToast('Error loading report: ' + data.error, 'error');
+            }
+        } catch (error) {
+            console.error('Error loading report:', error);
+            showToast('Failed to load report: ' + error.message, 'error');
+        }
+    }
+
+    function displayReport(report) {
+        if (!report) {
+            console.error('No report data');
+            return;
+        }
+
+        // Overall Risk
+        const overview = report.overview || {};
+        const overallScore = overview.overall_risk_score || 0;
+        const riskLevel = overview.overall_risk_level || 'INFO';
+
+        const scoreElem = document.getElementById('overallRiskScore');
+        const badgeElem = document.getElementById('overallRiskBadge');
+        const circleElem = document.getElementById('overallRiskCircle');
+
+        if (scoreElem) scoreElem.textContent = overallScore.toFixed(0);
+        if (badgeElem) {
+            badgeElem.textContent = riskLevel;
+            badgeElem.className = `risk-badge-${riskLevel.toLowerCase()}`;
+        }
+        if (circleElem) {
+            circleElem.style.backgroundColor = getRiskColor(riskLevel);
+        }
+
+        // Summary
+        const totalDevicesElem = document.getElementById('totalDevices');
+        const criticalFindingsElem = document.getElementById('criticalFindings');
+        const criticalDevicesElem = document.getElementById('criticalDevices');
+        const assessmentDateElem = document.getElementById('assessmentDate');
+
+        if (totalDevicesElem) totalDevicesElem.textContent = overview.total_devices || 0;
+        if (criticalFindingsElem) criticalFindingsElem.textContent = overview.critical_count || 0;
+        if (criticalDevicesElem) criticalDevicesElem.textContent = (report.critical_devices || []).length;
+        if (assessmentDateElem) {
+            assessmentDateElem.textContent = overview.scan_timestamp ?
+                new Date(overview.scan_timestamp).toLocaleString() : 'N/A';
+        }
+
+        // Network Scan Summary
+        const devicesFoundElem = document.getElementById('devicesFound');
+        if (devicesFoundElem) devicesFoundElem.textContent = overview.total_devices || 0;
+
+        // Display OT Protocol Scan Results
+        displayOTProtocolResults(report);
+
+        // Category Scores
+        const assessments = report.assessments || {};
+        if (assessments.network) displayCategoryScore('network', assessments.network);
+        if (assessments.device) displayCategoryScore('device', assessments.device);
+        if (assessments.vulnerability) displayCategoryScore('vulnerability', assessments.vulnerability, true);
+        if (assessments.compliance) displayCategoryScore('compliance', assessments.compliance);
+
+        // IEC 62443 Level
+        if (report.compliance && report.compliance.length > 0) {
+            const iec = report.compliance.find(c => c.framework && c.framework.includes('62443'));
+            if (iec && iec.security_level) {
+                const iecElem = document.getElementById('iecLevel');
+                if (iecElem) iecElem.textContent = iec.security_level;
+            }
+        }
+
+        // Detailed Assessment Results
+        displayDetailedResults(report);
+
+        // Charts
+        displayCharts(report);
+
+        // Critical Devices Table
+        displayCriticalDevices(report.critical_devices || []);
+
+        // Action Plan
+        displayActionPlan(report.action_plan || {});
+    }
+
+    function displayOTProtocolResults(report) {
+        const tbody = document.getElementById('otProtocolResultsBody');
+        if (!tbody) return;
+
+        tbody.innerHTML = '';
+
+        const devices = report.device_profiles || [];
+        const protocolsFound = new Set();
+        let hasOTData = false;
+
+        devices.forEach(device => {
+            if (!device.metadata) return;
+
+            const protocols = device.protocols || [];
+            const metadata = device.metadata;
+
+            protocols.forEach(protocol => {
+                const protocolUpper = protocol.toUpperCase();
+
+                let vendor = device.vendor || 'Unknown';
+                let model = device.model || '-';
+                let serialNumber = '-';
+                let firmware = device.firmware_version || '-';
+                let additionalInfo = '';
+                let port = '-';
+
+                if (protocolUpper === 'S7' || protocol === 'Siemens S7') {
+                    port = '102';
+                    if (metadata.s7_info || metadata.module_type) {
+                        const s7Info = metadata.s7_info || metadata;
+                        vendor = 'Siemens';
+                        model = s7Info.module_type || s7Info.module_name || model;
+                        serialNumber = s7Info.serial_number || serialNumber;
+                        firmware = s7Info.firmware || firmware;
+                        additionalInfo = `CPU State: ${s7Info.cpu_state || 'Unknown'}`;
+                        if (s7Info.rack !== undefined) additionalInfo += `, Rack: ${s7Info.rack}, Slot: ${s7Info.slot}`;
+                        hasOTData = true;
+                    }
+                } else if (protocolUpper === 'MODBUS' || protocolUpper === 'MODBUS TCP') {
+                    port = '502';
+                    if (metadata.modbus_info) {
+                        const mbInfo = metadata.modbus_info;
+                        vendor = mbInfo.VendorName || vendor;
+                        model = mbInfo.ProductName || mbInfo.ModelName || model;
+                        serialNumber = mbInfo.ProductCode || serialNumber;
+                        firmware = mbInfo.MajorMinorRevision || firmware;
+                        if (mbInfo.VendorUrl) additionalInfo = `URL: ${mbInfo.VendorUrl}`;
+                        hasOTData = true;
+                    }
+                } else if (protocolUpper === 'ETHERNET/IP' || protocolUpper === 'ETHERNETIP') {
+                    port = '44818';
+                    if (metadata.enip_info || metadata.ethernet_ip_info) {
+                        const enipInfo = metadata.enip_info || metadata.ethernet_ip_info;
+                        vendor = `VID: ${enipInfo.VendorID || 'Unknown'}`;
+                        model = enipInfo.ProductName || model;
+                        serialNumber = enipInfo.SerialNumber || serialNumber;
+                        firmware = enipInfo.Revision || firmware;
+                        additionalInfo = `Type: ${enipInfo.DeviceType || 'Unknown'}, Product Code: ${enipInfo.ProductCode || '-'}`;
+                        hasOTData = true;
+                    }
+                } else if (protocolUpper === 'BACNET') {
+                    port = '47808';
+                    if (metadata.bacnet_info) {
+                        const bacInfo = metadata.bacnet_info;
+                        model = `Type: ${bacInfo.ObjectType || 'Unknown'}`;
+                        serialNumber = bacInfo.DeviceID || serialNumber;
+                        additionalInfo = `Instance: ${bacInfo.ObjectInstance || '-'}`;
+                        hasOTData = true;
+                    }
+                } else if (protocolUpper === 'FINS') {
+                    port = '9600';
+                    vendor = 'Omron';
+                    model = metadata.fins_info?.DeviceType || 'PLC';
+                    hasOTData = true;
+                } else if (protocolUpper === 'PROFINET DCP' || protocolUpper === 'PROFINET') {
+                    port = '0x8892 (DCP)';
+                    if (metadata.profinet_info) {
+                        const pnInfo = metadata.profinet_info;
+                        vendor = pnInfo.vendor || vendor;
+                        model = pnInfo.device_model || pnInfo.module_type || model;
+                        serialNumber = pnInfo.serial_number || serialNumber;
+                        firmware = pnInfo.firmware || firmware;
+                        additionalInfo = `Role: ${pnInfo.role || 'Unknown'}, Station: ${pnInfo.type_station || '-'}`;
+                        if (pnInfo.cpu_state) additionalInfo += `, CPU: ${pnInfo.cpu_state}`;
+                        hasOTData = true;
+                    }
+                }
+
+                if (hasOTData) {
+                    protocolsFound.add(protocol);
+                    const row = tbody.insertRow();
+                    row.className = 'border-b border-slate-700 hover:bg-slate-700';
+                    row.innerHTML = `
+                        <td class="px-4 py-2">${device.ip || '-'}</td>
+                        <td class="px-4 py-2"><span class="px-2 py-1 bg-blue-600 text-white rounded text-xs">${protocol}</span></td>
+                        <td class="px-4 py-2">${port}</td>
+                        <td class="px-4 py-2">${vendor}</td>
+                        <td class="px-4 py-2">${model}</td>
+                        <td class="px-4 py-2">${serialNumber}</td>
+                        <td class="px-4 py-2">${firmware}</td>
+                        <td class="px-4 py-2 text-xs">${additionalInfo}</td>
+                    `;
+                }
+            });
+        });
+
+        if (!hasOTData) {
+            tbody.innerHTML = '<tr><td colspan="8" class="px-4 py-8 text-center text-slate-500">No OT protocol scan data available. Run OT protocol scan first.</td></tr>';
+        }
+
+        const protocolsFoundElem = document.getElementById('protocolsFound');
+        if (protocolsFoundElem) {
+            protocolsFoundElem.textContent = protocolsFound.size > 0 ?
+                Array.from(protocolsFound).join(', ') : 'None';
+        }
+    }
+
+    function displayDetailedResults(report) {
+        const assessments = report.assessments || {};
+
+        // Network Assessment Details
+        const networkBody = document.getElementById('networkDetailsBody');
+        if (networkBody && assessments.network) {
+            const net = assessments.network;
+            networkBody.innerHTML = `
+                <h6 class="text-green-400 font-semibold mb-2"><i class="fas fa-check-circle mr-2"></i>What Was Assessed</h6>
+                <ul class="list-disc list-inside mb-4 space-y-1">
+                    <li><strong>Network Segmentation:</strong> ${net.findings_count > 0 ? 'Checked - Issues found' : 'Checked - OK'}</li>
+                    <li><strong>Protocol Security:</strong> Analyzed OT protocols (S7, Modbus, Profinet, etc.)</li>
+                    <li><strong>Network Topology:</strong> Evaluated network structure and zones</li>
+                    <li><strong>Firewall Rules:</strong> ${net.findings_count > 5 ? 'Missing or inadequate' : 'Evaluated'}</li>
+                </ul>
+                <h6 class="text-yellow-400 font-semibold mb-2"><i class="fas fa-exclamation-triangle mr-2"></i>Findings</h6>
+                <div class="glass p-4 rounded-lg border ${net.risk_level === 'CRITICAL' || net.risk_level === 'HIGH' ? 'border-red-500' : net.risk_level === 'MEDIUM' ? 'border-yellow-500' : 'border-blue-500'} border-opacity-30">
+                    <p class="mb-1"><strong>Risk Level:</strong> <span class="risk-badge-${net.risk_level.toLowerCase()}">${net.risk_level}</span></p>
+                    <p class="mb-1"><strong>Score:</strong> ${net.score.toFixed(1)}/100</p>
+                    <p class="mb-1"><strong>Issues Found:</strong> ${net.findings_count}</p>
+                    <p><strong>Reason:</strong> ${net.score < 50 ? 'Network lacks proper segmentation, uses insecure protocols, or is exposed to external networks' :
+                                                net.score < 70 ? 'Some network security controls in place but improvements needed' :
+                                                'Good network security controls detected'}</p>
+                </div>
+            `;
+        }
+
+        // Device Assessment Details
+        const deviceBody = document.getElementById('deviceDetailsBody');
+        if (deviceBody && assessments.device) {
+            const dev = assessments.device;
+            const totalDevices = report.overview?.total_devices || 0;
+            deviceBody.innerHTML = `
+                <h6 class="text-green-400 font-semibold mb-2"><i class="fas fa-check-circle mr-2"></i>What Was Assessed</h6>
+                <ul class="list-disc list-inside mb-4 space-y-1">
+                    <li><strong>Total Devices Analyzed:</strong> ${totalDevices}</li>
+                    <li><strong>Authentication:</strong> Checked for password protection and authentication mechanisms</li>
+                    <li><strong>Firmware Version:</strong> Analyzed firmware age and update status</li>
+                    <li><strong>Default Credentials:</strong> Checked for default/weak credentials</li>
+                    <li><strong>Protection Level:</strong> Evaluated S7 protection levels (Level 0-3)</li>
+                </ul>
+                <h6 class="text-red-400 font-semibold mb-2"><i class="fas fa-times-circle mr-2"></i>What Could Not Be Assessed</h6>
+                <ul class="list-disc list-inside mb-4 space-y-1">
+                    <li><strong>Internal Configuration:</strong> Requires authenticated access</li>
+                    <li><strong>User Permissions:</strong> Need administrator access</li>
+                    <li><strong>Encrypted Communications:</strong> Cannot inspect encrypted traffic</li>
+                </ul>
+                <h6 class="text-yellow-400 font-semibold mb-2"><i class="fas fa-exclamation-triangle mr-2"></i>Findings</h6>
+                <div class="glass p-4 rounded-lg border ${dev.risk_level === 'CRITICAL' || dev.risk_level === 'HIGH' ? 'border-red-500' : dev.risk_level === 'MEDIUM' ? 'border-yellow-500' : 'border-blue-500'} border-opacity-30">
+                    <p class="mb-1"><strong>Risk Level:</strong> <span class="risk-badge-${dev.risk_level.toLowerCase()}">${dev.risk_level}</span></p>
+                    <p class="mb-1"><strong>Score:</strong> ${dev.score.toFixed(1)}/100</p>
+                    <p class="mb-1"><strong>Issues Found:</strong> ${dev.findings_count}</p>
+                    <p><strong>Reason:</strong> ${dev.score < 50 ? 'Multiple devices lack authentication, have outdated firmware, or use default settings' :
+                                                dev.score < 70 ? 'Some devices need security updates or configuration improvements' :
+                                                'Most devices have adequate security configurations'}</p>
+                </div>
+            `;
+        }
+
+        // Vulnerability Assessment Details
+        const vulnBody = document.getElementById('vulnDetailsBody');
+        if (vulnBody && assessments.vulnerability) {
+            const vuln = assessments.vulnerability;
+            const criticalCount = report.overview?.critical_count || 0;
+            const highCount = report.overview?.high_count || 0;
+            vulnBody.innerHTML = `
+                <h6 class="text-green-400 font-semibold mb-2"><i class="fas fa-check-circle mr-2"></i>What Was Assessed</h6>
+                <ul class="list-disc list-inside mb-4 space-y-1">
+                    <li><strong>CVE Database:</strong> Checked against known Common Vulnerabilities and Exposures</li>
+                    <li><strong>Vendor-Specific Vulnerabilities:</strong> Analyzed vendor and model specific issues</li>
+                    <li><strong>Firmware Vulnerabilities:</strong> Checked firmware versions against vulnerability databases</li>
+                    <li><strong>Protocol Vulnerabilities:</strong> Evaluated protocol-specific security issues</li>
+                </ul>
+                <h6 class="text-yellow-400 font-semibold mb-2"><i class="fas fa-exclamation-triangle mr-2"></i>Findings</h6>
+                <div class="glass p-4 rounded-lg border ${vuln.risk_level === 'CRITICAL' || vuln.risk_level === 'HIGH' ? 'border-red-500' : vuln.risk_level === 'MEDIUM' ? 'border-yellow-500' : 'border-blue-500'} border-opacity-30">
+                    <p class="mb-1"><strong>Risk Level:</strong> <span class="risk-badge-${vuln.risk_level.toLowerCase()}">${vuln.risk_level}</span></p>
+                    <p class="mb-1"><strong>Score:</strong> ${vuln.score.toFixed(1)}/100</p>
+                    <p class="mb-1"><strong>Total CVEs Found:</strong> ${vuln.findings_count}</p>
+                    <p class="mb-1"><strong>Critical CVEs:</strong> ${criticalCount}</p>
+                    <p class="mb-1"><strong>High CVEs:</strong> ${highCount}</p>
+                    <p><strong>Reason:</strong> ${criticalCount > 0 ? 'CRITICAL vulnerabilities detected requiring immediate patching' :
+                                                vuln.score < 50 ? 'Multiple high-severity vulnerabilities found' :
+                                                vuln.score < 70 ? 'Some vulnerabilities detected, patches recommended' :
+                                                'No critical vulnerabilities detected'}</p>
+                </div>
+            `;
+        }
+
+        // Compliance Assessment Details
+        const compBody = document.getElementById('complianceDetailsBody');
+        if (compBody && assessments.compliance) {
+            const comp = assessments.compliance;
+            const iecCompliance = report.compliance?.[0] || {};
+            compBody.innerHTML = `
+                <h6 class="text-green-400 font-semibold mb-2"><i class="fas fa-check-circle mr-2"></i>Standards Assessed</h6>
+                <ul class="list-disc list-inside mb-4 space-y-1">
+                    <li><strong>IEC 62443-3-3:</strong> Industrial automation security requirements</li>
+                    <li><strong>NIST CSF:</strong> Cybersecurity Framework alignment</li>
+                </ul>
+                <h6 class="text-blue-400 font-semibold mb-2"><i class="fas fa-clipboard-list mr-2"></i>IEC 62443 Requirements Checked</h6>
+                <ul class="list-disc list-inside mb-4 space-y-1">
+                    <li>FR1 - Identification and Authentication Control</li>
+                    <li>FR2 - Use Control</li>
+                    <li>FR3 - System Integrity</li>
+                    <li>FR4 - Data Confidentiality</li>
+                    <li>FR5 - Restricted Data Flow</li>
+                    <li>FR6 - Timely Response to Events</li>
+                    <li>FR7 - Resource Availability</li>
+                </ul>
+                <h6 class="text-yellow-400 font-semibold mb-2"><i class="fas fa-exclamation-triangle mr-2"></i>Compliance Results</h6>
+                <div class="glass p-4 rounded-lg border border-yellow-500 border-opacity-30">
+                    <p class="mb-1"><strong>Overall Compliance:</strong> ${comp.score.toFixed(1)}%</p>
+                    <p class="mb-1"><strong>Security Level:</strong> ${iecCompliance.security_level || 'SL-0 (No Security)'}</p>
+                    <p class="mb-1"><strong>Requirements Met:</strong> ${iecCompliance.requirements_met || 0} / ${iecCompliance.requirements_total || 28}</p>
+                    <p><strong>Reason:</strong> ${comp.score < 40 ? 'System does not meet basic IEC 62443 requirements. Most foundational requirements (FR1-FR7) are not satisfied.' :
+                                                comp.score < 60 ? 'Partial compliance. Some requirements met but significant gaps remain.' :
+                                                comp.score < 80 ? 'Good compliance level. Most requirements met with minor improvements needed.' :
+                                                'High compliance with IEC 62443 standards.'}</p>
+                </div>
+            `;
+        }
+    }
+
+    function displayCategoryScore(category, data, isVuln = false) {
+        if (!data) return;
+
+        const score = data.score || 0;
+        const risk = data.risk_level || 'INFO';
+        const findings = data.findings_count || 0;
+
+        const progressBar = document.getElementById(`${category}Score`);
+        if (progressBar) {
+            progressBar.style.width = score + '%';
+            progressBar.className = `h-6 rounded-full transition-all duration-500 ${getProgressBarClass(risk)}`;
+        }
+
+        const scoreText = document.getElementById(`${category}ScoreText`);
+        if (scoreText) scoreText.textContent = score.toFixed(1);
+
+        const findingsElem = document.getElementById(`${category}Findings`);
+        if (findingsElem) findingsElem.textContent = findings;
+
+        const badge = document.getElementById(`${category}RiskBadge`);
+        if (badge) {
+            badge.textContent = risk;
+            badge.className = `risk-badge-${risk.toLowerCase()}`;
+        }
+    }
+
+    function displayCharts(report) {
+        if (!report) return;
+
+        const findings = report.findings || { critical: [], high: [], all: [] };
+        const assessments = report.assessments || {};
+
+        // Findings by Severity Chart
+        const findingsData = {
+            labels: ['Critical', 'High', 'Medium', 'Low'],
+            datasets: [{
+                data: [
+                    (findings.critical || []).length,
+                    (findings.high || []).length,
+                    (findings.all || []).filter(f => f.severity === 'MEDIUM').length,
+                    (findings.all || []).filter(f => f.severity === 'LOW').length
+                ],
+                backgroundColor: ['#dc3545', '#fd7e14', '#ffc107', '#28a745']
+            }]
+        };
+
+        const ctx1 = document.getElementById('findingsChart');
+        if (ctx1) {
+            if (findingsChart) findingsChart.destroy();
+            findingsChart = new Chart(ctx1, {
+                type: 'doughnut',
+                data: findingsData,
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: { position: 'bottom', labels: { color: '#e2e8f0' } }
+                    }
+                }
+            });
+        }
+
+        // Category Risk Chart
+        const categoryData = {
+            labels: ['Network', 'Device', 'Vulnerability', 'Compliance'],
+            datasets: [{
+                label: 'Risk Score',
+                data: [
+                    100 - (assessments.network?.score || 0),
+                    100 - (assessments.device?.score || 0),
+                    100 - (assessments.vulnerability?.score || 0),
+                    100 - (assessments.compliance?.score || 0)
+                ],
+                backgroundColor: ['#667eea', '#764ba2', '#f093fb', '#4facfe']
+            }]
+        };
+
+        const ctx2 = document.getElementById('categoryChart');
+        if (ctx2) {
+            if (categoryChart) categoryChart.destroy();
+            categoryChart = new Chart(ctx2, {
+                type: 'bar',
+                data: categoryData,
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: { beginAtZero: true, max: 100, ticks: { color: '#e2e8f0' }, grid: { color: '#334155' } },
+                        x: { ticks: { color: '#e2e8f0' }, grid: { color: '#334155' } }
+                    },
+                    plugins: {
+                        legend: { display: false }
+                    }
+                }
+            });
+        }
+    }
+
+    function displayCriticalDevices(devices) {
+        const tbody = document.getElementById('criticalDevicesBody');
+        if (!tbody) return;
+
+        tbody.innerHTML = '';
+
+        if (!devices || devices.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-slate-500">No high-risk devices found</td></tr>';
+            return;
+        }
+
+        devices.forEach(device => {
+            const row = tbody.insertRow();
+            row.className = 'border-b border-slate-700 hover:bg-slate-700';
+            row.innerHTML = `
+                <td class="px-4 py-2">${device.ip || 'N/A'}</td>
+                <td class="px-4 py-2">${device.device_type || 'Unknown'}</td>
+                <td class="px-4 py-2">${device.vendor || 'Unknown'} ${device.model || ''}</td>
+                <td class="px-4 py-2"><strong>${device.risk_score ? device.risk_score.toFixed(1) : '0'}</strong></td>
+                <td class="px-4 py-2"><span class="risk-badge-${(device.risk_level || 'info').toLowerCase()}">${device.risk_level || 'INFO'}</span></td>
+                <td class="px-4 py-2">${device.cve_count || 0}</td>
+                <td class="px-4 py-2">${device.protection_level !== null && device.protection_level !== undefined ? 'Level ' + device.protection_level : 'N/A'}</td>
+            `;
+        });
+    }
+
+    function displayActionPlan(actionPlan) {
+        if (!actionPlan) {
+            actionPlan = { immediate: [], short_term: [], medium_term: [] };
+        }
+
+        displayActions('immediateActions', actionPlan.immediate || [], 'action-immediate');
+        displayActions('shortTermActions', actionPlan.short_term || [], 'action-short');
+        displayActions('mediumTermActions', actionPlan.medium_term || [], 'action-medium');
+    }
+
+    function displayActions(elementId, actions, className) {
+        const container = document.getElementById(elementId);
+        if (!container) return;
+
+        container.innerHTML = '';
+
+        if (!actions || actions.length === 0) {
+            container.innerHTML = '<p class="text-slate-500">No actions in this category</p>';
+            return;
+        }
+
+        actions.slice(0, 5).forEach((action, index) => {
+            const div = document.createElement('div');
+            div.className = `action-item glass ${className}`;
+            div.innerHTML = `
+                <strong class="text-white">${index + 1}. ${action.title || 'Untitled Action'}</strong>
+                <p class="mb-1 text-slate-300">${action.description || 'No description available'}</p>
+                ${action.affected_devices && action.affected_devices.length > 0 ?
+                    `<small class="text-slate-400">Affected: ${action.affected_devices.join(', ')}</small>` : ''}
+            `;
+            container.appendChild(div);
+        });
+    }
+
+    async function exportReport(format) {
+        if (!currentReportId) {
+            showToast('No report to export', 'warning');
+            return;
+        }
+
+        try {
+            window.location.href = `/api/risk/export/${currentReportId}/${format}`;
+        } catch (error) {
+            console.error('Error exporting report:', error);
+            showToast('Failed to export report: ' + error.message, 'error');
+        }
+    }
+
+    function getRiskColor(riskLevel) {
+        const colors = {
+            'CRITICAL': '#dc3545',
+            'HIGH': '#fd7e14',
+            'MEDIUM': '#ffc107',
+            'LOW': '#28a745',
+            'INFO': '#6c757d'
+        };
+        return colors[riskLevel] || '#6c757d';
+    }
+
+    function getProgressBarClass(riskLevel) {
+        const classes = {
+            'CRITICAL': 'bg-red-500',
+            'HIGH': 'bg-orange-500',
+            'MEDIUM': 'bg-yellow-500',
+            'LOW': 'bg-green-500',
+            'INFO': 'bg-slate-500'
+        };
+        return classes[riskLevel] || 'bg-slate-500';
+    }
+</script>
+{% endblock %}

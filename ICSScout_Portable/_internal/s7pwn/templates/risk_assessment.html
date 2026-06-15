@@ -1,0 +1,1212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Risk Assessment - ICSScout</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+    <style>
+        body {
+            background-color: #f8f9fa;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .navbar {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .risk-card {
+            border-radius: 15px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease;
+        }
+        .risk-card:hover {
+            transform: translateY(-5px);
+        }
+        .risk-badge-critical {
+            background-color: #dc3545;
+            color: white;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-weight: bold;
+        }
+        .risk-badge-high {
+            background-color: #fd7e14;
+            color: white;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-weight: bold;
+        }
+        .risk-badge-medium {
+            background-color: #ffc107;
+            color: #000;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-weight: bold;
+        }
+        .risk-badge-low {
+            background-color: #28a745;
+            color: white;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-weight: bold;
+        }
+        .risk-badge-info {
+            background-color: #6c757d;
+            color: white;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-weight: bold;
+        }
+        .score-circle {
+            width: 150px;
+            height: 150px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: white;
+            margin: 0 auto;
+        }
+        .progress-bar-animated {
+            animation: progress-animation 1s ease-in-out;
+        }
+        @keyframes progress-animation {
+            from { width: 0%; }
+        }
+        .device-table {
+            font-size: 0.9rem;
+        }
+        .loading-spinner {
+            text-align: center;
+            padding: 50px;
+        }
+        .action-item {
+            padding: 15px;
+            margin-bottom: 10px;
+            border-left: 4px solid;
+            background-color: white;
+            border-radius: 5px;
+        }
+        .action-immediate {
+            border-left-color: #dc3545;
+        }
+        .action-short {
+            border-left-color: #fd7e14;
+        }
+        .action-medium {
+            border-left-color: #ffc107;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navbar -->
+    <nav class="navbar navbar-dark">
+        <div class="container-fluid">
+            <span class="navbar-brand mb-0 h1">
+                <i class="fas fa-shield-alt"></i> ICSScout - Risk Assessment Dashboard
+            </span>
+            <div>
+                <button class="btn btn-light me-2" onclick="window.location.href='/'">
+                    <i class="fas fa-home"></i> Home
+                </button>
+                <button class="btn btn-success" id="btnRunAssessment">
+                    <i class="fas fa-play"></i> Run Assessment
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="container-fluid mt-4">
+        <!-- Loading State -->
+        <div id="loadingState" class="loading-spinner" style="display: none;">
+            <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-3">Running risk assessment... This may take a minute.</p>
+        </div>
+
+        <!-- No Data State -->
+        <div id="noDataState" class="text-center" style="padding: 100px;">
+            <i class="fas fa-clipboard-list fa-5x text-muted mb-4"></i>
+            <h3>No Risk Assessment Data Available</h3>
+            <p class="text-muted">Click "Run Assessment" to start a comprehensive security analysis</p>
+            <button class="btn btn-primary btn-lg" onclick="runRiskAssessment()">
+                <i class="fas fa-play"></i> Run Assessment Now
+            </button>
+        </div>
+
+        <!-- Progress Tracking -->
+        <div id="progressState" style="display: none;">
+            <div class="row mb-4">
+                <div class="col-12">
+                    <div class="card risk-card">
+                        <div class="card-body">
+                            <h4 class="card-title mb-4">
+                                <i class="fas fa-tasks"></i> Assessment Progress
+                            </h4>
+                            <div class="progress mb-4" style="height: 30px;">
+                                <div id="overallProgress" class="progress-bar progress-bar-striped progress-bar-animated bg-success"
+                                     role="progressbar" style="width: 0%">
+                                    <span id="progressPercent">0%</span>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="list-group">
+                                        <div class="list-group-item" id="step-network-scan">
+                                            <i class="fas fa-circle text-secondary me-2"></i>
+                                            <strong>Network Scan</strong>
+                                            <span class="float-end text-muted">Pending</span>
+                                        </div>
+                                        <div class="list-group-item" id="step-device-discovery">
+                                            <i class="fas fa-circle text-secondary me-2"></i>
+                                            <strong>Device Discovery</strong>
+                                            <span class="float-end text-muted">Pending</span>
+                                        </div>
+                                        <div class="list-group-item" id="step-network-assessment">
+                                            <i class="fas fa-circle text-secondary me-2"></i>
+                                            <strong>Network Security Assessment</strong>
+                                            <span class="float-end text-muted">Pending</span>
+                                        </div>
+                                        <div class="list-group-item" id="step-device-assessment">
+                                            <i class="fas fa-circle text-secondary me-2"></i>
+                                            <strong>Device Security Assessment</strong>
+                                            <span class="float-end text-muted">Pending</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="list-group">
+                                        <div class="list-group-item" id="step-vuln-scan">
+                                            <i class="fas fa-circle text-secondary me-2"></i>
+                                            <strong>Vulnerability Scan</strong>
+                                            <span class="float-end text-muted">Pending</span>
+                                        </div>
+                                        <div class="list-group-item" id="step-vuln-assessment">
+                                            <i class="fas fa-circle text-secondary me-2"></i>
+                                            <strong>Vulnerability Assessment</strong>
+                                            <span class="float-end text-muted">Pending</span>
+                                        </div>
+                                        <div class="list-group-item" id="step-compliance">
+                                            <i class="fas fa-circle text-secondary me-2"></i>
+                                            <strong>Compliance Check (IEC 62443)</strong>
+                                            <span class="float-end text-muted">Pending</span>
+                                        </div>
+                                        <div class="list-group-item" id="step-report-gen">
+                                            <i class="fas fa-circle text-secondary me-2"></i>
+                                            <strong>Report Generation</strong>
+                                            <span class="float-end text-muted">Pending</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Dashboard Content -->
+        <div id="dashboardContent" style="display: none;">
+            <!-- Overall Risk Score -->
+            <div class="row mb-4">
+                <div class="col-12">
+                    <div class="card risk-card">
+                        <div class="card-body text-center p-4">
+                            <h2 class="card-title mb-4">Overall Security Risk</h2>
+                            <div class="row align-items-center">
+                                <div class="col-md-4">
+                                    <div id="overallRiskCircle" class="score-circle">
+                                        <span id="overallRiskScore">0</span>
+                                    </div>
+                                    <h3 class="mt-3">
+                                        <span id="overallRiskBadge" class="risk-badge-info">INFO</span>
+                                    </h3>
+                                </div>
+                                <div class="col-md-8 text-start">
+                                    <div class="row">
+                                        <div class="col-6 mb-3">
+                                            <h5><i class="fas fa-server text-primary"></i> Total Devices</h5>
+                                            <h2 id="totalDevices">0</h2>
+                                        </div>
+                                        <div class="col-6 mb-3">
+                                            <h5><i class="fas fa-exclamation-triangle text-warning"></i> Critical Findings</h5>
+                                            <h2 id="criticalFindings">0</h2>
+                                        </div>
+                                        <div class="col-6">
+                                            <h5><i class="fas fa-exclamation-circle text-danger"></i> High Risk Devices</h5>
+                                            <h2 id="criticalDevices">0</h2>
+                                        </div>
+                                        <div class="col-6">
+                                            <h5><i class="fas fa-calendar text-info"></i> Assessment Date</h5>
+                                            <p id="assessmentDate">-</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Category Assessments -->
+            <div class="row mb-4">
+                <div class="col-md-3">
+                    <div class="card risk-card h-100">
+                        <div class="card-body">
+                            <h5 class="card-title"><i class="fas fa-network-wired text-primary"></i> Network Security</h5>
+                            <div class="progress mb-2" style="height: 25px;">
+                                <div id="networkScore" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar"></div>
+                            </div>
+                            <p class="mb-1"><strong>Score:</strong> <span id="networkScoreText">0</span>/100</p>
+                            <p class="mb-1"><strong>Findings:</strong> <span id="networkFindings">0</span></p>
+                            <span id="networkRiskBadge" class="risk-badge-info">INFO</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card risk-card h-100">
+                        <div class="card-body">
+                            <h5 class="card-title"><i class="fas fa-microchip text-success"></i> Device Security</h5>
+                            <div class="progress mb-2" style="height: 25px;">
+                                <div id="deviceScore" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar"></div>
+                            </div>
+                            <p class="mb-1"><strong>Score:</strong> <span id="deviceScoreText">0</span>/100</p>
+                            <p class="mb-1"><strong>Findings:</strong> <span id="deviceFindings">0</span></p>
+                            <span id="deviceRiskBadge" class="risk-badge-info">INFO</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card risk-card h-100">
+                        <div class="card-body">
+                            <h5 class="card-title"><i class="fas fa-bug text-danger"></i> Vulnerabilities</h5>
+                            <div class="progress mb-2" style="height: 25px;">
+                                <div id="vulnScore" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar"></div>
+                            </div>
+                            <p class="mb-1"><strong>Score:</strong> <span id="vulnScoreText">0</span>/100</p>
+                            <p class="mb-1"><strong>CVEs:</strong> <span id="vulnFindings">0</span></p>
+                            <span id="vulnRiskBadge" class="risk-badge-info">INFO</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card risk-card h-100">
+                        <div class="card-body">
+                            <h5 class="card-title"><i class="fas fa-check-circle text-warning"></i> Compliance</h5>
+                            <div class="progress mb-2" style="height: 25px;">
+                                <div id="complianceScore" class="progress-bar progress-bar-striped progress-bar-animated bg-warning" role="progressbar"></div>
+                            </div>
+                            <p class="mb-1"><strong>Score:</strong> <span id="complianceScoreText">0</span>%</p>
+                            <p class="mb-1"><strong>IEC 62443:</strong> <span id="iecLevel">SL-0</span></p>
+                            <span id="complianceRiskBadge" class="risk-badge-info">INFO</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Charts Row -->
+            <div class="row mb-4">
+                <div class="col-md-6">
+                    <div class="card risk-card">
+                        <div class="card-body">
+                            <h5 class="card-title"><i class="fas fa-chart-pie"></i> Findings by Severity</h5>
+                            <canvas id="findingsChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="card risk-card">
+                        <div class="card-body">
+                            <h5 class="card-title"><i class="fas fa-chart-bar"></i> Risk by Category</h5>
+                            <canvas id="categoryChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Detailed Assessment Results -->
+            <div class="row mb-4">
+                <div class="col-12">
+                    <div class="card risk-card">
+                        <div class="card-body">
+                            <h5 class="card-title"><i class="fas fa-clipboard-check"></i> Detailed Assessment Results</h5>
+
+                            <!-- Network Scan Summary -->
+                            <div class="mt-3">
+                                <h6><i class="fas fa-network-wired text-primary"></i> Network Scan Summary</h6>
+                                <div id="networkScanSummary" class="alert alert-info">
+                                    <strong>Devices Discovered:</strong> <span id="devicesFound">0</span><br>
+                                    <strong>OT Protocols Detected:</strong> <span id="protocolsFound">-</span><br>
+                                    <strong>Network Segments:</strong> <span id="segmentsFound">-</span>
+                                </div>
+                            </div>
+
+                            <!-- OT Protocol Scan Results -->
+                            <div class="mt-3">
+                                <h6><i class="fas fa-broadcast-tower text-success"></i> OT Protocol Scan Results</h6>
+                                <div id="otProtocolResults" class="table-responsive">
+                                    <table class="table table-sm table-striped">
+                                        <thead class="table-dark">
+                                            <tr>
+                                                <th>IP Address</th>
+                                                <th>Protocol</th>
+                                                <th>Port</th>
+                                                <th>Vendor</th>
+                                                <th>Model/Product</th>
+                                                <th>Serial Number</th>
+                                                <th>Firmware</th>
+                                                <th>Additional Info</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="otProtocolResultsBody">
+                                            <tr><td colspan="8" class="text-center text-muted">No OT protocol scan data available</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <!-- Assessment Details by Category -->
+                            <div class="accordion mt-3" id="assessmentAccordion">
+                                <!-- Network Assessment -->
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header">
+                                        <button class="accordion-button collapsed" type="button"
+                                                data-bs-toggle="collapse" data-bs-target="#networkDetails">
+                                            <i class="fas fa-shield-alt me-2"></i> Network Security Assessment Details
+                                        </button>
+                                    </h2>
+                                    <div id="networkDetails" class="accordion-collapse collapse" data-bs-parent="#assessmentAccordion">
+                                        <div class="accordion-body" id="networkDetailsBody">
+                                            Loading...
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Device Assessment -->
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header">
+                                        <button class="accordion-button collapsed" type="button"
+                                                data-bs-toggle="collapse" data-bs-target="#deviceDetails">
+                                            <i class="fas fa-microchip me-2"></i> Device Security Assessment Details
+                                        </button>
+                                    </h2>
+                                    <div id="deviceDetails" class="accordion-collapse collapse" data-bs-parent="#assessmentAccordion">
+                                        <div class="accordion-body" id="deviceDetailsBody">
+                                            Loading...
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Vulnerability Assessment -->
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header">
+                                        <button class="accordion-button collapsed" type="button"
+                                                data-bs-toggle="collapse" data-bs-target="#vulnDetails">
+                                            <i class="fas fa-bug me-2"></i> Vulnerability Assessment Details
+                                        </button>
+                                    </h2>
+                                    <div id="vulnDetails" class="accordion-collapse collapse" data-bs-parent="#assessmentAccordion">
+                                        <div class="accordion-body" id="vulnDetailsBody">
+                                            Loading...
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Compliance Assessment -->
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header">
+                                        <button class="accordion-button collapsed" type="button"
+                                                data-bs-toggle="collapse" data-bs-target="#complianceDetails">
+                                            <i class="fas fa-check-circle me-2"></i> Compliance Assessment Details
+                                        </button>
+                                    </h2>
+                                    <div id="complianceDetails" class="accordion-collapse collapse" data-bs-parent="#assessmentAccordion">
+                                        <div class="accordion-body" id="complianceDetailsBody">
+                                            Loading...
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Critical Devices Table -->
+            <div class="row mb-4">
+                <div class="col-12">
+                    <div class="card risk-card">
+                        <div class="card-body">
+                            <h5 class="card-title"><i class="fas fa-server text-danger"></i> High Risk Devices</h5>
+                            <div class="table-responsive">
+                                <table class="table table-hover device-table" id="criticalDevicesTable">
+                                    <thead class="table-dark">
+                                        <tr>
+                                            <th>IP Address</th>
+                                            <th>Device Type</th>
+                                            <th>Vendor/Model</th>
+                                            <th>Risk Score</th>
+                                            <th>Risk Level</th>
+                                            <th>CVEs</th>
+                                            <th>Protection Level</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="criticalDevicesBody">
+                                        <!-- Will be populated by JavaScript -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Action Plan -->
+            <div class="row mb-4">
+                <div class="col-12">
+                    <div class="card risk-card">
+                        <div class="card-body">
+                            <h5 class="card-title"><i class="fas fa-tasks text-success"></i> Remediation Action Plan</h5>
+
+                            <h6 class="mt-3 text-danger"><i class="fas fa-fire"></i> IMMEDIATE Actions (Within 24 hours)</h6>
+                            <div id="immediateActions"></div>
+
+                            <h6 class="mt-4 text-warning"><i class="fas fa-exclamation-triangle"></i> SHORT TERM Actions (Within 1 week)</h6>
+                            <div id="shortTermActions"></div>
+
+                            <h6 class="mt-4 text-info"><i class="fas fa-clock"></i> MEDIUM TERM Actions (Within 1 month)</h6>
+                            <div id="mediumTermActions"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Export Buttons -->
+            <div class="row mb-4">
+                <div class="col-12 text-center">
+                    <div class="card risk-card">
+                        <div class="card-body">
+                            <h5 class="card-title"><i class="fas fa-download"></i> Export Report</h5>
+                            <button class="btn btn-danger btn-lg me-2" onclick="exportReport('pdf')">
+                                <i class="fas fa-file-pdf"></i> Export PDF
+                            </button>
+                            <button class="btn btn-primary btn-lg me-2" onclick="exportReport('docx')">
+                                <i class="fas fa-file-word"></i> Export Word
+                            </button>
+                            <button class="btn btn-success btn-lg" onclick="exportReport('json')">
+                                <i class="fas fa-file-code"></i> Export JSON
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let currentReportId = null;
+        let findingsChart = null;
+        let categoryChart = null;
+        const assessmentSteps = [
+            'network-scan',
+            'device-discovery',
+            'network-assessment',
+            'device-assessment',
+            'vuln-scan',
+            'vuln-assessment',
+            'compliance',
+            'report-gen'
+        ];
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            loadLatestReport();
+
+            document.getElementById('btnRunAssessment').addEventListener('click', runRiskAssessment);
+        });
+
+        function updateProgress(stepIndex, status = 'running') {
+            // Update step status
+            const step = assessmentSteps[stepIndex];
+            const element = document.getElementById(`step-${step}`);
+            if (!element) return;
+
+            const icon = element.querySelector('i');
+            const statusSpan = element.querySelector('.float-end');
+
+            if (status === 'running') {
+                icon.className = 'fas fa-spinner fa-spin text-primary me-2';
+                statusSpan.textContent = 'Running...';
+                statusSpan.className = 'float-end text-primary';
+            } else if (status === 'complete') {
+                icon.className = 'fas fa-check-circle text-success me-2';
+                statusSpan.textContent = 'Complete';
+                statusSpan.className = 'float-end text-success';
+            } else if (status === 'error') {
+                icon.className = 'fas fa-times-circle text-danger me-2';
+                statusSpan.textContent = 'Error';
+                statusSpan.className = 'float-end text-danger';
+            }
+
+            // Update overall progress bar
+            const percent = Math.round(((stepIndex + 1) / assessmentSteps.length) * 100);
+            const progressBar = document.getElementById('overallProgress');
+            const progressPercent = document.getElementById('progressPercent');
+            if (progressBar && progressPercent) {
+                progressBar.style.width = percent + '%';
+                progressPercent.textContent = percent + '%';
+            }
+        }
+
+        async function runRiskAssessment() {
+            document.getElementById('loadingState').style.display = 'none';
+            document.getElementById('noDataState').style.display = 'none';
+            document.getElementById('dashboardContent').style.display = 'none';
+            document.getElementById('progressState').style.display = 'block';
+
+            try {
+                // Step 1: Network scan (assumed already done)
+                updateProgress(0, 'running');
+                await new Promise(r => setTimeout(r, 500));
+                updateProgress(0, 'complete');
+
+                // Step 2: Device discovery with OT protocol scan
+                updateProgress(1, 'running');
+                try {
+                    // Run OT protocol scan to get detailed device info
+                    const otScanResponse = await fetch('/api/scanner/scan-ot-protocols', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({})  // Scan all devices in session
+                    });
+
+                    const otScanData = await otScanResponse.json();
+                    if (otScanData.success) {
+                        console.log('OT protocol scan started:', otScanData);
+                        // Wait a bit for OT scan to complete (it runs in background)
+                        await new Promise(r => setTimeout(r, 3000));
+                    } else {
+                        console.warn('OT protocol scan failed:', otScanData.error);
+                    }
+                } catch (error) {
+                    console.error('Error running OT protocol scan:', error);
+                }
+                updateProgress(1, 'complete');
+
+                updateProgress(2, 'running');  // Network assessment
+                await new Promise(r => setTimeout(r, 300));
+                updateProgress(2, 'complete');
+
+                updateProgress(3, 'running');  // Device assessment
+                await new Promise(r => setTimeout(r, 300));
+                updateProgress(3, 'complete');
+
+                updateProgress(4, 'running');  // Vuln scan
+                const response = await fetch('/api/risk/assess', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        include_vulnerability_scan: true
+                    })
+                });
+
+                const data = await response.json();
+                updateProgress(4, 'complete');
+
+                updateProgress(5, 'running');  // Vuln assessment
+                await new Promise(r => setTimeout(r, 300));
+                updateProgress(5, 'complete');
+
+                updateProgress(6, 'running');  // Compliance
+                await new Promise(r => setTimeout(r, 300));
+                updateProgress(6, 'complete');
+
+                updateProgress(7, 'running');  // Report generation
+                if (data.success) {
+                    currentReportId = data.report_id;
+                    await loadReport(currentReportId);
+                    updateProgress(7, 'complete');
+
+                    // Wait a moment then show results
+                    setTimeout(() => {
+                        document.getElementById('progressState').style.display = 'none';
+                        document.getElementById('dashboardContent').style.display = 'block';
+                    }, 1000);
+                } else {
+                    updateProgress(7, 'error');
+                    alert('Error: ' + (data.error || 'Unknown error'));
+                    document.getElementById('progressState').style.display = 'none';
+                    document.getElementById('noDataState').style.display = 'block';
+                }
+            } catch (error) {
+                console.error('Error running assessment:', error);
+                alert('Failed to run assessment: ' + error.message);
+                document.getElementById('progressState').style.display = 'none';
+                document.getElementById('noDataState').style.display = 'block';
+            }
+        }
+
+        async function loadLatestReport() {
+            try {
+                const response = await fetch('/api/risk/reports');
+                const data = await response.json();
+
+                if (data.success && data.reports && data.reports.length > 0) {
+                    currentReportId = data.reports[0].report_id;
+                    await loadReport(currentReportId);
+                } else {
+                    document.getElementById('noDataState').style.display = 'block';
+                }
+            } catch (error) {
+                console.error('Error loading reports:', error);
+                document.getElementById('noDataState').style.display = 'block';
+            }
+        }
+
+        async function loadReport(reportId) {
+            try {
+                const response = await fetch(`/api/risk/report/${reportId}`);
+                const data = await response.json();
+
+                if (data.success) {
+                    displayReport(data.report);
+                    document.getElementById('loadingState').style.display = 'none';
+                    document.getElementById('noDataState').style.display = 'none';
+                    document.getElementById('dashboardContent').style.display = 'block';
+                } else {
+                    alert('Error loading report: ' + data.error);
+                }
+            } catch (error) {
+                console.error('Error loading report:', error);
+                alert('Failed to load report: ' + error.message);
+            }
+        }
+
+        function displayReport(report) {
+            if (!report) {
+                console.error('No report data');
+                return;
+            }
+
+            // Overall Risk - with null checks
+            const overview = report.overview || {};
+            const overallScore = overview.overall_risk_score || 0;
+            const riskLevel = overview.overall_risk_level || 'INFO';
+
+            const scoreElem = document.getElementById('overallRiskScore');
+            const badgeElem = document.getElementById('overallRiskBadge');
+            const circleElem = document.getElementById('overallRiskCircle');
+
+            if (scoreElem) scoreElem.textContent = overallScore.toFixed(0);
+            if (badgeElem) {
+                badgeElem.textContent = riskLevel;
+                badgeElem.className = `risk-badge-${riskLevel.toLowerCase()}`;
+            }
+            if (circleElem) {
+                circleElem.style.backgroundColor = getRiskColor(riskLevel);
+            }
+
+            // Summary - with null checks
+            const totalDevicesElem = document.getElementById('totalDevices');
+            const criticalFindingsElem = document.getElementById('criticalFindings');
+            const criticalDevicesElem = document.getElementById('criticalDevices');
+            const assessmentDateElem = document.getElementById('assessmentDate');
+
+            if (totalDevicesElem) totalDevicesElem.textContent = overview.total_devices || 0;
+            if (criticalFindingsElem) criticalFindingsElem.textContent = overview.critical_count || 0;
+            if (criticalDevicesElem) criticalDevicesElem.textContent = (report.critical_devices || []).length;
+            if (assessmentDateElem) {
+                assessmentDateElem.textContent = overview.scan_timestamp ?
+                    new Date(overview.scan_timestamp).toLocaleString() : 'N/A';
+            }
+
+            // Network Scan Summary
+            const devicesFoundElem = document.getElementById('devicesFound');
+            if (devicesFoundElem) devicesFoundElem.textContent = overview.total_devices || 0;
+
+            // Display OT Protocol Scan Results
+            displayOTProtocolResults(report);
+
+            // Category Scores - with null checks
+            const assessments = report.assessments || {};
+            if (assessments.network) displayCategoryScore('network', assessments.network);
+            if (assessments.device) displayCategoryScore('device', assessments.device);
+            if (assessments.vulnerability) displayCategoryScore('vulnerability', assessments.vulnerability, true);
+            if (assessments.compliance) displayCategoryScore('compliance', assessments.compliance);
+
+            // IEC 62443 Level
+            if (report.compliance && report.compliance.length > 0) {
+                const iec = report.compliance.find(c => c.framework && c.framework.includes('62443'));
+                if (iec && iec.security_level) {
+                    const iecElem = document.getElementById('iecLevel');
+                    if (iecElem) iecElem.textContent = iec.security_level;
+                }
+            }
+
+            // Detailed Assessment Results
+            displayDetailedResults(report);
+
+            // Charts
+            displayCharts(report);
+
+            // Critical Devices Table
+            displayCriticalDevices(report.critical_devices || []);
+
+            // Action Plan
+            displayActionPlan(report.action_plan || {});
+        }
+
+        function displayOTProtocolResults(report) {
+            const tbody = document.getElementById('otProtocolResultsBody');
+            if (!tbody) return;
+
+            tbody.innerHTML = '';
+
+            // Get device profiles with OT protocol info
+            const devices = report.device_profiles || [];
+            const protocolsFound = new Set();
+            let hasOTData = false;
+
+            devices.forEach(device => {
+                if (!device.metadata) return;
+
+                // Check for OT protocol data in metadata
+                const protocols = device.protocols || [];
+                const metadata = device.metadata;
+
+                protocols.forEach(protocol => {
+                    const protocolUpper = protocol.toUpperCase();
+
+                    // Parse protocol-specific data
+                    let vendor = device.vendor || 'Unknown';
+                    let model = device.model || '-';
+                    let serialNumber = '-';
+                    let firmware = device.firmware_version || '-';
+                    let additionalInfo = '';
+                    let port = '-';
+
+                    if (protocolUpper === 'S7' || protocol === 'Siemens S7') {
+                        port = '102';
+                        if (metadata.s7_info || metadata.module_type) {
+                            const s7Info = metadata.s7_info || metadata;
+                            vendor = 'Siemens';
+                            model = s7Info.module_type || s7Info.module_name || model;
+                            serialNumber = s7Info.serial_number || serialNumber;
+                            firmware = s7Info.firmware || firmware;
+                            additionalInfo = `CPU State: ${s7Info.cpu_state || 'Unknown'}`;
+                            if (s7Info.rack !== undefined) additionalInfo += `, Rack: ${s7Info.rack}, Slot: ${s7Info.slot}`;
+                            hasOTData = true;
+                        }
+                    } else if (protocolUpper === 'MODBUS' || protocolUpper === 'MODBUS TCP') {
+                        port = '502';
+                        if (metadata.modbus_info) {
+                            const mbInfo = metadata.modbus_info;
+                            vendor = mbInfo.VendorName || vendor;
+                            model = mbInfo.ProductName || mbInfo.ModelName || model;
+                            serialNumber = mbInfo.ProductCode || serialNumber;
+                            firmware = mbInfo.MajorMinorRevision || firmware;
+                            if (mbInfo.VendorUrl) additionalInfo = `URL: ${mbInfo.VendorUrl}`;
+                            hasOTData = true;
+                        }
+                    } else if (protocolUpper === 'ETHERNET/IP' || protocolUpper === 'ETHERNETIP') {
+                        port = '44818';
+                        if (metadata.enip_info || metadata.ethernet_ip_info) {
+                            const enipInfo = metadata.enip_info || metadata.ethernet_ip_info;
+                            vendor = `VID: ${enipInfo.VendorID || 'Unknown'}`;
+                            model = enipInfo.ProductName || model;
+                            serialNumber = enipInfo.SerialNumber || serialNumber;
+                            firmware = enipInfo.Revision || firmware;
+                            additionalInfo = `Type: ${enipInfo.DeviceType || 'Unknown'}, Product Code: ${enipInfo.ProductCode || '-'}`;
+                            hasOTData = true;
+                        }
+                    } else if (protocolUpper === 'BACNET') {
+                        port = '47808';
+                        if (metadata.bacnet_info) {
+                            const bacInfo = metadata.bacnet_info;
+                            model = `Type: ${bacInfo.ObjectType || 'Unknown'}`;
+                            serialNumber = bacInfo.DeviceID || serialNumber;
+                            additionalInfo = `Instance: ${bacInfo.ObjectInstance || '-'}`;
+                            hasOTData = true;
+                        }
+                    } else if (protocolUpper === 'FINS') {
+                        port = '9600';
+                        vendor = 'Omron';
+                        model = metadata.fins_info?.DeviceType || 'PLC';
+                        hasOTData = true;
+                    } else if (protocolUpper === 'PROFINET DCP' || protocolUpper === 'PROFINET') {
+                        port = '0x8892 (DCP)';
+                        if (metadata.profinet_info) {
+                            const pnInfo = metadata.profinet_info;
+                            vendor = pnInfo.vendor || vendor;
+                            model = pnInfo.device_model || pnInfo.module_type || model;
+                            serialNumber = pnInfo.serial_number || serialNumber;
+                            firmware = pnInfo.firmware || firmware;
+                            additionalInfo = `Role: ${pnInfo.role || 'Unknown'}, Station: ${pnInfo.type_station || '-'}`;
+                            if (pnInfo.cpu_state) {
+                                additionalInfo += `, CPU: ${pnInfo.cpu_state}`;
+                            }
+                            hasOTData = true;
+                        }
+                    }
+
+                    if (hasOTData) {
+                        protocolsFound.add(protocol);
+                        const row = tbody.insertRow();
+                        row.innerHTML = `
+                            <td>${device.ip || '-'}</td>
+                            <td><span class="badge bg-primary">${protocol}</span></td>
+                            <td>${port}</td>
+                            <td>${vendor}</td>
+                            <td>${model}</td>
+                            <td>${serialNumber}</td>
+                            <td>${firmware}</td>
+                            <td><small>${additionalInfo}</small></td>
+                        `;
+                    }
+                });
+            });
+
+            if (!hasOTData) {
+                tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">No OT protocol scan data available. Run OT protocol scan first.</td></tr>';
+            }
+
+            // Update protocols found
+            const protocolsFoundElem = document.getElementById('protocolsFound');
+            if (protocolsFoundElem) {
+                protocolsFoundElem.textContent = protocolsFound.size > 0 ?
+                    Array.from(protocolsFound).join(', ') : 'None';
+            }
+        }
+
+        function displayDetailedResults(report) {
+            const assessments = report.assessments || {};
+
+            // Network Assessment Details
+            const networkBody = document.getElementById('networkDetailsBody');
+            if (networkBody && assessments.network) {
+                const net = assessments.network;
+                networkBody.innerHTML = `
+                    <h6><i class="fas fa-check-circle text-success"></i> What Was Assessed</h6>
+                    <ul>
+                        <li><strong>Network Segmentation:</strong> ${net.findings_count > 0 ? 'Checked - Issues found' : 'Checked - OK'}</li>
+                        <li><strong>Protocol Security:</strong> Analyzed OT protocols (S7, Modbus, Profinet, etc.)</li>
+                        <li><strong>Network Topology:</strong> Evaluated network structure and zones</li>
+                        <li><strong>Firewall Rules:</strong> ${net.findings_count > 5 ? 'Missing or inadequate' : 'Evaluated'}</li>
+                    </ul>
+                    <h6><i class="fas fa-exclamation-triangle text-warning"></i> Findings</h6>
+                    <div class="alert alert-${net.risk_level === 'CRITICAL' || net.risk_level === 'HIGH' ? 'danger' : net.risk_level === 'MEDIUM' ? 'warning' : 'info'}">
+                        <strong>Risk Level:</strong> ${net.risk_level}<br>
+                        <strong>Score:</strong> ${net.score.toFixed(1)}/100<br>
+                        <strong>Issues Found:</strong> ${net.findings_count}<br>
+                        <strong>Reason:</strong> ${net.score < 50 ? 'Network lacks proper segmentation, uses insecure protocols, or is exposed to external networks' :
+                                                    net.score < 70 ? 'Some network security controls in place but improvements needed' :
+                                                    'Good network security controls detected'}
+                    </div>
+                `;
+            }
+
+            // Device Assessment Details
+            const deviceBody = document.getElementById('deviceDetailsBody');
+            if (deviceBody && assessments.device) {
+                const dev = assessments.device;
+                const totalDevices = report.overview?.total_devices || 0;
+                deviceBody.innerHTML = `
+                    <h6><i class="fas fa-check-circle text-success"></i> What Was Assessed</h6>
+                    <ul>
+                        <li><strong>Total Devices Analyzed:</strong> ${totalDevices}</li>
+                        <li><strong>Authentication:</strong> Checked for password protection and authentication mechanisms</li>
+                        <li><strong>Firmware Version:</strong> Analyzed firmware age and update status</li>
+                        <li><strong>Default Credentials:</strong> Checked for default/weak credentials</li>
+                        <li><strong>Protection Level:</strong> Evaluated S7 protection levels (Level 0-3)</li>
+                    </ul>
+                    <h6><i class="fas fa-times-circle text-danger"></i> What Could Not Be Assessed</h6>
+                    <ul>
+                        <li><strong>Internal Configuration:</strong> Requires authenticated access</li>
+                        <li><strong>User Permissions:</strong> Need administrator access</li>
+                        <li><strong>Encrypted Communications:</strong> Cannot inspect encrypted traffic</li>
+                    </ul>
+                    <h6><i class="fas fa-exclamation-triangle text-warning"></i> Findings</h6>
+                    <div class="alert alert-${dev.risk_level === 'CRITICAL' || dev.risk_level === 'HIGH' ? 'danger' : dev.risk_level === 'MEDIUM' ? 'warning' : 'info'}">
+                        <strong>Risk Level:</strong> ${dev.risk_level}<br>
+                        <strong>Score:</strong> ${dev.score.toFixed(1)}/100<br>
+                        <strong>Issues Found:</strong> ${dev.findings_count}<br>
+                        <strong>Reason:</strong> ${dev.score < 50 ? 'Multiple devices lack authentication, have outdated firmware, or use default settings' :
+                                                    dev.score < 70 ? 'Some devices need security updates or configuration improvements' :
+                                                    'Most devices have adequate security configurations'}
+                    </div>
+                `;
+            }
+
+            // Vulnerability Assessment Details
+            const vulnBody = document.getElementById('vulnDetailsBody');
+            if (vulnBody && assessments.vulnerability) {
+                const vuln = assessments.vulnerability;
+                const criticalCount = report.overview?.critical_count || 0;
+                const highCount = report.overview?.high_count || 0;
+                vulnBody.innerHTML = `
+                    <h6><i class="fas fa-check-circle text-success"></i> What Was Assessed</h6>
+                    <ul>
+                        <li><strong>CVE Database:</strong> Checked against known Common Vulnerabilities and Exposures</li>
+                        <li><strong>Vendor-Specific Vulnerabilities:</strong> Analyzed vendor and model specific issues</li>
+                        <li><strong>Firmware Vulnerabilities:</strong> Checked firmware versions against vulnerability databases</li>
+                        <li><strong>Protocol Vulnerabilities:</strong> Evaluated protocol-specific security issues</li>
+                    </ul>
+                    <h6><i class="fas fa-exclamation-triangle text-warning"></i> Findings</h6>
+                    <div class="alert alert-${vuln.risk_level === 'CRITICAL' || vuln.risk_level === 'HIGH' ? 'danger' : vuln.risk_level === 'MEDIUM' ? 'warning' : 'info'}">
+                        <strong>Risk Level:</strong> ${vuln.risk_level}<br>
+                        <strong>Score:</strong> ${vuln.score.toFixed(1)}/100<br>
+                        <strong>Total CVEs Found:</strong> ${vuln.findings_count}<br>
+                        <strong>Critical CVEs:</strong> ${criticalCount}<br>
+                        <strong>High CVEs:</strong> ${highCount}<br>
+                        <strong>Reason:</strong> ${criticalCount > 0 ? 'CRITICAL vulnerabilities detected requiring immediate patching' :
+                                                    vuln.score < 50 ? 'Multiple high-severity vulnerabilities found' :
+                                                    vuln.score < 70 ? 'Some vulnerabilities detected, patches recommended' :
+                                                    'No critical vulnerabilities detected'}
+                    </div>
+                `;
+            }
+
+            // Compliance Assessment Details
+            const compBody = document.getElementById('complianceDetailsBody');
+            if (compBody && assessments.compliance) {
+                const comp = assessments.compliance;
+                const iecCompliance = report.compliance?.[0] || {};
+                compBody.innerHTML = `
+                    <h6><i class="fas fa-check-circle text-success"></i> Standards Assessed</h6>
+                    <ul>
+                        <li><strong>IEC 62443-3-3:</strong> Industrial automation security requirements</li>
+                        <li><strong>NIST CSF:</strong> Cybersecurity Framework alignment</li>
+                    </ul>
+                    <h6><i class="fas fa-clipboard-list text-primary"></i> IEC 62443 Requirements Checked</h6>
+                    <ul>
+                        <li>FR1 - Identification and Authentication Control</li>
+                        <li>FR2 - Use Control</li>
+                        <li>FR3 - System Integrity</li>
+                        <li>FR4 - Data Confidentiality</li>
+                        <li>FR5 - Restricted Data Flow</li>
+                        <li>FR6 - Timely Response to Events</li>
+                        <li>FR7 - Resource Availability</li>
+                    </ul>
+                    <h6><i class="fas fa-exclamation-triangle text-warning"></i> Compliance Results</h6>
+                    <div class="alert alert-warning">
+                        <strong>Overall Compliance:</strong> ${comp.score.toFixed(1)}%<br>
+                        <strong>Security Level:</strong> ${iecCompliance.security_level || 'SL-0 (No Security)'}<br>
+                        <strong>Requirements Met:</strong> ${iecCompliance.requirements_met || 0} / ${iecCompliance.requirements_total || 28}<br>
+                        <strong>Reason:</strong> ${comp.score < 40 ? 'System does not meet basic IEC 62443 requirements. Most foundational requirements (FR1-FR7) are not satisfied.' :
+                                                    comp.score < 60 ? 'Partial compliance. Some requirements met but significant gaps remain.' :
+                                                    comp.score < 80 ? 'Good compliance level. Most requirements met with minor improvements needed.' :
+                                                    'High compliance with IEC 62443 standards.'}
+                    </div>
+                `;
+            }
+        }
+
+        function displayCategoryScore(category, data, isVuln = false) {
+            if (!data) return;
+
+            const score = data.score || 0;
+            const risk = data.risk_level || 'INFO';
+            const findings = data.findings_count || 0;
+
+            const progressBar = document.getElementById(`${category}Score`);
+            if (progressBar) {
+                progressBar.style.width = score + '%';
+                progressBar.className = `progress-bar progress-bar-striped progress-bar-animated ${getProgressBarClass(risk)}`;
+            }
+
+            const scoreText = document.getElementById(`${category}ScoreText`);
+            if (scoreText) scoreText.textContent = score.toFixed(1);
+
+            const findingsElem = document.getElementById(`${category}Findings`);
+            if (findingsElem) findingsElem.textContent = findings;
+
+            const badge = document.getElementById(`${category}RiskBadge`);
+            if (badge) {
+                badge.textContent = risk;
+                badge.className = `risk-badge-${risk.toLowerCase()}`;
+            }
+        }
+
+        function displayCharts(report) {
+            if (!report) return;
+
+            const findings = report.findings || { critical: [], high: [], all: [] };
+            const assessments = report.assessments || {};
+
+            // Findings by Severity Chart
+            const findingsData = {
+                labels: ['Critical', 'High', 'Medium', 'Low'],
+                datasets: [{
+                    data: [
+                        (findings.critical || []).length,
+                        (findings.high || []).length,
+                        (findings.all || []).filter(f => f.severity === 'MEDIUM').length,
+                        (findings.all || []).filter(f => f.severity === 'LOW').length
+                    ],
+                    backgroundColor: ['#dc3545', '#fd7e14', '#ffc107', '#28a745']
+                }]
+            };
+
+            const ctx1 = document.getElementById('findingsChart');
+            if (ctx1) {
+                if (findingsChart) findingsChart.destroy();
+                findingsChart = new Chart(ctx1, {
+                    type: 'doughnut',
+                    data: findingsData,
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            legend: {
+                                position: 'bottom'
+                            }
+                        }
+                    }
+                });
+            }
+
+            // Category Risk Chart
+            const categoryData = {
+                labels: ['Network', 'Device', 'Vulnerability', 'Compliance'],
+                datasets: [{
+                    label: 'Risk Score',
+                    data: [
+                        100 - (assessments.network?.score || 0),
+                        100 - (assessments.device?.score || 0),
+                        100 - (assessments.vulnerability?.score || 0),
+                        100 - (assessments.compliance?.score || 0)
+                    ],
+                    backgroundColor: ['#667eea', '#764ba2', '#f093fb', '#4facfe']
+                }]
+            };
+
+            const ctx2 = document.getElementById('categoryChart');
+            if (ctx2) {
+                if (categoryChart) categoryChart.destroy();
+                categoryChart = new Chart(ctx2, {
+                    type: 'bar',
+                    data: categoryData,
+                    options: {
+                        responsive: true,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                max: 100
+                            }
+                        },
+                        plugins: {
+                            legend: {
+                                display: false
+                            }
+                        }
+                    }
+                });
+            }
+        }
+
+        function displayCriticalDevices(devices) {
+            const tbody = document.getElementById('criticalDevicesBody');
+            if (!tbody) return;
+
+            tbody.innerHTML = '';
+
+            if (!devices || devices.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No high-risk devices found</td></tr>';
+                return;
+            }
+
+            devices.forEach(device => {
+                const row = tbody.insertRow();
+                row.innerHTML = `
+                    <td>${device.ip || 'N/A'}</td>
+                    <td>${device.device_type || 'Unknown'}</td>
+                    <td>${device.vendor || 'Unknown'} ${device.model || ''}</td>
+                    <td><strong>${device.risk_score ? device.risk_score.toFixed(1) : '0'}</strong></td>
+                    <td><span class="risk-badge-${(device.risk_level || 'info').toLowerCase()}">${device.risk_level || 'INFO'}</span></td>
+                    <td>${device.cve_count || 0}</td>
+                    <td>${device.protection_level !== null && device.protection_level !== undefined ? 'Level ' + device.protection_level : 'N/A'}</td>
+                `;
+            });
+        }
+
+        function displayActionPlan(actionPlan) {
+            if (!actionPlan) {
+                actionPlan = { immediate: [], short_term: [], medium_term: [] };
+            }
+
+            displayActions('immediateActions', actionPlan.immediate || [], 'action-immediate');
+            displayActions('shortTermActions', actionPlan.short_term || [], 'action-short');
+            displayActions('mediumTermActions', actionPlan.medium_term || [], 'action-medium');
+        }
+
+        function displayActions(elementId, actions, className) {
+            const container = document.getElementById(elementId);
+            if (!container) return;
+
+            container.innerHTML = '';
+
+            if (!actions || actions.length === 0) {
+                container.innerHTML = '<p class="text-muted">No actions in this category</p>';
+                return;
+            }
+
+            actions.slice(0, 5).forEach((action, index) => {
+                const div = document.createElement('div');
+                div.className = `action-item ${className}`;
+                div.innerHTML = `
+                    <strong>${index + 1}. ${action.title || 'Untitled Action'}</strong>
+                    <p class="mb-1">${action.description || 'No description available'}</p>
+                    ${action.affected_devices && action.affected_devices.length > 0 ?
+                        `<small class="text-muted">Affected: ${action.affected_devices.join(', ')}</small>` : ''}
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        async function exportReport(format) {
+            if (!currentReportId) {
+                alert('No report to export');
+                return;
+            }
+
+            try {
+                window.location.href = `/api/risk/export/${currentReportId}/${format}`;
+            } catch (error) {
+                console.error('Error exporting report:', error);
+                alert('Failed to export report: ' + error.message);
+            }
+        }
+
+        function getRiskColor(riskLevel) {
+            const colors = {
+                'CRITICAL': '#dc3545',
+                'HIGH': '#fd7e14',
+                'MEDIUM': '#ffc107',
+                'LOW': '#28a745',
+                'INFO': '#6c757d'
+            };
+            return colors[riskLevel] || '#6c757d';
+        }
+
+        function getProgressBarClass(riskLevel) {
+            const classes = {
+                'CRITICAL': 'bg-danger',
+                'HIGH': 'bg-warning',
+                'MEDIUM': 'bg-info',
+                'LOW': 'bg-success',
+                'INFO': 'bg-secondary'
+            };
+            return classes[riskLevel] || 'bg-secondary';
+        }
+    </script>
+</body>
+</html>

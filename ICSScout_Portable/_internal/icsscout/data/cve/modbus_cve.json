@@ -1,0 +1,53 @@
+{
+  "CVE-2020-12529": {
+    "vendor": "Multiple",
+    "products": ["Modbus TCP Devices"],
+    "firmware_versions": ["all"],
+    "severity": "HIGH",
+    "cvss": 7.5,
+    "title": "Modbus Protocol Lack of Authentication",
+    "description": "Modbus TCP protocol inherently lacks authentication, allowing any network client to read/write registers",
+    "published": "2020-05-01",
+    "references": [
+      "https://www.cisa.gov/uscert/ics/advisories/icsa-20-121-01"
+    ],
+    "exploit_available": true,
+    "patch_available": false,
+    "workaround": "Implement network segmentation and firewall rules",
+    "recommendation": "Use Modbus security extensions or implement VPN/firewall protection"
+  },
+  "CVE-2019-6573": {
+    "vendor": "Schneider Electric",
+    "products": ["Modicon M580", "Modicon M340"],
+    "firmware_versions": ["< SV3.20"],
+    "severity": "CRITICAL",
+    "cvss": 10.0,
+    "title": "Authentication Bypass in Modicon PLCs",
+    "description": "Authentication can be bypassed allowing unauthorized firmware download and configuration changes",
+    "published": "2019-02-12",
+    "references": [
+      "https://www.se.com/ww/en/download/document/SEVD-2019-036-01"
+    ],
+    "exploit_available": true,
+    "patch_available": true,
+    "patch_version": "SV3.20",
+    "recommendation": "Update to SV3.20 or later immediately"
+  },
+  "CVE-2018-7789": {
+    "vendor": "Multiple",
+    "products": ["Modbus Devices"],
+    "firmware_versions": ["all"],
+    "severity": "MEDIUM",
+    "cvss": 6.5,
+    "title": "Modbus Function Code Flooding DoS",
+    "description": "Malformed or excessive Modbus function code requests can cause device instability or crash",
+    "published": "2018-03-08",
+    "references": [
+      "https://www.cisa.gov/uscert/ics/advisories/icsa-18-067-01"
+    ],
+    "exploit_available": true,
+    "patch_available": false,
+    "workaround": "Implement rate limiting at network level",
+    "recommendation": "Deploy IDS/IPS with Modbus protocol awareness"
+  }
+}

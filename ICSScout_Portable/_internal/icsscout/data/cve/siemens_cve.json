@@ -1,0 +1,87 @@
+{
+  "CVE-2022-38465": {
+    "vendor": "Siemens",
+    "products": ["S7-1200", "S7-1500"],
+    "firmware_versions": ["< V4.5.0"],
+    "severity": "CRITICAL",
+    "cvss": 9.8,
+    "title": "Authentication Bypass in Web Server",
+    "description": "The integrated web server of affected devices allow unauthenticated remote attackers to bypass authentication and gain full administrative access",
+    "published": "2022-09-13",
+    "references": [
+      "https://cert-portal.siemens.com/productcert/pdf/ssa-568427.pdf"
+    ],
+    "exploit_available": true,
+    "patch_available": true,
+    "patch_version": "V4.5.0",
+    "recommendation": "Update firmware to V4.5.0 or later immediately"
+  },
+  "CVE-2021-44691": {
+    "vendor": "Siemens",
+    "products": ["S7-1200", "S7-1500"],
+    "firmware_versions": ["< V4.4.0"],
+    "severity": "HIGH",
+    "cvss": 7.5,
+    "title": "Denial of Service via Malformed Packets",
+    "description": "Affected devices do not properly validate incoming network packets, allowing remote attackers to cause denial of service",
+    "published": "2021-12-14",
+    "references": [
+      "https://cert-portal.siemens.com/productcert/pdf/ssa-044112.pdf"
+    ],
+    "exploit_available": false,
+    "patch_available": true,
+    "patch_version": "V4.4.0",
+    "recommendation": "Update to V4.4.0 or later, implement network filtering"
+  },
+  "CVE-2020-15782": {
+    "vendor": "Siemens",
+    "products": ["S7-300", "S7-400"],
+    "firmware_versions": ["< V3.3.17"],
+    "severity": "CRITICAL",
+    "cvss": 9.1,
+    "title": "Memory Corruption Vulnerability",
+    "description": "A memory corruption vulnerability allows remote attackers to execute arbitrary code or cause system crash",
+    "published": "2020-10-13",
+    "references": [
+      "https://cert-portal.siemens.com/productcert/pdf/ssa-689071.pdf"
+    ],
+    "exploit_available": true,
+    "patch_available": true,
+    "patch_version": "V3.3.17",
+    "recommendation": "Urgently update firmware to V3.3.17 or later"
+  },
+  "CVE-2019-13945": {
+    "vendor": "Siemens",
+    "products": ["S7-1200", "S7-1500"],
+    "firmware_versions": ["< V4.2.0"],
+    "severity": "HIGH",
+    "cvss": 8.1,
+    "title": "Unencrypted Communication",
+    "description": "Devices use unencrypted S7 protocol allowing traffic interception and manipulation",
+    "published": "2019-08-13",
+    "references": [
+      "https://cert-portal.siemens.com/productcert/pdf/ssa-232418.pdf"
+    ],
+    "exploit_available": false,
+    "patch_available": true,
+    "patch_version": "V4.2.0",
+    "recommendation": "Update firmware and enable S7-PLUS encrypted communication where possible"
+  },
+  "CVE-2018-4832": {
+    "vendor": "Siemens",
+    "products": ["S7-300", "S7-400", "S7-1200", "S7-1500"],
+    "firmware_versions": ["all"],
+    "severity": "MEDIUM",
+    "cvss": 5.3,
+    "title": "Information Disclosure via SNMP",
+    "description": "SNMP service exposes device information including firmware version and configuration details",
+    "published": "2018-03-15",
+    "references": [
+      "https://cert-portal.siemens.com/productcert/pdf/ssa-686531.pdf"
+    ],
+    "exploit_available": false,
+    "patch_available": false,
+    "workaround": "Disable SNMP service if not required",
+    "recommendation": "Disable SNMP or restrict access to trusted management networks only"
+  }
+}

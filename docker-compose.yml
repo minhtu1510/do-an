@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  # CLI mode - interactive
+  s7pwn-cli:
+    build: .
+    image: s7pwn:latest
+    container_name: s7pwn-cli
+    network_mode: host
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./reports:/app/reports
+    command: python -m s7pwn.cli
+    privileged: true  # Required for network scanning
+
+  # Web GUI mode
+  s7pwn-web:
+    build: .
+    image: s7pwn:latest
+    container_name: s7pwn-web
+    network_mode: host
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./reports:/app/reports
+    environment:
+      - FLASK_ENV=production
+    command: python start_webgui.py --host 0.0.0.0 --port 5000 --no-browser
+    privileged: true  # Required for network scanning
+    restart: unless-stopped
