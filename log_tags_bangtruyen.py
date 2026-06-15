@@ -225,10 +225,12 @@ def poll_once(client: snap7.client.Client, poll_seq: int, metadata: dict) -> dic
         # Đọc CPU state
         try:
             mode = client.get_cpu_state()
-            mode_str = str(mode)
-            row['plc_mode'] = 1 if ("Run" in mode_str or mode_str == "8" or mode == 8) else 0
+            mode_str = str(mode).upper()
+            # S7 returns various formats: 'Run', 'S7CpuStatusRun', 8, 'RUN', etc.
+            is_stop = ("STOP" in mode_str or mode_str == "4" or mode == 4)
+            row['plc_mode'] = 0 if is_stop else 1
         except Exception:
-            row['plc_mode'] = 0  # Conservative fallback: unknown state is not RUN
+            row['plc_mode'] = 1  # Connected OK → assume RUN (STOP detection relies on explicit check)
 
         # ── I area (Physical Input) ───────────────────────────────────────────
         try:
