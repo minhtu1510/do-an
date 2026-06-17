@@ -381,31 +381,31 @@ run_controller() {
 
 run_hmi_credential_brute() {
     _run_attack "HMI_CREDENTIAL_BRUTE" "hmi_credential_brute" \
-        "--target-url 'http://${HMI_IP}:${HMI_PORT}'"
+        "--target-url http://${HMI_IP}:${HMI_PORT}"
 }
 
 run_hmi_alarm_suppress() {
     [[ "$ENABLE_OPC_ATTACKS" == "1" ]] || { echo "[skip] HMI_ALARM_SUPPRESS (--no-opc)"; return 0; }
     _run_attack "HMI_ALARM_SUPPRESS" "hmi_alarm_suppress" \
-        "--opc-url '$OPC_URL' --opc-username '$OPC_USERNAME' --opc-password '$OPC_PASSWORD'"
+        "--opc-url ${OPC_URL} --opc-username ${OPC_USERNAME} --opc-password ${OPC_PASSWORD}"
 }
 
 run_hmi_fake_display() {
     [[ "$ENABLE_OPC_ATTACKS" == "1" ]] || { echo "[skip] HMI_FAKE_DISPLAY (--no-opc)"; return 0; }
     _run_attack "HMI_FAKE_DISPLAY" "hmi_fake_display" \
-        "--opc-url '$OPC_URL' --opc-username '$OPC_USERNAME' --opc-password '$OPC_PASSWORD'"
+        "--opc-url ${OPC_URL} --opc-username ${OPC_USERNAME} --opc-password ${OPC_PASSWORD}"
     restore_plc
 }
 
 run_ews_rogue_engineer() {
     _run_attack "EWS_ROGUE_ENGINEER" "ews_rogue_engineer" \
-        "--target '$TARGET_IP' --rack '$RACK' --slot '$SLOT'"
+        "--target ${TARGET_IP} --rack ${RACK} --slot ${SLOT}"
     restore_plc
 }
 
 run_ews_firmware_tamper() {
     _run_attack "EWS_FIRMWARE_TAMPER" "ews_firmware_tamper" \
-        "--target '$TARGET_IP' --rack '$RACK' --slot '$SLOT'"
+        "--target ${TARGET_IP} --rack ${RACK} --slot ${SLOT}"
     restore_plc
 }
 
@@ -419,7 +419,7 @@ run_dns_spoof_ics() {
         return 0
     fi
     _run_attack "DNS_SPOOF_ICS" "dns_spoof_ics" \
-        "--iface '${CAPTURE_IFACE:-eth0}' --hmi-ip '${HMI_IP}' --attacker-ip '${ATTACKER_IP}'"
+        "--iface ${CAPTURE_IFACE:-eth0} --hmi-ip ${HMI_IP} --attacker-ip ${ATTACKER_IP}"
 }
 
 run_kill_chain() {
