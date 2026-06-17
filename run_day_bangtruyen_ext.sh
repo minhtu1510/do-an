@@ -48,6 +48,7 @@ ENABLE_OPC_ATTACKS="${ENABLE_OPC_ATTACKS:-1}"
 
 # ── Timing (dùng chung với run_day_bangtruyen.sh) ────────────────
 CAPTURE_FILTER="${CAPTURE_FILTER:-}"
+DAY7_DURATION_S="${DAY7_DURATION_S:-14400}"
 WARMUP_S="${WARMUP_S:-300}"
 BENIGN_GAP_S="${BENIGN_GAP_S:-300}"
 COOLDOWN_S="${COOLDOWN_S:-600}"
