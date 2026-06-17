@@ -306,6 +306,78 @@ _run_attack() {
     label "$scenario" "END" "$ep" "dur=${dur}s"
 }
 
+# ── Controller functions ─────────────────────────────────────────
+ENABLE_TAG_LOGGER="${ENABLE_TAG_LOGGER:-1}"
+TAG_LOG_INTERVAL="${TAG_LOG_INTERVAL:-0.5}"
+ENABLE_HMI="${ENABLE_HMI:-1}"
+HMI_POLL_MIN_S="${HMI_POLL_MIN_S:-1.0}"
+HMI_POLL_MAX_S="${HMI_POLL_MAX_S:-2.0}"
+
+start_tag_logger() {
+    [[ "$ENABLE_TAG_LOGGER" == "1" ]] || { echo "[ctrl] tag logger disabled"; return 0; }
+    "$PY_CMD" log_tags_bangtruyen.py \
+        --target "$TARGET_IP" \
+        --rack "$RACK" \
+        --slot "$SLOT" \
+        --interval "$TAG_LOG_INTERVAL" \
+        --output "$LOG_DIR/day${DAY}_${SESSION_ID}_${HOST_ID}_tags.csv" \
+        --session-id "$SESSION_ID" \
+        --host-id "$HOST_ID" \
+        --scenario-id "BENIGN_READER" \
+        --episode-id "${SESSION_ID}:controller:tag_logger" \
+        --day "$DAY" &
+    PIDS+=("$!")
+    echo "[ctrl] tag logger started -> $LOG_DIR/day${DAY}_${SESSION_ID}_${HOST_ID}_tags.csv"
+}
+
+start_hmi() {
+    [[ "$ENABLE_HMI" == "1" ]] || { echo "[ctrl] HMI disabled"; return 0; }
+    "$PY_CMD" -u - <<PYEOF &
+import random, time
+import snap7
+try:
+    from snap7.type import Areas
+except ImportError:
+    from snap7.types import Areas
+
+target = "$TARGET_IP"
+rack = int("$RACK")
+slot = int("$SLOT")
+poll_min = float("$HMI_POLL_MIN_S")
+poll_max = float("$HMI_POLL_MAX_S")
+
+c = snap7.client.Client()
+print("[HMI] observe-only polling started", flush=True)
+while True:
+    try:
+        if not c.get_connected():
+            c.connect(target, rack, slot)
+            print("[HMI] connected", flush=True)
+        c.read_area(Areas.MK, 0, 0, 80)
+        try: c.read_area(Areas.PA, 0, 0, 1)
+        except: pass
+        try: c.read_area(Areas.PE, 0, 0, 1)
+        except: pass
+        time.sleep(random.uniform(poll_min, poll_max))
+    except Exception as exc:
+        print(f"[HMI][WARN] {exc}", flush=True)
+        try: c.disconnect()
+        except: pass
+        time.sleep(2.0)
+PYEOF
+    PIDS+=("$!")
+    echo "[ctrl] HMI started"
+}
+
+run_controller() {
+    start_capture "controller"
+    start_tag_logger
+    start_hmi
+    label "BENIGN_NORMAL" "START" "day7_controller_runtime" ""
+    wait_s "$DAY7_DURATION_S" "controller_runtime"
+    label "BENIGN_NORMAL" "END" "day7_controller_runtime" ""
+}
+
 run_hmi_credential_brute() {
     _run_attack "HMI_CREDENTIAL_BRUTE" "hmi_credential_brute" \
         "--target-url 'http://${HMI_IP}:${HMI_PORT}'"
@@ -375,7 +447,7 @@ run_kill_chain() {
 # ── Main ─────────────────────────────────────────────────────────
 if [[ "$PREFLIGHT_ENABLED" == "1" ]]; then
     if ! preflight_plc; then
-        echo "[ERROR] Preflight failed. Check PLC, Snap7, PUT/GET." >&2
+        echo "[ERROR] Preflight failed." >&2
         exit 2
     fi
 fi
@@ -384,6 +456,19 @@ if [[ "${PREFLIGHT_ONLY:-0}" == "1" ]]; then
     echo "[preflight] done"; exit 0
 fi
 
+# Dispatch: controller vs attacker
+case "${ROLE:-attacker}" in
+    controller)
+        run_controller
+        echo "================================================================"
+        echo "  DAY 7 CONTROLLER COMPLETE"
+        echo "  Tags: $LOG_DIR/day${DAY}_${SESSION_ID}_${HOST_ID}_tags.csv"
+        echo "================================================================"
+        exit 0
+        ;;
+esac
+
+# ── Attacker schedule ───────────────────────────────────────────
 start_capture "day7_ext_attacks"
 
 echo ""
