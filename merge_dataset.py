@@ -366,9 +366,9 @@ def assign_network_labels(
         system_info = label_for_window(w_start, window_ms, intervals, session_id)
         source = str(row.get("capture_source", row.get("capture_role", ""))).lower()
         role = str(row.get("capture_role", "")).lower()
-        is_attacker_capture = source == "attacker" or role == "attacker"
+        is_system_capture = source in {"attacker", "mirror"} or role in {"attacker", "mirror"}
 
-        if label_all_traffic_by_system or is_attacker_capture:
+        if label_all_traffic_by_system or is_system_capture:
             network_info = system_info
         else:
             network_info = label_for_time(-1, [], session_id)
@@ -557,6 +557,7 @@ def main() -> None:
     )
     parser.add_argument("--attacker-features", default=None, help="CSV from extract_s7_features.py for attacker capture")
     parser.add_argument("--controller-features", default=None, help="CSV from extract_s7_features.py for controller capture")
+    parser.add_argument("--mirror-features", default=None, help="CSV from extract_s7_features.py for SPAN/mirror-port capture")
     parser.add_argument("--plc-tags", default=None, help="CSV from log_tags*.py")
     parser.add_argument("--timeline-files", nargs="+", default=[], help="Timeline CSV(s), START/END or start/end interval format")
     parser.add_argument("--output", required=True, help="Network-only dataset output CSV")
@@ -569,6 +570,7 @@ def main() -> None:
     parser.add_argument("--session-id", default=None, help="Session/run metadata for grouped splitting")
     parser.add_argument("--attacker-host-id", default="attacker_host", help="Attacker capture host metadata")
     parser.add_argument("--controller-host-id", default="controller_host", help="Controller capture host metadata")
+    parser.add_argument("--mirror-host-id", default="mirror_capture", help="SPAN/mirror capture host metadata")
     parser.add_argument("--process-host-id", default="process_logger", help="PLC tag logger host metadata")
     parser.add_argument("--plc-ip", default=None, help="If set, keep only rows with to/from PLC packet counts")
     parser.add_argument("--timeline-bound-filter", action="store_true", help="Trim feature rows to timeline min/max bounds; off by default to preserve benign warmup/cooldown")
@@ -593,6 +595,11 @@ def main() -> None:
         frames.append(normalize_feature_frame(args.controller_features, "controller", session_id, args.controller_host_id))
     elif args.controller_features:
         print(f"[WARN] Controller features not found: {args.controller_features}")
+
+    if args.mirror_features and os.path.exists(args.mirror_features):
+        frames.append(normalize_feature_frame(args.mirror_features, "mirror", session_id, args.mirror_host_id))
+    elif args.mirror_features:
+        print(f"[WARN] Mirror features not found: {args.mirror_features}")
 
     network_df = pd.DataFrame()
     if frames:
