@@ -87,6 +87,23 @@ HMI_ENABLE_LEGIT_WRITES="${HMI_ENABLE_LEGIT_WRITES:-0}"
 HMI_LEGIT_WRITE_PROB="${HMI_LEGIT_WRITE_PROB:-0.02}"
 HMI_POLL_MIN_S="${HMI_POLL_MIN_S:-1.0}"
 HMI_POLL_MAX_S="${HMI_POLL_MAX_S:-2.0}"
+CONTROLLER_PROFILE="${CONTROLLER_PROFILE:-standard}"
+CTRL_NORMAL_HMI_S="${CTRL_NORMAL_HMI_S:-5400}"
+CTRL_SPARSE_HMI_S="${CTRL_SPARSE_HMI_S:-3600}"
+CTRL_TIA_ONLY_S="${CTRL_TIA_ONLY_S:-3600}"
+CTRL_IDLE_S="${CTRL_IDLE_S:-1800}"
+CTRL_TIA_ATTACK_S="${CTRL_TIA_ATTACK_S:-18000}"
+CTRL_TIA_ATTACK_TAG_LOGGER="${CTRL_TIA_ATTACK_TAG_LOGGER:-0}"
+CTRL_TIA_ATTACK_TAG_INTERVAL="${CTRL_TIA_ATTACK_TAG_INTERVAL:-2.0}"
+CTRL_ATTACK_MIXED_NORMAL_HMI_S="${CTRL_ATTACK_MIXED_NORMAL_HMI_S:-3600}"
+CTRL_ATTACK_MIXED_SPARSE_HMI_S="${CTRL_ATTACK_MIXED_SPARSE_HMI_S:-3600}"
+CTRL_ATTACK_MIXED_TIA_ONLY_S="${CTRL_ATTACK_MIXED_TIA_ONLY_S:-7200}"
+CTRL_ATTACK_MIXED_IDLE_S="${CTRL_ATTACK_MIXED_IDLE_S:-3600}"
+CTRL_ATTACK_MIXED_TIA_TAG_LOGGER="${CTRL_ATTACK_MIXED_TIA_TAG_LOGGER:-0}"
+CTRL_ATTACK_MIXED_IDLE_TAG_LOGGER="${CTRL_ATTACK_MIXED_IDLE_TAG_LOGGER:-0}"
+CTRL_SPARSE_TAG_LOG_INTERVAL="${CTRL_SPARSE_TAG_LOG_INTERVAL:-2.0}"
+CTRL_SPARSE_HMI_POLL_MIN_S="${CTRL_SPARSE_HMI_POLL_MIN_S:-5.0}"
+CTRL_SPARSE_HMI_POLL_MAX_S="${CTRL_SPARSE_HMI_POLL_MAX_S:-20.0}"
 
 S7_FLOOD_THREADS="${S7_FLOOD_THREADS:-6}"
 SYN_FLOOD_THREADS="${SYN_FLOOD_THREADS:-20}"
@@ -429,6 +446,7 @@ start_tag_logger() {
         --scenario-id "BENIGN_READER" \
         --episode-id "${SESSION_ID}:controller:tag_logger" \
         --day "$DAY" &
+    TAG_LOGGER_PID="$!"
     PIDS+=("$!")
     echo "[ctrl] tag logger started"
 }
@@ -491,8 +509,59 @@ while True:
             pass
         time.sleep(2.0)
 PYEOF
+    HMI_PID="$!"
     PIDS+=("$!")
     echo "[ctrl] HMI started"
+}
+
+stop_controller_services() {
+    if [[ -n "${HMI_PID:-}" ]]; then
+        stop_pid "$HMI_PID"
+        HMI_PID=""
+    fi
+    if [[ -n "${TAG_LOGGER_PID:-}" ]]; then
+        stop_pid "$TAG_LOGGER_PID"
+        TAG_LOGGER_PID=""
+    fi
+}
+
+run_controller_segment() {
+    local name="$1"
+    local duration_s="$2"
+    local tag_enabled="$3"
+    local hmi_enabled="$4"
+    local tag_interval="$5"
+    local hmi_min="$6"
+    local hmi_max="$7"
+
+    local old_tag="$ENABLE_TAG_LOGGER"
+    local old_hmi="$ENABLE_HMI"
+    local old_tag_interval="$TAG_LOG_INTERVAL"
+    local old_hmi_min="$HMI_POLL_MIN_S"
+    local old_hmi_max="$HMI_POLL_MAX_S"
+
+    ENABLE_TAG_LOGGER="$tag_enabled"
+    ENABLE_HMI="$hmi_enabled"
+    TAG_LOG_INTERVAL="$tag_interval"
+    HMI_POLL_MIN_S="$hmi_min"
+    HMI_POLL_MAX_S="$hmi_max"
+
+    label "BENIGN_NORMAL" "START" "${SESSION_ID}:day${DAY}:BENIGN:${name}" "controller_profile=${CONTROLLER_PROFILE};segment=${name};duration_s=${duration_s}"
+    echo "[ctrl] segment=$name duration=${duration_s}s tag_logger=$ENABLE_TAG_LOGGER hmi=$ENABLE_HMI tag_interval=$TAG_LOG_INTERVAL hmi_poll=${HMI_POLL_MIN_S}-${HMI_POLL_MAX_S}s"
+    if [[ "$name" == "tia_portal_only" || "$name" == "tia_portal_attack_background" ]]; then
+        echo "[ctrl] Open TIA Portal now: go online, monitor/watch table, diagnostics. Script-generated HMI polling is disabled in this segment."
+    fi
+    start_tag_logger
+    start_hmi
+    wait_s "$duration_s" "controller_${name}"
+    stop_controller_services
+    label "BENIGN_NORMAL" "END" "${SESSION_ID}:day${DAY}:BENIGN:${name}" "controller_profile=${CONTROLLER_PROFILE};segment=${name};duration_s=${duration_s}"
+
+    ENABLE_TAG_LOGGER="$old_tag"
+    ENABLE_HMI="$old_hmi"
+    TAG_LOG_INTERVAL="$old_tag_interval"
+    HMI_POLL_MIN_S="$old_hmi_min"
+    HMI_POLL_MAX_S="$old_hmi_max"
 }
 
 start_attack_process() {
@@ -1034,7 +1103,44 @@ run_repeated() {
     done
 }
 
+run_controller_mixed() {
+    start_capture "controller"
+    echo "[ctrl] mixed benign profile: normal_hmi -> sparse_hmi -> tia_portal_only -> idle_quiet"
+    run_controller_segment "normal_hmi" "$CTRL_NORMAL_HMI_S" "1" "1" "$TAG_LOG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S"
+    run_controller_segment "sparse_hmi" "$CTRL_SPARSE_HMI_S" "1" "1" "$CTRL_SPARSE_TAG_LOG_INTERVAL" "$CTRL_SPARSE_HMI_POLL_MIN_S" "$CTRL_SPARSE_HMI_POLL_MAX_S"
+    run_controller_segment "tia_portal_only" "$CTRL_TIA_ONLY_S" "0" "0" "$TAG_LOG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S"
+    run_controller_segment "idle_quiet" "$CTRL_IDLE_S" "0" "0" "$TAG_LOG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S"
+}
+
+run_controller_tia_attack() {
+    start_capture "controller"
+    echo "[ctrl] TIA Portal attack-background profile: no script HMI polling while attacker day6 runs"
+    echo "[ctrl] Keep TIA Portal online during this period. Optional tag logger: CTRL_TIA_ATTACK_TAG_LOGGER=$CTRL_TIA_ATTACK_TAG_LOGGER"
+    run_controller_segment "tia_portal_attack_background" "$CTRL_TIA_ATTACK_S" "$CTRL_TIA_ATTACK_TAG_LOGGER" "0" "$CTRL_TIA_ATTACK_TAG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S"
+}
+
+run_controller_attack_mixed() {
+    start_capture "controller"
+    echo "[ctrl] attack-mixed profile for day6: normal_hmi -> sparse_hmi -> tia_portal_only -> idle_quiet while attacker runs"
+    run_controller_segment "attack_normal_hmi" "$CTRL_ATTACK_MIXED_NORMAL_HMI_S" "1" "1" "$TAG_LOG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S"
+    run_controller_segment "attack_sparse_hmi" "$CTRL_ATTACK_MIXED_SPARSE_HMI_S" "1" "1" "$CTRL_SPARSE_TAG_LOG_INTERVAL" "$CTRL_SPARSE_HMI_POLL_MIN_S" "$CTRL_SPARSE_HMI_POLL_MAX_S"
+    run_controller_segment "attack_tia_portal_only" "$CTRL_ATTACK_MIXED_TIA_ONLY_S" "$CTRL_ATTACK_MIXED_TIA_TAG_LOGGER" "0" "$CTRL_TIA_ATTACK_TAG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S"
+    run_controller_segment "attack_idle_quiet" "$CTRL_ATTACK_MIXED_IDLE_S" "$CTRL_ATTACK_MIXED_IDLE_TAG_LOGGER" "0" "$TAG_LOG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S"
+}
+
 run_controller() {
+    if [[ "$CONTROLLER_PROFILE" == "mixed" ]]; then
+        run_controller_mixed
+        return
+    fi
+    if [[ "$CONTROLLER_PROFILE" == "tia_attack" || "$CONTROLLER_PROFILE" == "tia_portal_attack" ]]; then
+        run_controller_tia_attack
+        return
+    fi
+    if [[ "$CONTROLLER_PROFILE" == "attack_mixed" || "$CONTROLLER_PROFILE" == "day6_mixed" ]]; then
+        run_controller_attack_mixed
+        return
+    fi
     start_capture "controller"
     start_tag_logger
     start_hmi
