@@ -21,6 +21,10 @@ wheels/
 *.egg
 .claude/
 process/
+captures/
+*.pcap
+*.pcapng
+labels/
 
 # Virtual environments
 venv/

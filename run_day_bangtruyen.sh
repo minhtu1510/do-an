@@ -87,6 +87,8 @@ HMI_ENABLE_LEGIT_WRITES="${HMI_ENABLE_LEGIT_WRITES:-0}"
 HMI_LEGIT_WRITE_PROB="${HMI_LEGIT_WRITE_PROB:-0.02}"
 HMI_POLL_MIN_S="${HMI_POLL_MIN_S:-1.0}"
 HMI_POLL_MAX_S="${HMI_POLL_MAX_S:-2.0}"
+Q0_ALLOWED_MASK="${Q0_ALLOWED_MASK:-0x41}"
+CONTROLLER_PROFILE_EXPLICIT="${CONTROLLER_PROFILE+x}"
 CONTROLLER_PROFILE="${CONTROLLER_PROFILE:-standard}"
 CTRL_NORMAL_HMI_S="${CTRL_NORMAL_HMI_S:-5400}"
 CTRL_SPARSE_HMI_S="${CTRL_SPARSE_HMI_S:-3600}"
@@ -95,6 +97,11 @@ CTRL_IDLE_S="${CTRL_IDLE_S:-1800}"
 CTRL_TIA_ATTACK_S="${CTRL_TIA_ATTACK_S:-18000}"
 CTRL_TIA_ATTACK_TAG_LOGGER="${CTRL_TIA_ATTACK_TAG_LOGGER:-0}"
 CTRL_TIA_ATTACK_TAG_INTERVAL="${CTRL_TIA_ATTACK_TAG_INTERVAL:-2.0}"
+CTRL_DAY4_MIXED_NORMAL_HMI_S="${CTRL_DAY4_MIXED_NORMAL_HMI_S:-2400}"
+CTRL_DAY4_MIXED_TIA_S="${CTRL_DAY4_MIXED_TIA_S:-2400}"
+CTRL_DAY4_MIXED_SPARSE_HMI_S="${CTRL_DAY4_MIXED_SPARSE_HMI_S:-2400}"
+CTRL_DAY4_MIXED_IDLE_S="${CTRL_DAY4_MIXED_IDLE_S:-2400}"
+CTRL_DAY4_MIXED_TIA_TAG_LOGGER="${CTRL_DAY4_MIXED_TIA_TAG_LOGGER:-0}"
 CTRL_ATTACK_MIXED_NORMAL_HMI_S="${CTRL_ATTACK_MIXED_NORMAL_HMI_S:-3600}"
 CTRL_ATTACK_MIXED_SPARSE_HMI_S="${CTRL_ATTACK_MIXED_SPARSE_HMI_S:-3600}"
 CTRL_ATTACK_MIXED_TIA_ONLY_S="${CTRL_ATTACK_MIXED_TIA_ONLY_S:-7200}"
@@ -127,6 +134,10 @@ Options:
   --no-preflight          Skip Snap7 preflight.
   --preflight-only        Run preflight and exit.
   --enable-cpu-control    Opt in to CPU_STOP attack. Default is disabled.
+
+Environment:
+  CONTROLLER_PROFILE=standard|mixed|tia_portal_attack|attack_mixed|day4_mixed
+                          If unset, Day 4 controller uses day4_mixed; other days use standard.
 
 Examples:
   Controller host:
@@ -175,6 +186,9 @@ fi
 if [[ -z "$CAPTURE_FILTER" ]]; then
     CAPTURE_FILTER="host $TARGET_IP"
 fi
+if [[ -z "$CONTROLLER_PROFILE_EXPLICIT" && "$DAY" == "4" && "$ROLE" == "controller" ]]; then
+    CONTROLLER_PROFILE="day4_mixed"
+fi
 
 mkdir -p "$CAPTURE_DIR/day${DAY}" "$LOG_DIR" "$LABEL_DIR"
 
@@ -186,7 +200,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-echo "=== run_day_bangtruyen.sh day=$DAY role=$ROLE target=$TARGET_IP rack=$RACK slot=$SLOT session=$SESSION_ID host=$HOST_ID ==="
+echo "=== run_day_bangtruyen.sh day=$DAY role=$ROLE target=$TARGET_IP rack=$RACK slot=$SLOT session=$SESSION_ID host=$HOST_ID controller_profile=$CONTROLLER_PROFILE ==="
 if [[ "$ENABLE_CPU_CONTROL_ATTACK" != "1" ]]; then
     echo "[info] CPU_STOP attack disabled. Set ENABLE_CPU_CONTROL_ATTACK=1 or --enable-cpu-control only if PLC permits it."
 fi
@@ -440,6 +454,7 @@ start_tag_logger() {
         --rack "$RACK" \
         --slot "$SLOT" \
         --interval "$TAG_LOG_INTERVAL" \
+        --q0-allowed-mask "$Q0_ALLOWED_MASK" \
         --output "$LOG_DIR/day${DAY}_${SESSION_ID}_${HOST_ID}_tags.csv" \
         --session-id "$SESSION_ID" \
         --host-id "$HOST_ID" \
@@ -548,7 +563,7 @@ run_controller_segment() {
 
     label "BENIGN_NORMAL" "START" "${SESSION_ID}:day${DAY}:BENIGN:${name}" "controller_profile=${CONTROLLER_PROFILE};segment=${name};duration_s=${duration_s}"
     echo "[ctrl] segment=$name duration=${duration_s}s tag_logger=$ENABLE_TAG_LOGGER hmi=$ENABLE_HMI tag_interval=$TAG_LOG_INTERVAL hmi_poll=${HMI_POLL_MIN_S}-${HMI_POLL_MAX_S}s"
-    if [[ "$name" == "tia_portal_only" || "$name" == "tia_portal_attack_background" ]]; then
+    if [[ "$name" == *"tia_portal"* ]]; then
         echo "[ctrl] Open TIA Portal now: go online, monitor/watch table, diagnostics. Script-generated HMI polling is disabled in this segment."
     fi
     start_tag_logger
@@ -1119,6 +1134,17 @@ run_controller_tia_attack() {
     run_controller_segment "tia_portal_attack_background" "$CTRL_TIA_ATTACK_S" "$CTRL_TIA_ATTACK_TAG_LOGGER" "0" "$CTRL_TIA_ATTACK_TAG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S"
 }
 
+run_controller_day4_mixed() {
+    start_capture "controller"
+    echo "[ctrl] day4 mixed attack-background profile: normal_hmi -> tia_portal -> sparse_hmi -> tia_portal -> normal_hmi -> idle_quiet"
+    run_controller_segment "day4_normal_hmi_a" "$CTRL_DAY4_MIXED_NORMAL_HMI_S" "1" "1" "$TAG_LOG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S"
+    run_controller_segment "day4_tia_portal_a" "$CTRL_DAY4_MIXED_TIA_S" "$CTRL_DAY4_MIXED_TIA_TAG_LOGGER" "0" "$CTRL_TIA_ATTACK_TAG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S"
+    run_controller_segment "day4_sparse_hmi" "$CTRL_DAY4_MIXED_SPARSE_HMI_S" "1" "1" "$CTRL_SPARSE_TAG_LOG_INTERVAL" "$CTRL_SPARSE_HMI_POLL_MIN_S" "$CTRL_SPARSE_HMI_POLL_MAX_S"
+    run_controller_segment "day4_tia_portal_b" "$CTRL_DAY4_MIXED_TIA_S" "$CTRL_DAY4_MIXED_TIA_TAG_LOGGER" "0" "$CTRL_TIA_ATTACK_TAG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S"
+    run_controller_segment "day4_normal_hmi_b" "$CTRL_DAY4_MIXED_NORMAL_HMI_S" "1" "1" "$TAG_LOG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S"
+    run_controller_segment "day4_idle_quiet" "$CTRL_DAY4_MIXED_IDLE_S" "0" "0" "$TAG_LOG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S"
+}
+
 run_controller_attack_mixed() {
     start_capture "controller"
     echo "[ctrl] attack-mixed profile for day6: normal_hmi -> sparse_hmi -> tia_portal_only -> idle_quiet while attacker runs"
@@ -1135,6 +1161,10 @@ run_controller() {
     fi
     if [[ "$CONTROLLER_PROFILE" == "tia_attack" || "$CONTROLLER_PROFILE" == "tia_portal_attack" ]]; then
         run_controller_tia_attack
+        return
+    fi
+    if [[ "$CONTROLLER_PROFILE" == "day4_mixed" || "$CONTROLLER_PROFILE" == "day4_hmi_tia" ]]; then
+        run_controller_day4_mixed
         return
     fi
     if [[ "$CONTROLLER_PROFILE" == "attack_mixed" || "$CONTROLLER_PROFILE" == "day6_mixed" ]]; then
