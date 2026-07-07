@@ -89,7 +89,7 @@ HMI_POLL_MIN_S="${HMI_POLL_MIN_S:-1.0}"
 HMI_POLL_MAX_S="${HMI_POLL_MAX_S:-2.0}"
 Q0_ALLOWED_MASK="${Q0_ALLOWED_MASK:-0x41}"
 CONTROLLER_PROFILE_EXPLICIT="${CONTROLLER_PROFILE+x}"
-CONTROLLER_PROFILE="${CONTROLLER_PROFILE:-standard}"
+CONTROLLER_PROFILE="${CONTROLLER_PROFILE:-mixed}"
 CTRL_NORMAL_HMI_S="${CTRL_NORMAL_HMI_S:-5400}"
 CTRL_SPARSE_HMI_S="${CTRL_SPARSE_HMI_S:-3600}"
 CTRL_TIA_ONLY_S="${CTRL_TIA_ONLY_S:-3600}"
@@ -137,7 +137,7 @@ Options:
 
 Environment:
   CONTROLLER_PROFILE=standard|mixed|tia_portal_attack|attack_mixed|day4_mixed
-                          If unset, Day 4 controller uses day4_mixed; other days use standard.
+                          If unset, controller uses mixed background; Day 4 uses day4_mixed.
 
 Examples:
   Controller host:
