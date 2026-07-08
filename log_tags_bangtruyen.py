@@ -11,6 +11,7 @@ Bảng tag PLC (Conveyor Belt S7-1500/S7-1200) — Tham chiếu từ bảng tag 
 
   Q area (đầu ra vật lý):
     Q0.0 = BangTai              (1=Băng tải đang chạy, 0=Dừng)
+    Q0.6 = auxiliary output     (observed normal on current conveyor testbed)
 
   M area (biến nội bộ):
     M5.0  = START (Bool)
@@ -136,6 +137,25 @@ M_BYTES_RAW = {
 NORMAL_CD_MS_MIN = 500       # 0.5 giây
 NORMAL_CD_MS_MAX = 30_000    # 30 giây
 
+# Q0 valid-output mask. Day 1 baseline on the current conveyor reports Q0=0x41,
+# so Q0.0 and Q0.6 are treated as legitimate unless overridden.
+DEFAULT_Q0_ALLOWED_MASK = '0x41'
+
+
+def parse_u8_int(value: str) -> int:
+    try:
+        parsed = int(str(value), 0)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"invalid byte value '{value}' (use decimal or 0xNN)"
+        ) from exc
+
+    if not 0 <= parsed <= 0xFF:
+        raise argparse.ArgumentTypeError(
+            f"byte value '{value}' is outside 0..255"
+        )
+    return parsed
+
 
 # =============================================================================
 #  Build CSV header
@@ -192,7 +212,7 @@ def build_header() -> list:
         'cd_timer_corrupted',         # CD1 hoặc CD2 bị đặt giá trị bất thường
 
         # Output write attack
-        'q_output_unexpected',        # q0_raw có bit bất thường (ngoài Q0.0) được set → RWRITE
+        'q_output_unexpected',        # q0_raw có bit ngoài allowed mask → RWRITE
     ]
 
     return cols
@@ -320,11 +340,11 @@ def poll_once(client: snap7.client.Client, poll_seq: int, metadata: dict) -> dic
         )
 
         # 7. Q output byte có bit không hợp lệ (RWRITE Q0 attack)
-        # Q0.0 = BangTai (bit 0) là bit hợp lệ duy nhất
-        # Nếu bit 1-7 của Q0 được set → RWRITE tấn công output byte
+        # Mask hợp lệ phụ thuộc wiring thực tế; mặc định cho phép Q0.0 và Q0.6.
         q0_val = row.get('q0_raw', 0)
-        # Mask bỏ bit 0 (BangTai hợp lệ), nếu còn bit nào set → bất thường
-        row['q_output_unexpected'] = int((q0_val & 0xFE) != 0)
+        q0_allowed_mask = int(metadata.get('q0_allowed_mask', parse_u8_int(DEFAULT_Q0_ALLOWED_MASK))) & 0xFF
+        unexpected_q0_bits = q0_val & (~q0_allowed_mask & 0xFF)
+        row['q_output_unexpected'] = int(unexpected_q0_bits != 0)
 
     except Exception as e:
         row['polling_error'] = 1
@@ -360,6 +380,12 @@ def main():
     parser.add_argument('--scenario-id', default='BENIGN_READER')
     parser.add_argument('--episode-id', default='')
     parser.add_argument('--day', default='')
+    parser.add_argument(
+        '--q0-allowed-mask',
+        type=parse_u8_int,
+        default=parse_u8_int(os.getenv('Q0_ALLOWED_MASK', DEFAULT_Q0_ALLOWED_MASK)),
+        help='Allowed normal Q0 bits for q_bad detection. Default/env Q0_ALLOWED_MASK=0x41',
+    )
     args = parser.parse_args()
 
     header = build_header()
@@ -379,6 +405,7 @@ def main():
     print(f"[LOG_TAGS_BT] Poll   : {args.interval}s ({1/args.interval:.0f} Hz)")
     print(f"[LOG_TAGS_BT] Hệ thống: Băng Truyền (Conveyor Belt)")
     print(f"[LOG_TAGS_BT] Tags   : Q0.0(BangTai) | I0.0-I0.2 | M5-M10 | MD50-MD62 | MW70/74")
+    print(f"[LOG_TAGS_BT] Q0 mask: allowed=0x{args.q0_allowed_mask:02X}")
     print("[LOG_TAGS_BT] Ctrl+C để dừng.\n")
 
     try:
@@ -400,6 +427,7 @@ def main():
                 'scenario_id': args.scenario_id,
                 'episode_id': args.episode_id,
                 'day': args.day,
+                'q0_allowed_mask': args.q0_allowed_mask,
             })
             poll_seq += 1
             writer.writerow([row[col] for col in header])

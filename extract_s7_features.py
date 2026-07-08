@@ -2212,7 +2212,7 @@ Notes:
     parser.add_argument("--output", required=True, help="Output feature CSV")
     parser.add_argument("--window", type=float, default=5.0, help="Time window size in seconds, default=5.0")
     parser.add_argument("--plc-ip", default=None, help="PLC IP address for to/from PLC directional features")
-    parser.add_argument("--role", default="unknown", choices=["attacker", "controller", "logger", "unknown"], help="Capture role metadata")
+    parser.add_argument("--role", default="unknown", choices=["attacker", "controller", "logger", "mirror", "unknown"], help="Capture role metadata")
     parser.add_argument("--label", default="unknown", help="Default label if no timeline is provided")
     parser.add_argument("--timeline", default=None, help="Optional timeline CSV with start,end,label")
     parser.add_argument("--tag-log", default=None, help="Optional tag log CSV with timestamp,tag_name,value")
