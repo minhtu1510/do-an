@@ -379,11 +379,6 @@ run_controller() {
     label "BENIGN_NORMAL" "END" "day7_controller_runtime" ""
 }
 
-run_hmi_credential_brute() {
-    _run_attack "HMI_CREDENTIAL_BRUTE" "hmi_credential_brute" \
-        "--target-url http://${HMI_IP}:${HMI_PORT}"
-}
-
 run_hmi_alarm_suppress() {
     [[ "$ENABLE_OPC_ATTACKS" == "1" ]] || { echo "[skip] HMI_ALARM_SUPPRESS (--no-opc)"; return 0; }
     _run_attack "HMI_ALARM_SUPPRESS" "hmi_alarm_suppress" \
@@ -484,9 +479,6 @@ label "BENIGN_NORMAL" "END" "day7_warmup" ""
 # Phase 2: HMI Attacks
 echo "[Phase 2] HMI Attacks"
 for i in $(seq 1 "$ATTACK_REPETITIONS"); do
-    run_hmi_credential_brute
-    wait_s "$BENIGN_GAP_S" "gap_hmi_brute_r${i}"
-
     run_hmi_alarm_suppress
     wait_s "$BENIGN_GAP_S" "gap_alarm_sup_r${i}"
 

