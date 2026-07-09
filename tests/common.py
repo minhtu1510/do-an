@@ -64,27 +64,29 @@ def sep():
 
 # ── Snapshot PLC ─────────────────────────────────────────────────
 def plc_snapshot(client) -> dict:
-    snap = {"ts": datetime.now().isoformat(), "cpu": None, "db1": None, "db2": None}
+    snap = {"ts": datetime.now().isoformat(), "cpu": None, "db1": None, "mk0": None}
     try:
         snap["cpu"] = str(client.get_cpu_state())
-        try:
-            snap["db1"] = client.db_read(1, 0, 20).hex()
-        except Exception:
-            snap["db1"] = "N/A"
-        try:
-            snap["db2"] = client.db_read(2, 0, 20).hex()
-        except Exception:
-            snap["db2"] = "N/A"
-    except Exception as e:
-        snap["error"] = str(e)
+    except Exception:
+        snap["cpu"] = "N/A"
+    try:
+        from snap7.type import Areas
+    except ImportError:
+        from snap7.types import Areas
+    try:
+        snap["mk0"] = client.read_area(Areas.MK, 0, 0, 10).hex()
+    except Exception:
+        snap["mk0"] = "N/A"
     return snap
 
 
 def plc_diff(before, after) -> list:
     changes = []
-    for k in ["cpu", "db1", "db2"]:
-        if before.get(k) != after.get(k):
-            changes.append(f"{k}: {before.get(k)} -> {after.get(k)}")
+    for k in ["cpu", "mk0"]:
+        bv = before.get(k, "")
+        av = after.get(k, "")
+        if bv and av and bv != av and bv != "N/A" and av != "N/A":
+            changes.append(f"{k}: {bv} -> {av}")
     return changes
 
 

@@ -3,17 +3,12 @@ set -euo pipefail
 
 # ================================================================
 # run_day_bangtruyen_ext.sh
-# Day 7: Extended Attack Scenarios (HMI / EWS / Network / KillChain)
+# Day 7: Advanced Attack Scenarios
+#   SMB Enum + EWS Rogue + EWS Firmware + Replay + Logic-Aware + KillChain
 #
-# Cách chạy — đơn giản giống day 1-6:
+# Chạy:
 #   bash run_day_bangtruyen_ext.sh --day 7 --role attacker \
-#       --session-id bt_s1 --iface eth0
-#
-#   sudo bash run_day_bangtruyen_ext.sh --day 7 --role attacker \
-#       --session-id bt_s1 --iface eth0
-#
-# Mọi config mặc định từ testbed.conf.
-# Các trường mới (HMI, OPC) có thể thêm vào testbed.conf hoặc CLI.
+#       --session-id bt_ext_s1 --iface "\Device\NPF_{GUID}"
 # ================================================================
 
 [[ -f testbed.conf ]] && source ./testbed.conf
@@ -23,9 +18,9 @@ if [[ -z "${PY_CMD:-}" ]]; then
 fi
 
 export PYTHONPATH="${PYTHONPATH:-.}"
+DAY=7
 
-# ── Config (từ testbed.conf hoặc default) ────────────────────────
-TARGET_IP="${TARGET_IP:-192.168.1.10}"
+TARGET_IP="${TARGET_IP:-192.168.210.211}"
 RACK="${RACK:-0}"
 SLOT="${SLOT:-1}"
 CAPTURE_IFACE="${CAPTURE_IFACE:-${IFACE:-}}"
@@ -33,14 +28,9 @@ CAPTURE_ENABLED="${CAPTURE_ENABLED:-1}"
 SESSION_ID="${SESSION_ID:-}"
 HOST_ID="${HOST_ID:-}"
 PREFLIGHT_ENABLED="${PREFLIGHT_ENABLED:-1}"
-DAY=7
 
-# ── Trường mới cho HMI / DNS (thêm vào testbed.conf nếu muốn)
 HMI_IP="${HMI_IP:-}"
-ATTACKER_IP="${ATTACKER_IP:-}"
-ENABLE_DNS_SPOOF="${ENABLE_DNS_SPOOF:-1}"
 
-# ── Timing (dùng chung với run_day_bangtruyen.sh) ────────────────
 CAPTURE_FILTER="${CAPTURE_FILTER:-}"
 DAY7_DURATION_S="${DAY7_DURATION_S:-14400}"
 WARMUP_S="${WARMUP_S:-300}"
@@ -53,403 +43,223 @@ SHORT_ATTACK_DURATION_S="${SHORT_ATTACK_DURATION_S:-300}"
 
 CAPTURE_DIR="${CAPTURE_DIR:-captures}"
 LABEL_DIR="${LABEL_DIR:-labels}"
+LOG_DIR="${LOG_DIR:-logs}"
 
 usage() {
     cat <<'EOF'
 Usage:
   bash run_day_bangtruyen_ext.sh --day 7 --role attacker [options]
 
-Options:
-  --session-id ID      Session ID.           (auto nếu không có)
-  --host-id ID         Host ID.              (auto nếu không có)
-  --target IP          PLC IP.               (từ testbed.conf)
-  --rack N             PLC rack.             (từ testbed.conf)
-  --slot N             PLC slot.             (từ testbed.conf)
-  --iface IFACE        TShark interface.     (từ testbed.conf)
-  --hmi-ip IP          HMI IP.               (auto: subnet ~target)
-  --opc-url URL        OPC-UA URL.           (auto: opc.tcp://<hmi>:4840)
-  --attacker-ip IP     Attacker IP.          (auto: hostname -I)
-  --no-capture         Run without tshark.
+  --session-id ID      Session ID.
+  --target IP          PLC IP.         (từ testbed.conf)
+  --rack N             PLC rack.       (từ testbed.conf)
+  --slot N             PLC slot.       (từ testbed.conf)
+  --iface IFACE        TShark interface.
+  --hmi-ip IP          HMI IP.         (auto từ subnet target)
+  --no-capture         Skip tshark.
   --no-preflight       Skip Snap7 preflight.
-  --no-dns-spoof       Skip DNS spoof.
-  --no-opc             Skip OPC-UA attacks.
-  --preflight-only     Preflight check and exit.
-  -h, --help           Show help.
-
-Examples:
-  bash run_day_bangtruyen_ext.sh --day 7 --role attacker --session-id bt_s1 --iface eth0
-
-  # Đặt HMI IP riêng
-  bash run_day_bangtruyen_ext.sh --day 7 --role attacker --session-id bt_s1 --iface eth0 --hmi-ip 192.168.1.50
-
-  # Skip DNS spoof (ko cần root) + skip OPC (chưa cài opcua)
-  bash run_day_bangtruyen_ext.sh --day 7 --role attacker --session-id bt_s1 --iface eth0 --no-dns-spoof --no-opc
+  --preflight-only     Preflight and exit.
+  -h, --help
 EOF
 }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --day) DAY="$2"; shift 2 ;;
-        --role) ROLE="$2"; shift 2 ;;
-        --target) TARGET_IP="$2"; shift 2 ;;
-        --rack) RACK="$2"; shift 2 ;;
-        --slot) SLOT="$2"; shift 2 ;;
-        --iface) CAPTURE_IFACE="$2"; shift 2 ;;
-        --session-id) SESSION_ID="$2"; shift 2 ;;
-        --host-id) HOST_ID="$2"; shift 2 ;;
-        --hmi-ip) HMI_IP="$2"; OPC_SERVER_IP="$2"; shift 2 ;;
-        --opc-url) OPC_URL="$2"; shift 2 ;;
-        --attacker-ip) ATTACKER_IP="$2"; shift 2 ;;
-        --no-capture) CAPTURE_ENABLED="0"; shift ;;
-        --no-preflight) PREFLIGHT_ENABLED="0"; shift ;;
-        --no-dns-spoof) ENABLE_DNS_SPOOF="0"; shift ;;
-        --no-opc) ENABLE_OPC_ATTACKS="0"; shift ;;
+        --day)           DAY="$2";          shift 2 ;;
+        --role)          ROLE="$2";         shift 2 ;;
+        --target)        TARGET_IP="$2";    shift 2 ;;
+        --rack)          RACK="$2";         shift 2 ;;
+        --slot)          SLOT="$2";         shift 2 ;;
+        --iface)         CAPTURE_IFACE="$2";shift 2 ;;
+        --session-id)    SESSION_ID="$2";   shift 2 ;;
+        --host-id)       HOST_ID="$2";      shift 2 ;;
+        --hmi-ip)        HMI_IP="$2";       shift 2 ;;
+        --no-capture)    CAPTURE_ENABLED="0"; shift ;;
+        --no-preflight)  PREFLIGHT_ENABLED="0"; shift ;;
         --preflight-only) PREFLIGHT_ONLY="1"; shift ;;
-        -h|--help) usage; exit 0 ;;
+        -h|--help)       usage; exit 0 ;;
         *) echo "[ERROR] Unknown option: $1" >&2; usage; exit 1 ;;
     esac
 done
 
-# ── Auto-generate missing values (giống run_day_bangtruyen.sh) ───
 [[ -z "$SESSION_ID" ]] && SESSION_ID="day7_ext_s1"
-[[ -z "$HOST_ID" ]] && HOST_ID="${ATTACKER_HOST_ID:-attacker_host}"
+[[ -z "$HOST_ID" ]]    && HOST_ID="${ATTACKER_HOST_ID:-attacker_host}"
 [[ -z "$CAPTURE_FILTER" ]] && CAPTURE_FILTER="host $TARGET_IP"
-[[ -z "$ATTACKER_IP" ]] && ATTACKER_IP="$(hostname -I 2>/dev/null | awk '{print $1}' || echo '192.168.1.100')"
 
-# Tự suy HMI_IP từ subnet của TARGET_IP
 if [[ -z "$HMI_IP" ]]; then
     SUBNET_PREFIX=$(echo "$TARGET_IP" | sed -E 's/\.[0-9]+$//')
-    HMI_IP="${SUBNET_PREFIX}.20"
-    OPC_SERVER_IP="$HMI_IP"
+    HMI_IP="${SUBNET_PREFIX}.31"
 fi
-[[ -z "$OPC_URL" ]] && OPC_URL="opc.tcp://${OPC_SERVER_IP}:4840"
 
-mkdir -p "$CAPTURE_DIR/day${DAY}" "$LABEL_DIR"
+mkdir -p "$CAPTURE_DIR/day${DAY}" "$LABEL_DIR" "$LOG_DIR"
 
 declare -a PIDS=()
 cleanup() {
-    for p in "${PIDS[@]:-}"; do
-        kill "$p" 2>/dev/null || true
-    done
+    for p in "${PIDS[@]:-}"; do kill "$p" 2>/dev/null || true; done
 }
 trap cleanup EXIT INT TERM
 
 echo "================================================================"
-echo "  DAY 7 — EXTENDED SCENARIOS"
-echo "  Target     : $TARGET_IP  (rack=$RACK slot=$SLOT)"
-echo "  HMI        : $HMI_IP  (OPC: $OPC_URL)"
-echo "  Attacker   : $ATTACKER_IP"
-echo "  Session    : $SESSION_ID  | Host: $HOST_ID"
-echo "  Interface  : ${CAPTURE_IFACE:-auto}"
-echo "  DNS Spoof  : $ENABLE_DNS_SPOOF  | OPC: $ENABLE_OPC_ATTACKS"
+echo "  DAY 7 — ADVANCED ATTACK SCENARIOS"
+echo "  Target  : $TARGET_IP  (rack=$RACK slot=$SLOT)"
+echo "  HMI     : $HMI_IP"
+echo "  Session : $SESSION_ID  | Host: $HOST_ID"
+echo "  Iface   : ${CAPTURE_IFACE:-auto}"
 echo "================================================================"
 
-# ── Helpers (cùng schema CSV với run_day_bangtruyen.sh) ──────────
-now_ms() {
-    "$PY_CMD" -c "import time; print(int(time.time() * 1000))"
-}
-
-label_file() {
-    echo "$LABEL_DIR/day${DAY}_${SESSION_ID}_${HOST_ID}_timeline.csv"
-}
+# ── Helpers ─────────────────────────────────────────────────────
+now_ms()     { "$PY_CMD" -c "import time; print(int(time.time()*1000))"; }
+label_file() { echo "$LABEL_DIR/day${DAY}_${SESSION_ID}_${HOST_ID}_timeline.csv"; }
 
 label() {
-    local scenario="$1" action="$2" episode_id="${3:-}" note="${4:-}"
-    local ts f
-    ts="$(now_ms)"
-    f="$(label_file)"
+    local s="$1" a="$2" ep="${3:-}" n="${4:-}" ts f
+    ts="$(now_ms)"; f="$(label_file)"
     [[ ! -f "$f" ]] && echo "attacker_timestamp_ms,scenario_label,action,session_id,host_id,episode_id,day,note" > "$f"
-    note="${note//,/;}"
-    episode_id="${episode_id//,/;}"
-    printf '%s,%s,%s,%s,%s,%s,%s,%s\n' "$ts" "$scenario" "$action" "$SESSION_ID" "$HOST_ID" "$episode_id" "$DAY" "$note" >> "$f"
-    echo "[$(date +%H:%M:%S)] label $scenario $action"
+    n="${n//,/;}"; ep="${ep//,/;}"
+    printf '%s,%s,%s,%s,%s,%s,%s,%s\n' "$ts" "$s" "$a" "$SESSION_ID" "$HOST_ID" "$ep" "$DAY" "$n" >> "$f"
+    echo "[$(date +%H:%M:%S)] label $s $a"
 }
 
 wait_s() {
-    local seconds="$1" message="${2:-wait}"
-    [[ "$seconds" -le 0 ]] && return 0
-    echo "[wait] ${seconds}s -- $message"
-    sleep "$seconds"
+    local sec="$1" m="${2:-wait}"
+    [[ "$sec" -le 0 ]] && return 0
+    echo "[wait] ${sec}s -- $m"; sleep "$sec"
 }
 
 rand_duration() {
-    local base="${1:-$ATTACK_DURATION_S}"
-    "$PY_CMD" -c "import random,sys; b=max(1,int(float(sys.argv[1]))); lo=max(1,int(b*0.75)); hi=max(lo,int(b*1.25)); print(random.randint(lo, hi))" "$base"
+    local b="${1:-$ATTACK_DURATION_S}"
+    "$PY_CMD" -c "import random,sys; b=max(1,int(float(sys.argv[1]))); lo=max(1,int(b*0.75)); hi=max(lo,int(b*1.25)); print(random.randint(lo,hi))" "$b"
 }
 
-# ── Capture (dùng tshark giống run_day_bangtruyen.sh) ────────────
+# ── Capture ──────────────────────────────────────────────────────
 start_capture() {
-    local suffix="$1"
-    local pcap="$CAPTURE_DIR/day${DAY}/${SESSION_ID}_${suffix}.pcapng"
-    if [[ "$CAPTURE_ENABLED" != "1" ]]; then
-        echo "[$suffix] capture disabled"
-        return 0
-    fi
+    local suf="$1" pcap="$CAPTURE_DIR/day${DAY}/${SESSION_ID}_${suf}.pcapng"
+    [[ "$CAPTURE_ENABLED" != "1" ]] && { echo "[$suf] capture disabled"; return 0; }
     tshark -n -i "$CAPTURE_IFACE" -f "$CAPTURE_FILTER" -w "$pcap" -q \
         -o "tls.desegment_ssl_records:FALSE" \
         -o "tls.desegment_ssl_application_data:FALSE" &
-    PIDS+=("$!")
-    echo "[$suffix] tshark -> $pcap"
+    PIDS+=("$!"); echo "[$suf] tshark -> $pcap"
 }
 
 # ── Preflight ────────────────────────────────────────────────────
 preflight_plc() {
     "$PY_CMD" - <<PYEOF
 import sys, snap7
-try:
-    from snap7.type import Areas
-except ImportError:
-    from snap7.types import Areas
-target = "$TARGET_IP"
-rack = int("$RACK")
-slot = int("$SLOT")
+try: from snap7.type import Areas
+except ImportError: from snap7.types import Areas
 c = snap7.client.Client()
 try:
-    print(f"[preflight] connect {target} rack={rack} slot={slot}", flush=True)
-    c.connect(target, rack, slot)
-    state = "UNKNOWN"
-    try: state = str(c.get_cpu_state())
-    except Exception as exc: print(f"[preflight][WARN] CPU state: {exc}", flush=True)
-    print(f"[preflight] CPU state: {state}", flush=True)
-    m = c.read_area(Areas.MK, 0, 0, 1)
-    print(f"[preflight] read M area OK ({len(m)} bytes)", flush=True)
-    c.disconnect()
-    sys.exit(0)
-except Exception as exc:
-    print(f"[preflight][ERROR] Snap7 check failed: {exc}", flush=True)
-    try: c.disconnect()
-    except: pass
-    sys.exit(2)
+    c.connect("$TARGET_IP", int("$RACK"), int("$SLOT"))
+    print(f"[preflight] state={c.get_cpu_state()}", flush=True)
+    c.read_area(Areas.MK, 0, 0, 1)
+    print("[preflight] M area OK", flush=True)
+    c.disconnect(); sys.exit(0)
+except Exception as e:
+    print(f"[preflight] FAIL: {e}", flush=True); sys.exit(2)
 PYEOF
 }
 
-# ── PLC Restore (conveyor safe) ─────────────────────────────────
+# ── Restore PLC ──────────────────────────────────────────────────
 restore_plc() {
     echo "[restore] Conveyor safe restore"
     "$PY_CMD" - <<PYEOF || true
-import sys, time
-import snap7
+import sys, time, snap7
 try: from snap7.type import Areas
 except ImportError: from snap7.types import Areas
 from snap7.util import set_bool, set_dint
-
-target = "$TARGET_IP"
-rack = int("$RACK")
-slot = int("$SLOT")
-
 c = snap7.client.Client()
 try:
-    c.connect(target, rack, slot)
-    try:
-        state = str(c.get_cpu_state())
-        if "Stop" in state or state == "4":
-            print("[restore][WARN] CPU STOP. Start manually.", flush=True)
-    except: pass
-
+    c.connect("$TARGET_IP", int("$RACK"), int("$SLOT"))
     m5 = c.read_area(Areas.MK, 0, 5, 1)
-    for bit in range(8): set_bool(m5, 0, bit, False)
+    for b in range(8): set_bool(m5, 0, b, False)
     c.write_area(Areas.MK, 0, 5, m5)
-
     m6 = c.read_area(Areas.MK, 0, 6, 1)
-    set_bool(m6, 0, 0, False); set_bool(m6, 0, 1, False); set_bool(m6, 0, 2, False)
+    set_bool(m6,0,0,False); set_bool(m6,0,1,False); set_bool(m6,0,2,False)
     c.write_area(Areas.MK, 0, 6, m6)
-
     buf = bytearray(4)
-    set_dint(buf, 0, 5000)
-    c.write_area(Areas.MK, 0, 54, buf); c.write_area(Areas.MK, 0, 58, buf); c.write_area(Areas.MK, 0, 62, buf)
-    set_dint(buf, 0, 0)
-    c.write_area(Areas.MK, 0, 50, buf)
-
-    m5 = c.read_area(Areas.MK, 0, 5, 1)
-    set_bool(m5, 0, 0, True); set_bool(m5, 0, 1, False)
-    c.write_area(Areas.MK, 0, 5, m5)
-    time.sleep(0.3)
-    m5 = c.read_area(Areas.MK, 0, 5, 1)
-    set_bool(m5, 0, 0, False)
-    c.write_area(Areas.MK, 0, 5, m5)
-    print("[restore] START pulse sent", flush=True)
-
-    c.disconnect()
-    print("[restore] OK", flush=True)
-except Exception as exc:
-    print(f"[restore][WARN] failed: {exc}", flush=True)
-    try: c.disconnect()
-    except: pass
+    set_dint(buf,0,5000)
+    c.write_area(Areas.MK,0,54,buf); c.write_area(Areas.MK,0,58,buf); c.write_area(Areas.MK,0,62,buf)
+    set_dint(buf,0,0); c.write_area(Areas.MK,0,50,buf)
+    m5 = c.read_area(Areas.MK,0,5,1)
+    set_bool(m5,0,0,True); set_bool(m5,0,1,False)
+    c.write_area(Areas.MK,0,5,m5); time.sleep(0.3)
+    m5 = c.read_area(Areas.MK,0,5,1); set_bool(m5,0,0,False)
+    c.write_area(Areas.MK,0,5,m5)
+    c.disconnect(); print("[restore] OK", flush=True)
+except Exception as e: print(f"[restore] {e}", flush=True)
 PYEOF
     sleep 1
 }
 
 # ── Attack runners ───────────────────────────────────────────────
 _run_attack() {
-    local scenario="$1" module="$2" extra_args="${3:-}"
-    local dur ep note
+    local scenario="$1" module="$2" extra_args="${3:-}" dur ep
     dur="$(rand_duration "$SHORT_ATTACK_DURATION_S")"
     ep="${SESSION_ID}:day${DAY}:${scenario}"
-
     label "$scenario" "START" "$ep" "dur=${dur}s"
-
     "$PY_CMD" -u -m attacks_ext.${module} \
         --duration "$dur" \
-        --session-id "$SESSION_ID" \
-        --host-id "$HOST_ID" \
+        --session-id "$SESSION_ID" --host-id "$HOST_ID" \
         --label-file "$(label_file)" \
-        --episode-id "$ep" \
-        --day 7 \
-        $extra_args \
-    2>&1 || echo "[WARN] $scenario returned non-zero (continuing)"
-
+        --episode-id "$ep" --day "$DAY" \
+        $extra_args 2>&1 || echo "[WARN] $scenario returned non-zero"
     label "$scenario" "END" "$ep" "dur=${dur}s"
-}
-
-# ── Controller functions ─────────────────────────────────────────
-ENABLE_TAG_LOGGER="${ENABLE_TAG_LOGGER:-1}"
-TAG_LOG_INTERVAL="${TAG_LOG_INTERVAL:-0.5}"
-ENABLE_HMI="${ENABLE_HMI:-1}"
-HMI_POLL_MIN_S="${HMI_POLL_MIN_S:-1.0}"
-HMI_POLL_MAX_S="${HMI_POLL_MAX_S:-2.0}"
-
-start_tag_logger() {
-    [[ "$ENABLE_TAG_LOGGER" == "1" ]] || { echo "[ctrl] tag logger disabled"; return 0; }
-    "$PY_CMD" log_tags_bangtruyen.py \
-        --target "$TARGET_IP" \
-        --rack "$RACK" \
-        --slot "$SLOT" \
-        --interval "$TAG_LOG_INTERVAL" \
-        --output "$LOG_DIR/day${DAY}_${SESSION_ID}_${HOST_ID}_tags.csv" \
-        --session-id "$SESSION_ID" \
-        --host-id "$HOST_ID" \
-        --scenario-id "BENIGN_READER" \
-        --episode-id "${SESSION_ID}:controller:tag_logger" \
-        --day "$DAY" &
-    PIDS+=("$!")
-    echo "[ctrl] tag logger started -> $LOG_DIR/day${DAY}_${SESSION_ID}_${HOST_ID}_tags.csv"
-}
-
-start_hmi() {
-    [[ "$ENABLE_HMI" == "1" ]] || { echo "[ctrl] HMI disabled"; return 0; }
-    "$PY_CMD" -u - <<PYEOF &
-import random, time
-import snap7
-try:
-    from snap7.type import Areas
-except ImportError:
-    from snap7.types import Areas
-
-target = "$TARGET_IP"
-rack = int("$RACK")
-slot = int("$SLOT")
-poll_min = float("$HMI_POLL_MIN_S")
-poll_max = float("$HMI_POLL_MAX_S")
-
-c = snap7.client.Client()
-print("[HMI] observe-only polling started", flush=True)
-while True:
-    try:
-        if not c.get_connected():
-            c.connect(target, rack, slot)
-            print("[HMI] connected", flush=True)
-        c.read_area(Areas.MK, 0, 0, 80)
-        try: c.read_area(Areas.PA, 0, 0, 1)
-        except: pass
-        try: c.read_area(Areas.PE, 0, 0, 1)
-        except: pass
-        time.sleep(random.uniform(poll_min, poll_max))
-    except Exception as exc:
-        print(f"[HMI][WARN] {exc}", flush=True)
-        try: c.disconnect()
-        except: pass
-        time.sleep(2.0)
-PYEOF
-    PIDS+=("$!")
-    echo "[ctrl] HMI started"
-}
-
-run_controller() {
-    start_capture "controller"
-    start_tag_logger
-    start_hmi
-    label "BENIGN_NORMAL" "START" "day7_controller_runtime" ""
-    wait_s "$DAY7_DURATION_S" "controller_runtime"
-    label "BENIGN_NORMAL" "END" "day7_controller_runtime" ""
-}
-
-run_ews_rogue_engineer() {
-    _run_attack "EWS_ROGUE_ENGINEER" "ews_rogue_engineer" \
-        "--target ${TARGET_IP} --rack ${RACK} --slot ${SLOT}"
-    restore_plc
-}
-
-run_ews_firmware_tamper() {
-    _run_attack "EWS_FIRMWARE_TAMPER" "ews_firmware_tamper" \
-        "--target ${TARGET_IP} --rack ${RACK} --slot ${SLOT}"
-    restore_plc
-}
-
-run_dns_spoof_ics() {
-    if [[ "$ENABLE_DNS_SPOOF" != "1" ]]; then
-        echo "[skip] DNS_SPOOF_ICS (--no-dns-spoof)"; return 0
-    fi
-    if [[ "$EUID" -ne 0 ]]; then
-        echo "[WARN] DNS_SPOOF cần root. Bỏ qua."
-        label "DNS_SPOOF_ICS" "SKIP" "" "need_root"
-        return 0
-    fi
-    _run_attack "DNS_SPOOF_ICS" "dns_spoof_ics" \
-        "--iface ${CAPTURE_IFACE:-eth0} --hmi-ip ${HMI_IP} --attacker-ip ${ATTACKER_IP}"
 }
 
 run_kill_chain() {
     local ep="${SESSION_ID}:day${DAY}:KILL_CHAIN"
     label "KILL_CHAIN" "START" "$ep" "5stage_apt"
-
-    local extra_args="--target '$TARGET_IP' --rack '$RACK' --slot '$SLOT' --opc-url '$OPC_URL'"
-    [[ "$ENABLE_OPC_ATTACKS" == "1" ]] && extra_args="$extra_args --opc-username '$OPC_USERNAME' --opc-password '$OPC_PASSWORD'"
-
     "$PY_CMD" -u -m attacks_ext.kill_chain \
         --duration 1800 \
-        --session-id "$SESSION_ID" \
-        --host-id "$HOST_ID" \
+        --session-id "$SESSION_ID" --host-id "$HOST_ID" \
         --label-file "$(label_file)" \
-        --episode-id "$ep" \
-        --day 7 \
+        --episode-id "$ep" --day "$DAY" \
         --target "$TARGET_IP" --rack "$RACK" --slot "$SLOT" \
-        --opc-url "$OPC_URL" \
-        --opc-username "$OPC_USERNAME" --opc-password "$OPC_PASSWORD" \
-    2>&1 || echo "[WARN] KILL_CHAIN returned non-zero"
-
+        --opc-url "opc.tcp://127.0.0.1:4840" \
+        2>&1 || echo "[WARN] KILL_CHAIN returned non-zero"
     label "KILL_CHAIN" "END" "$ep" "5stage_apt"
     restore_plc
+}
+
+# ── Controller ───────────────────────────────────────────────────
+run_controller() {
+    start_capture "controller"
+    "$PY_CMD" log_tags_bangtruyen.py \
+        --target "$TARGET_IP" --rack "$RACK" --slot "$SLOT" \
+        --interval "${TAG_LOG_INTERVAL:-0.5}" \
+        --output "$LOG_DIR/day${DAY}_${SESSION_ID}_${HOST_ID}_tags.csv" \
+        --session-id "$SESSION_ID" --host-id "$HOST_ID" \
+        --scenario-id "BENIGN_READER" \
+        --episode-id "${SESSION_ID}:controller:tag_logger" \
+        --day "$DAY" &
+    PIDS+=("$!")
+    echo "[ctrl] tag logger started"
+    label "BENIGN_NORMAL" "START" "day7_controller_runtime" ""
+    wait_s "$DAY7_DURATION_S" "controller_runtime"
+    label "BENIGN_NORMAL" "END"   "day7_controller_runtime" ""
 }
 
 # ── Main ─────────────────────────────────────────────────────────
 if [[ "$PREFLIGHT_ENABLED" == "1" ]]; then
     if ! preflight_plc; then
-        echo "[ERROR] Preflight failed." >&2
-        exit 2
+        echo "[ERROR] Preflight failed." >&2; exit 2
     fi
 fi
 
-if [[ "${PREFLIGHT_ONLY:-0}" == "1" ]]; then
-    echo "[preflight] done"; exit 0
-fi
+[[ "${PREFLIGHT_ONLY:-0}" == "1" ]] && { echo "[preflight] done"; exit 0; }
 
-# Dispatch: controller vs attacker
 case "${ROLE:-attacker}" in
     controller)
         run_controller
-        echo "================================================================"
-        echo "  DAY 7 CONTROLLER COMPLETE"
-        echo "  Tags: $LOG_DIR/day${DAY}_${SESSION_ID}_${HOST_ID}_tags.csv"
-        echo "================================================================"
+        echo "DAY 7 CONTROLLER DONE"
         exit 0
         ;;
 esac
 
-# ── Attacker schedule ───────────────────────────────────────────
-start_capture "day7_ext_attacks"
+start_capture "day7_attacks"
 
 echo ""
-echo "  SCHEDULE: Warmup -> DCP(×3) -> S7 Probe(×3) -> SMB(×3) -> Cooldown"
+echo "  SCHEDULE: Warmup -> SMB(x3) -> Stealthy(x3) -> Replay(x3) -> LogicAware(x3) -> KillChain(x2) -> Cooldown"
 echo ""
 
 # Phase 1: Warmup
@@ -457,28 +267,54 @@ label "BENIGN_NORMAL" "START" "day7_warmup" ""
 wait_s "$WARMUP_S" "warmup_benign"
 label "BENIGN_NORMAL" "END" "day7_warmup" ""
 
-# Phase 2: Recon — DCP + S7 Probe + SMB
-echo "[Phase 2] Recon — Multi-protocol Discovery"
+# Phase 2: SMB Recon
+echo "[Phase 2] SMB Recon"
 for i in $(seq 1 "$ATTACK_REPETITIONS"); do
-    _run_attack "DCP_IDENTIFY_SCAN" "dcp_scan" \
-        "--iface ${CAPTURE_IFACE:-eth0}"
-    wait_s "$BENIGN_GAP_S" "gap_dcp_${i}"
-
-    _run_attack "S7_FUNC_PROBE" "s7_probe" \
-        "--target ${TARGET_IP}"
-    wait_s "$BENIGN_GAP_S" "gap_probe_${i}"
-
     _run_attack "SMB_RECON_ENUM" "smb_enum" \
         "--target ${HMI_IP}"
-    wait_s "$COOLDOWN_S" "cooldown_round${i}"
+    wait_s "$BENIGN_GAP_S" "gap_smb_${i}"
+done
+wait_s "$COOLDOWN_S" "cooldown_after_smb"
+
+# Phase 3: Stealthy Low-Rate Write
+echo "[Phase 3] Stealthy Low-Rate Write"
+for i in $(seq 1 "$ATTACK_REPETITIONS"); do
+    _run_attack "STEALTHY_WRITE" "stealthy_write" \
+        "--target ${TARGET_IP} --rack ${RACK} --slot ${SLOT}"
+    restore_plc
+    wait_s "$COOLDOWN_S" "cooldown_stealthy_${i}"
 done
 
-# Phase 3: Final Cooldown
+# Phase 4: S7 Replay + Logic-Aware
+echo "[Phase 4] S7 Replay + Logic-Aware"
+for i in $(seq 1 "$ATTACK_REPETITIONS"); do
+    _run_attack "S7_REPLAY" "s7_replay" \
+        "--target ${TARGET_IP} --rack ${RACK} --slot ${SLOT}"
+    wait_s "$BENIGN_GAP_S" "gap_replay_${i}"
+
+    _run_attack "LOGIC_AWARE" "logic_aware" \
+        "--target ${TARGET_IP} --rack ${RACK} --slot ${SLOT}"
+    restore_plc
+    wait_s "$COOLDOWN_S" "cooldown_phase4_${i}"
+done
+
+# Phase 5: Kill Chain x2
+echo "[Phase 5] Kill Chain (APT Simulation)"
+label "BENIGN_NORMAL" "START" "pre_killchain_gap" ""
+wait_s 600 "pre_killchain_buffer"
+label "BENIGN_NORMAL" "END" "pre_killchain_gap" ""
+
+run_kill_chain
+wait_s "$COOLDOWN_L" "cooldown_kc1"
+run_kill_chain
+
+# Phase 6: Final cooldown
 label "BENIGN_NORMAL" "START" "day7_cooldown_final" ""
 wait_s "$COOLDOWN_S" "final_cooldown"
 label "BENIGN_NORMAL" "END" "day7_cooldown_final" ""
 
 echo "================================================================"
 echo "  DAY 7 COMPLETE"
-echo "  Labels: $(label_file)"
+echo "  Labels : $(label_file)"
+echo "  PCAP   : $CAPTURE_DIR/day${DAY}/"
 echo "================================================================"
