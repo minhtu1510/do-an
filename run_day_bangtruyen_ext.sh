@@ -382,13 +382,13 @@ run_controller() {
 run_hmi_alarm_suppress() {
     [[ "$ENABLE_OPC_ATTACKS" == "1" ]] || { echo "[skip] HMI_ALARM_SUPPRESS (--no-opc)"; return 0; }
     _run_attack "HMI_ALARM_SUPPRESS" "hmi_alarm_suppress" \
-        "--opc-url ${OPC_URL} --opc-username ${OPC_USERNAME} --opc-password ${OPC_PASSWORD}"
+        "--opc-url ${OPC_SIM_URL}"
 }
 
 run_hmi_fake_display() {
     [[ "$ENABLE_OPC_ATTACKS" == "1" ]] || { echo "[skip] HMI_FAKE_DISPLAY (--no-opc)"; return 0; }
     _run_attack "HMI_FAKE_DISPLAY" "hmi_fake_display" \
-        "--opc-url ${OPC_URL} --opc-username ${OPC_USERNAME} --opc-password ${OPC_PASSWORD}"
+        "--opc-url ${OPC_SIM_URL}"
     restore_plc
 }
 
@@ -476,6 +476,18 @@ label "BENIGN_NORMAL" "START" "day7_warmup" ""
 wait_s "$WARMUP_S" "warmup_benign"
 label "BENIGN_NORMAL" "END" "day7_warmup" ""
 
+# ── Start OPC-UA Sim Server (background) ────────────────────
+OPC_SIM_PORT="${OPC_SIM_PORT:-4840}"
+OPC_SIM_URL="opc.tcp://127.0.0.1:${OPC_SIM_PORT}"
+
+if [[ "$ENABLE_OPC_ATTACKS" == "1" ]]; then
+    echo "[OPC] Starting simulation server on ${OPC_SIM_URL}"
+    "$PY_CMD" -m attacks_ext.opcua_sim_server --port "$OPC_SIM_PORT" &
+    OPC_SIM_PID="$!"
+    PIDS+=("$OPC_SIM_PID")
+    sleep 2
+fi
+
 # Phase 2: HMI Attacks
 echo "[Phase 2] HMI Attacks"
 for i in $(seq 1 "$ATTACK_REPETITIONS"); do
@@ -484,6 +496,21 @@ for i in $(seq 1 "$ATTACK_REPETITIONS"); do
 
     run_hmi_fake_display
     wait_s "$COOLDOWN_S" "cooldown_hmi_round${i}"
+done
+
+# ── Stop OPC-UA Sim Server ──────────────────────────────────
+if [[ "$ENABLE_OPC_ATTACKS" == "1" ]] && [[ -n "${OPC_SIM_PID:-}" ]]; then
+    kill "$OPC_SIM_PID" 2>/dev/null || true
+    wait "$OPC_SIM_PID" 2>/dev/null || true
+    echo "[OPC] Simulation server stopped"
+fi
+
+# Phase 2.5: Profinet DCP Scan
+echo "[Phase 2.5] Profinet DCP Scan (Layer 2 Discovery)"
+for i in 1 2; do
+    _run_attack "DCP_IDENTIFY_SCAN" "dcp_scan" \
+        "--iface ${CAPTURE_IFACE:-eth0}"
+    wait_s "$BENIGN_GAP_S" "gap_dcp_${i}"
 done
 
 # Phase 3: EWS Attacks

