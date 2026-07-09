@@ -249,7 +249,7 @@ esac
 start_capture "day8_ext_attacks"
 
 echo ""
-echo "  Day 8: Replay(×3) -> EWS(×3) -> DNS(×2) -> KillChain(×2) -> Cooldown"
+echo "  Day 8: EWS(×3) -> Replay(×3) -> LogicAware(×3) -> DNS(×2) -> KillChain(×2) -> Cooldown"
 echo ""
 
 # Phase 1: Warmup
@@ -257,17 +257,21 @@ label "BENIGN_NORMAL" "START" "day8_warmup" ""
 wait_s "$WARMUP_S" "warmup"
 label "BENIGN_NORMAL" "END" "day8_warmup" ""
 
-# Phase 2: S7 Replay + EWS
-echo "[Phase 2] Integrity — Replay + Rogue EWS + Firmware Tamper"
+# Phase 2: Integrity — EWS + Replay + Logic-Aware
+echo "[Phase 2] Integrity — Rogue EWS + Firmware + Replay + Logic-Aware"
 for i in $(seq 1 "$ATTACK_REPETITIONS"); do
-    _run_attack "S7_REPLAY" "s7_replay" \
-        "--target ${TARGET_IP} --rack ${RACK} --slot ${SLOT}"
-    wait_s "$BENIGN_GAP_S" "gap_replay_r${i}"
-
     run_ews_rogue_engineer
     wait_s "$BENIGN_GAP_S" "gap_rogue_r${i}"
 
     run_ews_firmware_tamper
+    wait_s "$BENIGN_GAP_S" "gap_fw_r${i}"
+
+    _run_attack "S7_REPLAY" "s7_replay" \
+        "--target ${TARGET_IP} --rack ${RACK} --slot ${SLOT}"
+    wait_s "$BENIGN_GAP_S" "gap_replay_r${i}"
+
+    _run_attack "LOGIC_AWARE" "logic_aware" \
+        "--target ${TARGET_IP} --rack ${RACK} --slot ${SLOT}"
     wait_s "$COOLDOWN_S" "cooldown_round${i}"
 done
 
