@@ -28,7 +28,17 @@ async def run_test():
     try:
         from asyncua import Client
 
-        async with Client(url=OPC_URL) as client:
+        # Dùng localhost nếu sim server chạy local, không thì dùng config
+        try:
+            async with Client(url="opc.tcp://127.0.0.1:4840") as test_client:
+                pass
+            opc_url = "opc.tcp://127.0.0.1:4840"
+            info("Using local OPC-UA sim server (127.0.0.1:4840)")
+        except Exception:
+            opc_url = OPC_URL
+            info(f"Using OPC-UA from config: {opc_url}")
+
+        async with Client(url=opc_url) as client:
             ns_idx = await client.get_namespace_index("PLC")
             ok(f"Connected, namespace PLC = {ns_idx}")
 

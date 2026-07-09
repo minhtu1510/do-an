@@ -35,16 +35,10 @@ HOST_ID="${HOST_ID:-}"
 PREFLIGHT_ENABLED="${PREFLIGHT_ENABLED:-1}"
 DAY=7
 
-# ── Trường mới cho HMI / OPC / DNS (thêm vào testbed.conf nếu muốn)
+# ── Trường mới cho HMI / DNS (thêm vào testbed.conf nếu muốn)
 HMI_IP="${HMI_IP:-}"
-HMI_PORT="${HMI_PORT:-5000}"
-OPC_SERVER_IP="${OPC_SERVER_IP:-${HMI_IP}}"
-OPC_URL="${OPC_URL:-}"
-OPC_USERNAME="${OPC_USERNAME:-admin}"
-OPC_PASSWORD="${OPC_PASSWORD:-admin123}"
 ATTACKER_IP="${ATTACKER_IP:-}"
 ENABLE_DNS_SPOOF="${ENABLE_DNS_SPOOF:-1}"
-ENABLE_OPC_ATTACKS="${ENABLE_OPC_ATTACKS:-1}"
 
 # ── Timing (dùng chung với run_day_bangtruyen.sh) ────────────────
 CAPTURE_FILTER="${CAPTURE_FILTER:-}"
@@ -379,19 +373,6 @@ run_controller() {
     label "BENIGN_NORMAL" "END" "day7_controller_runtime" ""
 }
 
-run_hmi_alarm_suppress() {
-    [[ "$ENABLE_OPC_ATTACKS" == "1" ]] || { echo "[skip] HMI_ALARM_SUPPRESS (--no-opc)"; return 0; }
-    _run_attack "HMI_ALARM_SUPPRESS" "hmi_alarm_suppress" \
-        "--opc-url ${OPC_SIM_URL}"
-}
-
-run_hmi_fake_display() {
-    [[ "$ENABLE_OPC_ATTACKS" == "1" ]] || { echo "[skip] HMI_FAKE_DISPLAY (--no-opc)"; return 0; }
-    _run_attack "HMI_FAKE_DISPLAY" "hmi_fake_display" \
-        "--opc-url ${OPC_SIM_URL}"
-    restore_plc
-}
-
 run_ews_rogue_engineer() {
     _run_attack "EWS_ROGUE_ENGINEER" "ews_rogue_engineer" \
         "--target ${TARGET_IP} --rack ${RACK} --slot ${SLOT}"
@@ -468,7 +449,7 @@ esac
 start_capture "day7_ext_attacks"
 
 echo ""
-echo "  SCHEDULE: Warmup -> HMI(×3) -> EWS(×3) -> DNS(×2) -> KillChain(×2) -> Cooldown"
+echo "  SCHEDULE: Warmup -> DCP(×3) -> S7 Probe(×3) -> SMB(×3) -> Cooldown"
 echo ""
 
 # Phase 1: Warmup
@@ -476,71 +457,23 @@ label "BENIGN_NORMAL" "START" "day7_warmup" ""
 wait_s "$WARMUP_S" "warmup_benign"
 label "BENIGN_NORMAL" "END" "day7_warmup" ""
 
-# ── Start OPC-UA Sim Server (background) ────────────────────
-OPC_SIM_PORT="${OPC_SIM_PORT:-4840}"
-OPC_SIM_URL="opc.tcp://127.0.0.1:${OPC_SIM_PORT}"
-
-if [[ "$ENABLE_OPC_ATTACKS" == "1" ]]; then
-    echo "[OPC] Starting simulation server on ${OPC_SIM_URL}"
-    "$PY_CMD" -m attacks_ext.opcua_sim_server --port "$OPC_SIM_PORT" &
-    OPC_SIM_PID="$!"
-    PIDS+=("$OPC_SIM_PID")
-    sleep 2
-fi
-
-# Phase 2: HMI Attacks
-echo "[Phase 2] HMI Attacks"
+# Phase 2: Recon — DCP + S7 Probe + SMB
+echo "[Phase 2] Recon — Multi-protocol Discovery"
 for i in $(seq 1 "$ATTACK_REPETITIONS"); do
-    run_hmi_alarm_suppress
-    wait_s "$BENIGN_GAP_S" "gap_alarm_sup_r${i}"
-
-    run_hmi_fake_display
-    wait_s "$COOLDOWN_S" "cooldown_hmi_round${i}"
-done
-
-# ── Stop OPC-UA Sim Server ──────────────────────────────────
-if [[ "$ENABLE_OPC_ATTACKS" == "1" ]] && [[ -n "${OPC_SIM_PID:-}" ]]; then
-    kill "$OPC_SIM_PID" 2>/dev/null || true
-    wait "$OPC_SIM_PID" 2>/dev/null || true
-    echo "[OPC] Simulation server stopped"
-fi
-
-# Phase 2.5: Profinet DCP Scan
-echo "[Phase 2.5] Profinet DCP Scan (Layer 2 Discovery)"
-for i in 1 2; do
     _run_attack "DCP_IDENTIFY_SCAN" "dcp_scan" \
         "--iface ${CAPTURE_IFACE:-eth0}"
     wait_s "$BENIGN_GAP_S" "gap_dcp_${i}"
+
+    _run_attack "S7_FUNC_PROBE" "s7_probe" \
+        "--target ${TARGET_IP}"
+    wait_s "$BENIGN_GAP_S" "gap_probe_${i}"
+
+    _run_attack "SMB_RECON_ENUM" "smb_enum" \
+        "--target ${HMI_IP}"
+    wait_s "$COOLDOWN_S" "cooldown_round${i}"
 done
 
-# Phase 3: EWS Attacks
-echo "[Phase 3] EWS Attacks"
-for i in $(seq 1 "$ATTACK_REPETITIONS"); do
-    run_ews_rogue_engineer
-    wait_s "$BENIGN_GAP_S" "gap_rogue_ews_r${i}"
-
-    run_ews_firmware_tamper
-    wait_s "$COOLDOWN_S" "cooldown_ews_round${i}"
-done
-
-# Phase 4: Network Attacks
-echo "[Phase 4] Network Attacks"
-for i in 1 2; do
-    run_dns_spoof_ics
-    wait_s "$COOLDOWN_L" "cooldown_dns_${i}"
-done
-
-# Phase 5: Full Kill Chain
-echo "[Phase 5] Full Kill Chain"
-label "BENIGN_NORMAL" "START" "pre_killchain_gap" ""
-wait_s 600 "pre_killchain_buffer"
-label "BENIGN_NORMAL" "END" "pre_killchain_gap" ""
-
-run_kill_chain
-wait_s "$COOLDOWN_L" "cooldown_after_killchain_1"
-run_kill_chain
-
-# Phase 6: Final
+# Phase 3: Final Cooldown
 label "BENIGN_NORMAL" "START" "day7_cooldown_final" ""
 wait_s "$COOLDOWN_S" "final_cooldown"
 label "BENIGN_NORMAL" "END" "day7_cooldown_final" ""
