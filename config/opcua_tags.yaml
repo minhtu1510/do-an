@@ -1,0 +1,93 @@
+# OPC UA Tag Registry cho Web-SCADA
+# File cấu hình duy nhất — không hardcode NodeId trong code
+
+tags:
+  - key: vat_1
+    node_id: 'ns=3;s="Vat 1"'
+    display_name: "Cảm biến vị trí 1"
+    description: "Phát hiện vật thể tại vị trí 1"
+    data_type: Boolean
+    group: sensors
+    writable: false
+    history_enabled: true
+
+  - key: vat_2
+    node_id: 'ns=3;s="Vat 2"'
+    display_name: "Cảm biến vị trí 2"
+    description: "Phát hiện vật thể tại vị trí 2"
+    data_type: Boolean
+    group: sensors
+    writable: false
+    history_enabled: true
+
+  - key: vat_3
+    node_id: 'ns=3;s="Vat 3"'
+    display_name: "Cảm biến vị trí 3"
+    description: "Phát hiện vật thể tại vị trí 3"
+    data_type: Boolean
+    group: sensors
+    writable: false
+    history_enabled: true
+
+  - key: bang_tai
+    node_id: 'ns=3;s="BangTai"'
+    display_name: "Trạng thái băng tải"
+    description: "RUN/STOP trạng thái băng tải"
+    data_type: Boolean
+    group: process
+    writable: false
+    history_enabled: true
+
+  - key: nhap
+    node_id: 'ns=3;s="Nhap"'
+    display_name: "Số sản phẩm nhập"
+    description: "Bộ đếm sản phẩm đầu vào"
+    data_type: Int16
+    group: counters
+    writable: false
+    history_enabled: true
+
+  - key: hien_thi
+    node_id: 'ns=3;s="HienThi"'
+    display_name: "Số sản phẩm xuất"
+    description: "Bộ đếm sản phẩm đầu ra"
+    data_type: Int16
+    group: counters
+    writable: false
+    history_enabled: true
+
+  - key: cd1
+    node_id: 'ns=3;s="CD1"'
+    display_name: "Thời gian công đoạn 1"
+    description: "Timer countdown cho vật thể 1"
+    unit: ms
+    data_type: Int32
+    group: parameters
+    writable: false
+    minimum: 500
+    maximum: 10000
+    history_enabled: true
+
+  - key: cd2
+    node_id: 'ns=3;s="CD2"'
+    display_name: "Thời gian công đoạn 2"
+    description: "Timer countdown cho vật thể 2"
+    unit: ms
+    data_type: Int32
+    group: parameters
+    writable: false
+    minimum: 500
+    maximum: 10000
+    history_enabled: true
+
+  - key: cd3
+    node_id: 'ns=3;s="CD3"'
+    display_name: "Thời gian công đoạn 3"
+    description: "Timer countdown cho vật thể 3"
+    unit: ms
+    data_type: Int32
+    group: parameters
+    writable: false
+    minimum: 500
+    maximum: 10000
+    history_enabled: true
