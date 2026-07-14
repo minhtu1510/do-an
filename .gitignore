@@ -25,7 +25,8 @@ captures/
 *.pcap
 *.pcapng
 labels/
-
+ml_results/
+logs/
 # Virtual environments
 venv/
 ENV/

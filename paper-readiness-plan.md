@@ -30,7 +30,7 @@ Trong 2 tuần tới, chốt được testbed, dataset, kịch bản tấn công
 - Day 4 Process manipulation: setpoint/timer attack, sensor spoof, stealthy low-rate STOP write.
 - Day 5 Availability: S7 connection flood, SYN flood, protocol fuzz.
 - Day 6 Robustness/OOD: trộn các attack trên với rate thấp hơn, thứ tự random, gap rộng hơn để kiểm tra model không chỉ học lịch cố định.
-- Day 7 Optional extension: HMI/OPC/DNS/kill-chain nếu còn thời gian; không đưa vào claim chính nếu chưa đủ dữ liệu.
+- Phạm vi báo cáo/dataset chính dừng ở Day 6. Không thêm Day 7/Day 8 vào kịch bản, bảng phân phối hoặc kết quả nếu chưa có dataset và benchmark tương ứng.
 
 ## 2 Tuần Tới
 - [ ] Chạy pilot 10-15 phút Day 1 mixed có capture thật -> Verify: có PCAP, timeline, tags CSV; `q_bad` gần 0, `cd_oor` giải thích được.
