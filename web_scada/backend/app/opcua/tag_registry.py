@@ -1,17 +1,37 @@
 """OPC UA tag registry loader — reads from config/opcua_tags.yaml"""
 
-import yaml
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
 from pathlib import Path
-from dataclasses import dataclass, field
-from typing import Optional, List
+from typing import Any, Optional
+
+import yaml
+
+REPO_ROOT = Path(__file__).resolve().parents[4]
+DEFAULT_CONFIG_PATH = REPO_ROOT / "config" / "opcua_tags.yaml"
 
 
-@dataclass
+def resolve_config_path(config_path: str | Path | None = None) -> Path:
+    raw_path = config_path or os.getenv("TAG_REGISTRY_PATH")
+    if raw_path:
+        path = Path(raw_path).expanduser()
+        if not path.is_absolute():
+            path = REPO_ROOT / path
+    else:
+        path = DEFAULT_CONFIG_PATH
+    path = path.resolve()
+    if not path.is_file():
+        raise FileNotFoundError(f"Không tìm thấy tag registry: {path}")
+    return path
+
+
+@dataclass(slots=True)
 class TagConfig:
     key: str
     node_id: str
     display_name: str = ""
-    description: str = ""
     data_type: str = "String"
     unit: str = ""
     group: str = "default"
@@ -22,10 +42,10 @@ class TagConfig:
     stale_timeout: int = 10
 
 
-@dataclass
+@dataclass(slots=True)
 class TagValue:
     key: str
-    value: object = None
+    value: Any = None
     data_type: str = "String"
     quality: str = "Bad"
     source_timestamp: str = ""
@@ -33,7 +53,7 @@ class TagValue:
     stale: bool = True
     config: Optional[TagConfig] = None
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "key": self.key,
             "value": self.value,
@@ -50,49 +70,62 @@ class TagValue:
 
 
 class TagRegistry:
-    def __init__(self, config_path: str = None):
-        if config_path is None:
-            config_path = Path(__file__).parent.parent.parent.parent / "config" / "opcua_tags.yaml"
-        self.tags: List[TagConfig] = []
-        self._by_key: dict = {}
-        self._by_node_id: dict = {}
-        self.load(config_path)
+    def __init__(self, config_path: str | Path | None = None):
+        self.config_path = resolve_config_path(config_path)
+        self.tags: list[TagConfig] = []
+        self._by_key: dict[str, TagConfig] = {}
+        self._by_node_id: dict[str, TagConfig] = {}
+        self.load(self.config_path)
 
-    def load(self, config_path: str):
-        with open(config_path, encoding="utf-8") as f:
-            data = yaml.safe_load(f)
+    def load(self, config_path: str | Path):
+        path = resolve_config_path(config_path)
+        with path.open("r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        raw_tags = data.get("tags", [])
+        if not isinstance(raw_tags, list):
+            raise ValueError("'tags' phải là danh sách.")
 
-        self.tags = []
-        for item in data.get("tags", []):
+        self.tags.clear()
+        self._by_key.clear()
+        self._by_node_id.clear()
+
+        for i, item in enumerate(raw_tags, 1):
+            key = str(item["key"]).strip()
+            nid = str(item["node_id"]).strip()
+            if key in self._by_key:
+                raise ValueError(f"Trùng key: {key}")
+            if nid in self._by_node_id:
+                raise ValueError(f"Trùng node_id: {nid}")
+
             cfg = TagConfig(
-                key=item["key"],
-                node_id=item["node_id"],
-                display_name=item.get("display_name", item["key"]),
-                description=item.get("description", ""),
+                key=key, node_id=nid,
+                display_name=item.get("display_name", key),
                 data_type=item.get("data_type", "String"),
                 unit=item.get("unit", ""),
                 group=item.get("group", "default"),
-                writable=item.get("writable", False),
+                writable=bool(item.get("writable", False)),
                 minimum=item.get("minimum"),
                 maximum=item.get("maximum"),
-                history_enabled=item.get("history_enabled", True),
-                stale_timeout=item.get("stale_timeout", 10),
+                history_enabled=bool(item.get("history_enabled", True)),
+                stale_timeout=int(item.get("stale_timeout", 10)),
             )
             self.tags.append(cfg)
-            self._by_key[cfg.key] = cfg
-            self._by_node_id[cfg.node_id] = cfg
+            self._by_key[key] = cfg
+            self._by_node_id[nid] = cfg
+
+        self.config_path = path
 
     def get_by_key(self, key: str) -> Optional[TagConfig]:
         return self._by_key.get(key)
 
-    def get_by_node_id(self, node_id: str) -> Optional[TagConfig]:
-        return self._by_node_id.get(node_id)
+    def get_by_node_id(self, nid: str) -> Optional[TagConfig]:
+        return self._by_node_id.get(nid)
 
-    def keys(self) -> List[str]:
+    def keys(self) -> list[str]:
         return list(self._by_key.keys())
 
-    def list_writable(self) -> List[TagConfig]:
-        return [t for t in self.tags if t.writable]
+    def __len__(self) -> int:
+        return len(self.tags)
 
 
 _tag_registry: Optional[TagRegistry] = None
