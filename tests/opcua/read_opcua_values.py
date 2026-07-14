@@ -1,60 +1,40 @@
-#!/usr/bin/env python3
-"""Read all OPC UA values from tag registry."""
-
 import asyncio
-from pathlib import Path
-
-import yaml
 from asyncua import Client
 
+ENDPOINT = "opc.tcp://192.168.210.211:4840"
 
-PLC_ENDPOINT = "opc.tcp://192.168.210.211:4840"
-REPO_ROOT = Path(__file__).resolve().parents[2]
-CONFIG_PATH = REPO_ROOT / "config" / "opcua_tags.yaml"
+# NodeId lấy từ kết quả browse của PLC.
+NODES = {
+    "Vat_1": 'ns=3;s="Vat 1"',
+    "Vat_2": 'ns=3;s="Vat 2"',
+    "Vat_3": 'ns=3;s="Vat 3"',
 
-
-def load_tag_config() -> list[dict]:
-    if not CONFIG_PATH.is_file():
-        raise FileNotFoundError(f"Không tìm thấy tag registry: {CONFIG_PATH}")
-    with CONFIG_PATH.open("r", encoding="utf-8-sig") as file:
-        data = yaml.safe_load(file) or {}
-    tags = data.get("tags", [])
-    if not isinstance(tags, list):
-        raise ValueError("Trường 'tags' phải là danh sách.")
-    return tags
+    "CD1": 'ns=3;s="CD1"',
+    "CD2": 'ns=3;s="CD2"',
+    "CD3": 'ns=3;s="CD3"',
+    "Nhap": 'ns=3;s="Nhap"',
+    "HienThi": 'ns=3;s="HienThi"',
+    "BangTai": 'ns=3;s="BangTai"',
+}
 
 
 async def main() -> None:
-    try:
-        tags_config = load_tag_config()
-    except (OSError, ValueError, yaml.YAMLError) as exc:
-        print(f"[FAIL] {exc}")
-        return
+    async with Client(url=ENDPOINT, timeout=10) as client:
+        print(f"Đã kết nối: {ENDPOINT}\n")
 
-    if not tags_config:
-        print("[FAIL] Không có tag trong config/opcua_tags.yaml")
-        return
+        for name, node_id in NODES.items():
+            try:
+                node = client.get_node(node_id)
+                value = await node.read_value()
+                data_type = await node.read_data_type_as_variant_type()
 
-    print(f"[*] Endpoint: {PLC_ENDPOINT}  Tags: {len(tags_config)}\n")
-
-    try:
-        async with Client(url=PLC_ENDPOINT, timeout=10) as client:
-            print("[OK] Kết nối OPC UA thành công.\n")
-            for tag in tags_config:
-                key = tag.get("key", "<missing>")
-                nid = tag.get("node_id")
-                if not nid:
-                    print(f"  {key:<15} — error: thiếu node_id")
-                    continue
-                try:
-                    node = client.get_node(nid)
-                    val = await node.read_value()
-                    dt = await node.read_data_type_as_variant_type()
-                    print(f"  {key:<15} = {val!r:<12} | type={dt.name:<10} | {nid}")
-                except Exception as exc:
-                    print(f"  {key:<15} — error: {exc}")
-    except Exception as exc:
-        print(f"\n[FAIL] {exc}")
+                print(
+                    f"{name:12} = {value!r:12} "
+                    f"| type={data_type.name:10} "
+                    f"| node={node_id}"
+                )
+            except Exception as exc:
+                print(f"{name:12} = [LỖI] {exc}")
 
 
 if __name__ == "__main__":
