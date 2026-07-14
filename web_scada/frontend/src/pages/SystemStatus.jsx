@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { fetchPlcStatus } from "../services/api";
+import { fetchAllTags, fetchPlcStatus } from "../services/api";
 import { connectWebSocket } from "../services/websocket";
 
 export default function SystemStatus() {
@@ -9,10 +9,35 @@ export default function SystemStatus() {
 
   useEffect(() => {
     fetchPlcStatus().then(setStatus);
-    const timer = setInterval(() => fetchPlcStatus().then(setStatus), 5000);
+    fetchAllTags().then((data) => {
+      if (data.tags) {
+        const map = {};
+        data.tags.forEach((t) => (map[t.key] = t));
+        setTags(map);
+      }
+    });
+
+    const timer = setInterval(() => {
+      fetchPlcStatus().then(setStatus);
+      fetchAllTags().then((data) => {
+        if (data.tags) {
+          const map = {};
+          data.tags.forEach((t) => (map[t.key] = t));
+          setTags(map);
+        }
+      });
+    }, 5000);
 
     const unsub = connectWebSocket((data) => {
       if (data.type === "full_state" && data.status) setStatus(data.status);
+      if (data.type === "full_state" && data.tags) {
+        const map = {};
+        data.tags.forEach((t) => (map[t.key] = t));
+        setTags(map);
+      }
+      if (data.type === "tag_update") {
+        setTags((prev) => ({ ...prev, [data.key]: data.data }));
+      }
     });
 
     const uptimeTimer = setInterval(() => setUptime((p) => p + 1), 1000);
@@ -24,9 +49,9 @@ export default function SystemStatus() {
     };
   }, []);
 
-  const goodTags = Object.values(tags).filter((t) => !t.stale).length;
   const staleTags = Object.values(tags).filter((t) => t.stale).length;
   const totalTags = Object.values(tags).length || status?.subscribed_tags || 9;
+  const goodTags = Object.values(tags).length > 0 ? Object.values(tags).filter((t) => !t.stale).length : totalTags - staleTags;
 
   return (
     <div className="p-6 space-y-4">
@@ -38,7 +63,7 @@ export default function SystemStatus() {
         <InfoRow label="State" value={status?.connected ? "CONNECTED" : "DISCONNECTED"} color={status?.connected ? "text-green-400" : "text-red-400"} />
         <InfoRow label="Reconnect count" value={status?.reconnect_count ?? 0} />
         <InfoRow label="Tags Total" value={totalTags} />
-        <InfoRow label="Tags Good" value={totalTags - staleTags} color="text-green-400" />
+        <InfoRow label="Tags Good" value={goodTags} color="text-green-400" />
         <InfoRow label="Tags Stale" value={staleTags} color={staleTags > 0 ? "text-red-400" : "text-gray-400"} />
         <InfoRow label="Backend uptime" value={formatUptime(uptime)} />
         <InfoRow label="WebSocket" value="ONLINE" color="text-green-400" />
