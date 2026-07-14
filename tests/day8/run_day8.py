@@ -1,0 +1,254 @@
+#!/usr/bin/env python3
+"""Day 8 scenario runner.
+
+The runner is intentionally safe by default. It lists and records scenarios,
+and only executes bounded read-only/denied checks marked safe in the catalog.
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import os
+import sys
+import time
+from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+
+import yaml
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from tests.common import OPC_URL, info, ok, warn, fail  # noqa: E402
+
+
+CATALOG_PATH = Path(__file__).with_name("scenarios.yaml")
+WEB_SCADA_API = os.getenv("WEB_SCADA_API", "http://127.0.0.1:8000/api").rstrip("/")
+
+
+def load_catalog() -> dict:
+    with CATALOG_PATH.open("r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+def iter_scenarios(catalog: dict):
+    for group_id, group in catalog["groups"].items():
+        for scenario in group.get("scenarios", []):
+            yield group_id, group, scenario
+
+
+def select_scenarios(catalog: dict, group_filter: str | None, scenario_filter: str | None):
+    selected = []
+    for group_id, group, scenario in iter_scenarios(catalog):
+        if group_filter and group_filter != group_id:
+            continue
+        if scenario_filter and scenario_filter != scenario["id"]:
+            continue
+        selected.append((group_id, group, scenario))
+    return selected
+
+
+def print_scenarios(items) -> None:
+    for group_id, group, scenario in items:
+        safe = "safe" if scenario.get("safe_to_execute") else "gated"
+        print(f"{group_id:15} {scenario['id']:<36} {safe:<6} {scenario['objective']}")
+
+
+async def opcua_benign_reconnect(repeat: int = 3) -> list[str]:
+    from asyncua import Client
+
+    evidence = []
+    for i in range(repeat):
+        async with Client(url=OPC_URL, timeout=5) as client:
+            namespace_array = await client.get_namespace_array()
+            evidence.append(f"reconnect_{i + 1}: namespaces={len(namespace_array)}")
+        await asyncio.sleep(0.5)
+    return evidence
+
+
+async def opcua_node_browse(limit: int = 30) -> list[str]:
+    from asyncua import Client
+
+    evidence = []
+    async with Client(url=OPC_URL, timeout=5) as client:
+        children = await client.nodes.objects.get_children()
+        for child in children[:limit]:
+            name = (await child.read_browse_name()).Name
+            evidence.append(f"object: {name} {child.nodeid}")
+            for sub in (await child.get_children())[:5]:
+                sub_name = (await sub.read_browse_name()).Name
+                evidence.append(f"node: {sub_name} {sub.nodeid}")
+                if len(evidence) >= limit:
+                    return evidence
+    return evidence
+
+
+async def opcua_endpoint_discovery() -> list[str]:
+    from asyncua import Client
+
+    async with Client(url=OPC_URL, timeout=5) as client:
+        endpoints = await client.connect_and_get_server_endpoints()
+        return [f"endpoint: {ep.EndpointUrl} policy={ep.SecurityPolicyUri}" for ep in endpoints]
+
+
+async def opcua_benign_subscription(duration: float = 5.0) -> list[str]:
+    from asyncua import Client
+
+    evidence = []
+    nodes = [
+        'ns=3;s="BangTai"',
+        'ns=3;s="Nhap"',
+        'ns=3;s="HienThi"',
+        'ns=3;s="Vat 1"',
+        'ns=3;s="Vat 2"',
+        'ns=3;s="Vat 3"',
+    ]
+
+    class Handler:
+        def datachange_notification(self, node, val, data):
+            evidence.append(f"datachange: {node.nodeid}={val!r}")
+
+    async with Client(url=OPC_URL, timeout=5) as client:
+        sub = await client.create_subscription(500, Handler())
+        handles = []
+        for node_id in nodes:
+            node = client.get_node(node_id)
+            try:
+                value = await node.read_value()
+                evidence.append(f"initial: {node_id}={value!r}")
+                handles.append(await sub.subscribe_data_change(node))
+            except Exception as exc:
+                evidence.append(f"read_failed: {node_id}: {exc}")
+        await asyncio.sleep(duration)
+        await sub.delete()
+    return evidence
+
+
+def http_request(method: str, path: str, body: bytes | None = None) -> tuple[int | None, str]:
+    try:
+        req = Request(f"{WEB_SCADA_API}{path}", data=body, method=method)
+        if body is not None:
+            req.add_header("Content-Type", "application/json")
+        with urlopen(req, timeout=5) as res:
+            return res.status, res.read().decode("utf-8", errors="replace")[:300]
+    except HTTPError as exc:
+        return exc.code, exc.read().decode("utf-8", errors="replace")[:300]
+    except (OSError, URLError) as exc:
+        return None, str(exc)
+
+
+def web_invalid_parameter() -> list[str]:
+    status, body = http_request("GET", "/tags/__invalid_tag_key__")
+    return [f"GET /tags/__invalid_tag_key__ -> {status}: {body}"]
+
+
+def web_command_rejected() -> list[str]:
+    status, body = http_request("POST", "/commands/start", b"{}")
+    return [f"POST /commands/start -> {status}: {body or 'empty'}"]
+
+
+async def execute_safe(scenario_id: str) -> list[str]:
+    if scenario_id == "OPCUA_BENIGN_RECONNECT":
+        return await opcua_benign_reconnect()
+    if scenario_id == "OPCUA_NODE_BROWSE":
+        return await opcua_node_browse()
+    if scenario_id == "OPCUA_ENDPOINT_DISCOVERY":
+        return await opcua_endpoint_discovery()
+    if scenario_id == "OPCUA_BENIGN_SUBSCRIPTION":
+        return await opcua_benign_subscription()
+    if scenario_id == "API_INVALID_PARAMETER":
+        return web_invalid_parameter()
+    if scenario_id in {"API_COMMAND_REJECTED", "WEB_UNAUTHORIZED_COMMAND"}:
+        return web_command_rejected()
+    if scenario_id == "WEB_LOG_AND_PLC_STATE_DIVERGENCE":
+        status, body = http_request("GET", "/events")
+        return [f"GET /events -> {status}: {body}"]
+    return ["No safe executor implemented; catalog-only scenario."]
+
+
+def save_result(group_id: str, scenario: dict, status: str, evidence: list[str], notes: list[str], start: float) -> Path:
+    out_dir = Path("test_results/day8")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    result = {
+        "scenario_id": scenario["id"],
+        "label": scenario.get("label", scenario["id"]),
+        "group": group_id,
+        "status": status,
+        "start_time": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(start)),
+        "end_time": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "duration_s": round(time.time() - start, 3),
+        "preconditions": scenario.get("preconditions", []),
+        "evidence": evidence,
+        "notes": notes,
+    }
+    path = out_dir / f"{scenario['id']}_{time.strftime('%Y%m%d_%H%M%S')}.json"
+    path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+async def run_items(items, execute: bool) -> int:
+    rc = 0
+    for group_id, _group, scenario in items:
+        start = time.time()
+        scenario_id = scenario["id"]
+        print(f"\n[DAY8] {scenario_id}")
+        info(scenario["objective"])
+        notes = []
+        evidence = []
+
+        if scenario.get("requires_manual_gate"):
+            notes.append("requires_manual_gate=true; not executed by runner")
+            status = "GATED"
+            warn("Manual safety gate required; catalog entry recorded only.")
+        elif not execute:
+            notes.append("dry-run only; add --execute for safe executor")
+            status = "DRY_RUN"
+            info("Dry-run; no traffic generated.")
+        elif not scenario.get("safe_to_execute"):
+            notes.append("safe_to_execute=false; blocked")
+            status = "BLOCKED"
+            warn("Blocked because safe_to_execute=false.")
+        else:
+            try:
+                evidence = await execute_safe(scenario_id)
+                status = "EXECUTED"
+                ok(f"Executed safe scenario; evidence={len(evidence)}")
+            except ImportError as exc:
+                status = "FAILED"
+                rc = 1
+                fail(f"Missing dependency: {exc}")
+                notes.append(f"Missing dependency: {exc}")
+            except Exception as exc:
+                status = "FAILED"
+                rc = 1
+                fail(str(exc))
+                notes.append(str(exc))
+
+        path = save_result(group_id, scenario, status, evidence, notes, start)
+        info(f"Saved: {path}")
+    return rc
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Day 8 multi-surface scenario runner")
+    parser.add_argument("--list", action="store_true", help="List scenarios and exit")
+    parser.add_argument("--group", choices=["s7_traditional", "opcua", "web_api", "logic_aware", "cross_layer"], help="Run/list one group")
+    parser.add_argument("--scenario", help="Run/list one scenario id")
+    parser.add_argument("--execute", action="store_true", help="Execute safe scenarios; default is dry-run")
+    args = parser.parse_args()
+
+    catalog = load_catalog()
+    items = select_scenarios(catalog, args.group, args.scenario)
+    if not items:
+        fail("No matching scenarios")
+        return 2
+    if args.list:
+        print_scenarios(items)
+        return 0
+    return asyncio.run(run_items(items, args.execute))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

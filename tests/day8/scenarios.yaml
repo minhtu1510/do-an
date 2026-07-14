@@ -1,0 +1,313 @@
+version: 1
+day: 8
+title: Multi-surface industrial communication scenarios
+defaults:
+  target_ip_env: TARGET_IP
+  opc_url_env: OPC_URL
+  web_api_env: WEB_SCADA_API
+  capture_iface_env: CAPTURE_IFACE
+groups:
+  s7_traditional:
+    title: Nhom A - S7 truyen thong
+    description: Existing S7comm attack labels retained for continuity with prior dataset days.
+    scenarios:
+      - id: SCAN_PORT
+        label: SCAN_PORT
+        objective: Discover exposed PLC/HMI industrial services.
+        protocol: S7comm/TCP
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Lab network isolation, Capture enabled, Target reachable on TCP/102]
+        evidence: [TCP SYN/ACK profile, Open port list, Timeline label]
+      - id: ENUM_TAGS
+        label: ENUM_TAGS
+        objective: Enumerate memory/tag ranges over S7comm.
+        protocol: S7comm
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [S7 client access, Known rack/slot, Capture enabled]
+        evidence: [ReadVar sequence, Address range, Response codes]
+      - id: RWRITE_BURST
+        label: RWRITE_BURST
+        objective: Burst write to process variables.
+        protocol: S7comm
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Writable marker/DB test area, Rollback value known, Operator approval]
+        evidence: [WriteVar burst, PLC state diff, Recovery log]
+      - id: SETPOINT_ATTACK
+        label: SETPOINT_ATTACK
+        objective: Modify setpoint or timer value.
+        protocol: S7comm
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Known safe setpoint bounds, Process stopped or guarded, Rollback value known]
+        evidence: [WriteVar to setpoint, Process response, Recovery log]
+      - id: SENSOR_SPOOF
+        label: SENSOR_SPOOF
+        objective: Spoof process-state bits or sensor-like values.
+        protocol: S7comm
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Known internal bits, Safe window, Operator approval]
+        evidence: [Bit/value write, State inconsistency, Timeline label]
+      - id: STEALTHY_WRITE
+        label: STEALTHY_WRITE
+        objective: Low-amplitude write changes within normal-looking ranges.
+        protocol: S7comm
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Safe writable marker, Baseline captured, Long capture window]
+        evidence: [Sparse WriteVar, Slow drift, Baseline deviation]
+      - id: S7_FLOOD
+        label: S7_FLOOD
+        objective: Stress S7 connection/session handling.
+        protocol: S7comm/TCP
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Dedicated lab window, Recovery plan, Operator present]
+        evidence: [Connection burst, Response latency, Reconnect events]
+      - id: PROTOCOL_FUZZ
+        label: PROTOCOL_FUZZ
+        objective: Send malformed S7 protocol traffic.
+        protocol: S7comm
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Non-production lab only, Fuzz count bounded, Recovery plan]
+        evidence: [Malformed PDU trace, Error responses, Device health log]
+
+  opcua:
+    title: Nhom B - OPC UA
+    description: New OPC UA attack surface using the controller OPC UA server and Web-SCADA gateway.
+    scenarios:
+      - id: OPCUA_BENIGN_SUBSCRIPTION
+        label: OPCUA_BENIGN_SUBSCRIPTION
+        objective: Establish a normal OPC UA subscription to configured tags.
+        protocol: OPC UA
+        safe_to_execute: true
+        requires_manual_gate: false
+        preconditions: [OPC UA endpoint reachable, Anonymous or configured read allowed, Tags exist]
+        evidence: [CreateSubscription, MonitoredItemCreate, DataChange or periodic reads]
+      - id: OPCUA_BENIGN_RECONNECT
+        label: OPCUA_BENIGN_RECONNECT
+        objective: Generate normal reconnect traffic for baseline comparison.
+        protocol: OPC UA
+        safe_to_execute: true
+        requires_manual_gate: false
+        preconditions: [OPC UA endpoint reachable, Short reconnect interval approved]
+        evidence: [OpenSecureChannel, CreateSession, CloseSession repeated]
+      - id: OPCUA_ENDPOINT_DISCOVERY
+        label: OPCUA_ENDPOINT_DISCOVERY
+        objective: Query OPC UA endpoint/security policy metadata.
+        protocol: OPC UA
+        safe_to_execute: true
+        requires_manual_gate: false
+        preconditions: [TCP/4840 reachable]
+        evidence: [GetEndpoints request, Endpoint/security policy list]
+      - id: OPCUA_NODE_BROWSE
+        label: OPCUA_NODE_BROWSE
+        objective: Browse namespace and discover exposed nodes.
+        protocol: OPC UA
+        safe_to_execute: true
+        requires_manual_gate: false
+        preconditions: [Browse permission available]
+        evidence: [Browse requests, NodeIds, BrowseName list]
+      - id: OPCUA_UNAUTHORIZED_SESSION
+        label: OPCUA_UNAUTHORIZED_SESSION
+        objective: Attempt session creation with invalid identity.
+        protocol: OPC UA
+        safe_to_execute: true
+        requires_manual_gate: false
+        preconditions: [Server has user/password auth path or rejects invalid identity]
+        evidence: [CreateSession/ActivateSession failure, BadIdentityTokenInvalid]
+      - id: OPCUA_WRITE_DENIED
+        label: OPCUA_WRITE_DENIED
+        objective: Attempt write to read-only node and verify denial.
+        protocol: OPC UA
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Known read-only node, Expected BadUserAccessDenied, No process impact]
+        evidence: [Write request, BadUserAccessDenied or BadNotWritable]
+      - id: OPCUA_INVALID_WRITE
+        label: OPCUA_INVALID_WRITE
+        objective: Attempt invalid type/range write and verify rejection.
+        protocol: OPC UA
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Known node, Invalid value selected to be rejected, Rollback not needed]
+        evidence: [Write request, BadTypeMismatch or range error]
+      - id: OPCUA_SESSION_BURST
+        label: OPCUA_SESSION_BURST
+        objective: Create bounded burst of OPC UA sessions.
+        protocol: OPC UA
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Dedicated lab window, Low bounded connection count, Recovery plan]
+        evidence: [Session burst, Server diagnostics, Reconnect/stale events]
+      - id: OPCUA_CERTIFICATE_REJECTED
+        label: OPCUA_CERTIFICATE_REJECTED
+        objective: Attempt connection with untrusted client certificate.
+        protocol: OPC UA
+        safe_to_execute: true
+        requires_manual_gate: false
+        preconditions: [Server security policy enabled, Client cert not trusted]
+        evidence: [OpenSecureChannel failure, Certificate rejected status]
+
+  web_api:
+    title: Nhom C - Web/API
+    description: Representative Web/API misuse scenarios against the SCADA application surface.
+    scenarios:
+      - id: WEB_LOGIN_FAILURE
+        label: WEB_LOGIN_FAILURE
+        objective: Failed login attempts against the web auth surface.
+        protocol: HTTP
+        safe_to_execute: true
+        requires_manual_gate: false
+        preconditions: [Auth endpoint exists, Test account policy known]
+        evidence: [HTTP 401/403, Login failure log]
+      - id: WEB_ROLE_VIOLATION
+        label: WEB_ROLE_VIOLATION
+        objective: User attempts action outside assigned role.
+        protocol: HTTP
+        safe_to_execute: true
+        requires_manual_gate: false
+        preconditions: [Role model exists, Low-privilege test account]
+        evidence: [HTTP 403, Audit event]
+      - id: WEB_UNAUTHORIZED_COMMAND
+        label: WEB_UNAUTHORIZED_COMMAND
+        objective: Command sent without valid authorization.
+        protocol: HTTP/WebSocket
+        safe_to_execute: true
+        requires_manual_gate: false
+        preconditions: [Command endpoint exists or returns 404/405, No PLC write side effect]
+        evidence: [HTTP 401/403/404/405, Rejected operation count]
+      - id: API_INVALID_PARAMETER
+        label: API_INVALID_PARAMETER
+        objective: Submit invalid API parameter and verify validation.
+        protocol: HTTP
+        safe_to_execute: true
+        requires_manual_gate: false
+        preconditions: [API reachable]
+        evidence: [HTTP 400/404/422, Error body]
+      - id: API_COMMAND_REJECTED
+        label: API_COMMAND_REJECTED
+        objective: Verify command rejection path for unsupported write operation.
+        protocol: HTTP
+        safe_to_execute: true
+        requires_manual_gate: false
+        preconditions: [Read-only backend policy active]
+        evidence: [HTTP 404/405/501, No PLC state change]
+      - id: API_EXCESSIVE_REQUEST
+        label: API_EXCESSIVE_REQUEST
+        objective: Bounded high-rate read requests to characterize API behavior.
+        protocol: HTTP
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Bounded request count, Backend resource monitoring, Lab window]
+        evidence: [HTTP rate pattern, Latency, Error/retry behavior]
+
+  logic_aware:
+    title: Nhom D - Logic-aware
+    description: Process semantics and timing context, not merely protocol anomalies.
+    scenarios:
+      - id: VALID_VALUE_WRONG_CONTEXT
+        label: VALID_VALUE_WRONG_CONTEXT
+        objective: Send a valid value when the process context makes it unsafe.
+        protocol: S7comm/OPC UA/Web
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [State model defined, Safe window detection, Rollback plan]
+        evidence: [Value within range, Context violation, Process response]
+      - id: VALID_VALUE_WRONG_TIME
+        label: VALID_VALUE_WRONG_TIME
+        objective: Send valid command/value at wrong process phase.
+        protocol: S7comm/OPC UA/Web
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Stage/timer tags readable, Phase boundary known]
+        evidence: [Timestamped command, Stage/timer state, Violation label]
+      - id: COMMAND_SEQUENCE_VIOLATION
+        label: COMMAND_SEQUENCE_VIOLATION
+        objective: Issue commands out of allowed sequence.
+        protocol: Web/S7comm/OPC UA
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Allowed sequence documented, Simulator/test mode preferred]
+        evidence: [Command order trace, Rejection or abnormal state]
+      - id: SETPOINT_CHANGE_DURING_FAULT
+        label: SETPOINT_CHANGE_DURING_FAULT
+        objective: Attempt setpoint change while fault state is active.
+        protocol: Web/S7comm/OPC UA
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Fault state available or simulated safely, Command should be rejected]
+        evidence: [Fault state, Setpoint request, Reject/accept outcome]
+      - id: START_DURING_MAINTENANCE
+        label: START_DURING_MAINTENANCE
+        objective: Attempt start while maintenance mode is active.
+        protocol: Web/S7comm/OPC UA
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Maintenance flag exists, Start command path exists, Operator approval]
+        evidence: [Maintenance state, Start command, Rejection or unsafe transition]
+      - id: LOW_RATE_PARAMETER_CHANGE
+        label: LOW_RATE_PARAMETER_CHANGE
+        objective: Low-rate parameter drift that stays within single-step thresholds.
+        protocol: S7comm/OPC UA/Web
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Safe parameter, Bounds known, Long capture window]
+        evidence: [Sparse updates, Cumulative drift, Process trend]
+
+  cross_layer:
+    title: Nhom E - Cross-layer
+    description: Correlated Web/API, OPC UA and PLC-state scenarios for novel dataset labels.
+    scenarios:
+      - id: WEB_TO_OPCUA_UNAUTHORIZED_WRITE
+        label: WEB_TO_OPCUA_UNAUTHORIZED_WRITE
+        objective: Web-originated request attempts unauthorized OPC UA write path.
+        protocol: HTTP -> OPC UA
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Command path implemented, OPC UA write denied policy, Audit logging]
+        evidence: [HTTP request, OPC UA write denied, Audit correlation]
+      - id: COMPROMISED_OPERATOR_SESSION
+        label: COMPROMISED_OPERATOR_SESSION
+        objective: Valid session used from abnormal context or timing.
+        protocol: HTTP/WebSocket -> PLC
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Auth/session telemetry available, Test operator account, Command path]
+        evidence: [Valid session token, Abnormal command, PLC state effect/rejection]
+      - id: FALSE_DISPLAY_WITH_PROCESS_CHANGE
+        label: FALSE_DISPLAY_WITH_PROCESS_CHANGE
+        objective: Process changes while display/log does not reflect it correctly.
+        protocol: WebSocket/OPC UA/S7comm
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Independent PLC read path, Web display capture, Safe change target]
+        evidence: [PLC state changed, UI stale/false value, Divergence interval]
+      - id: COMMAND_WITHOUT_VALID_WEB_SESSION
+        label: COMMAND_WITHOUT_VALID_WEB_SESSION
+        objective: PLC-affecting command observed without corresponding valid web session.
+        protocol: S7comm/OPC UA + HTTP audit
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Web audit log, Direct PLC command path, Safe command target]
+        evidence: [PLC write, Missing/invalid web session, Correlation gap]
+      - id: WEB_LOG_AND_PLC_STATE_DIVERGENCE
+        label: WEB_LOG_AND_PLC_STATE_DIVERGENCE
+        objective: Web log claims one state while PLC independently reports another.
+        protocol: HTTP/WebSocket + OPC UA/S7comm
+        safe_to_execute: true
+        requires_manual_gate: false
+        preconditions: [Web logs/events available, Independent OPC UA read]
+        evidence: [Event log value, PLC tag value, Divergence duration]
+      - id: MULTI_STAGE_WEB_OPCUA_PLC_ATTACK
+        label: MULTI_STAGE_WEB_OPCUA_PLC_ATTACK
+        objective: Correlate reconnaissance, web misuse, OPC UA/S7 access and process impact.
+        protocol: HTTP + OPC UA + S7comm
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [All single-stage checks passed, Timeline labeling, Operator approval]
+        evidence: [Stage timeline, Cross-protocol flow sequence, PLC state diff]
