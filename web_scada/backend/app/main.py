@@ -15,6 +15,9 @@ load_dotenv()
 from .opcua.gateway import OPCUAGateway
 from .opcua.tag_registry import get_tag_registry
 from .api.router import api_router
+from .alarms import alarm_engine
+from .events import event_service
+from .history.router import history_router
 from .websocket.manager import ws_manager
 
 logger = logging.getLogger("web_scada")
@@ -40,7 +43,12 @@ async def lifespan(app: FastAPI):
     def on_tag_update(key: str, data: dict):
         try:
             loop = asyncio.get_event_loop()
+            events = event_service.add_many(alarm_engine.process_tag_update(key, data))
             loop.create_task(ws_manager.broadcast_tag_update(key, data))
+            for event in events:
+                payload = event.to_dict()
+                payload["active_count"] = alarm_engine.active_alarm_count()
+                loop.create_task(ws_manager.broadcast_event(payload))
         except Exception:
             pass
 
@@ -77,6 +85,7 @@ app.add_middleware(
 )
 
 app.include_router(api_router, prefix="/api")
+app.include_router(history_router, prefix="/api/history")
 
 
 @app.websocket("/ws/process")
@@ -90,6 +99,11 @@ async def websocket_endpoint(ws: WebSocket):
             "status": gateway.status,
             "timestamp": datetime.now(TZ).isoformat(),
         })
+        events = event_service.add_many(alarm_engine.process_gateway_status(gateway.status))
+        for event in events:
+            payload = event.to_dict()
+            payload["active_count"] = alarm_engine.active_alarm_count()
+            await ws.send_json({"type": "event", "event": payload, "active_count": payload["active_count"]})
         while True:
             await ws.receive_text()
     except WebSocketDisconnect:

@@ -2,12 +2,18 @@ import { Routes, Route, NavLink } from "react-router-dom";
 import StatusBar from "./components/StatusBar";
 import Overview from "./pages/Overview";
 import ProcessMonitor from "./pages/ProcessMonitor";
+import AlarmEvents from "./pages/AlarmEvents";
+import Trends from "./pages/Trends";
+import SecurityView from "./pages/SecurityView";
 import SystemStatus from "./pages/SystemStatus";
 
 const NAV = [
-  { to: "/", label: "Tong quan", end: true },
-  { to: "/process", label: "Giam sat", end: false },
-  { to: "/system", label: "He thong", end: false },
+  { to: "/", label: "Overview", end: true },
+  { to: "/process", label: "Process Monitor", end: false },
+  { to: "/alarms", label: "Alarms & Events", end: false },
+  { to: "/trends", label: "Trends & History", end: false },
+  { to: "/security", label: "Security / IDS", end: false },
+  { to: "/system", label: "System Status", end: false },
 ];
 
 export default function App() {
@@ -15,7 +21,7 @@ export default function App() {
     <div className="min-h-screen bg-gray-950">
       <StatusBar />
       {/* Nav */}
-      <nav className="flex gap-1 bg-gray-900 border-b border-gray-800 px-4">
+      <nav className="flex flex-wrap gap-1 bg-gray-900 border-b border-gray-800 px-4">
         {NAV.map((n) => (
           <NavLink
             key={n.to}
@@ -36,6 +42,9 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Overview />} />
         <Route path="/process" element={<ProcessMonitor />} />
+        <Route path="/alarms" element={<AlarmEvents />} />
+        <Route path="/trends" element={<Trends />} />
+        <Route path="/security" element={<SecurityView />} />
         <Route path="/system" element={<SystemStatus />} />
       </Routes>
     </div>

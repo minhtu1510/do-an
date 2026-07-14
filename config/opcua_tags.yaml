@@ -4,90 +4,99 @@
 tags:
   - key: vat_1
     node_id: 'ns=3;s="Vat 1"'
-    display_name: "Cảm biến vị trí 1"
-    description: "Phát hiện vật thể tại vị trí 1"
+    display_name: "Stage 1 status"
+    description: "Internal status bit for production stage 1"
     data_type: Boolean
-    group: sensors
+    group: process_steps
     writable: false
     history_enabled: true
+    semantic_type: internal_step
 
   - key: vat_2
     node_id: 'ns=3;s="Vat 2"'
-    display_name: "Cảm biến vị trí 2"
-    description: "Phát hiện vật thể tại vị trí 2"
+    display_name: "Stage 2 status"
+    description: "Internal status bit for production stage 2"
     data_type: Boolean
-    group: sensors
+    group: process_steps
     writable: false
     history_enabled: true
+    semantic_type: internal_step
 
   - key: vat_3
     node_id: 'ns=3;s="Vat 3"'
-    display_name: "Cảm biến vị trí 3"
-    description: "Phát hiện vật thể tại vị trí 3"
+    display_name: "Stage 3 status"
+    description: "Internal status bit for production stage 3"
     data_type: Boolean
-    group: sensors
+    group: process_steps
     writable: false
     history_enabled: true
+    semantic_type: internal_step
 
   - key: bang_tai
     node_id: 'ns=3;s="BangTai"'
-    display_name: "Trạng thái băng tải"
-    description: "RUN/STOP trạng thái băng tải"
+    display_name: "Conveyor status"
+    description: "RUN/STOP state of the conveyor"
     data_type: Boolean
-    group: process
+    group: equipment
     writable: false
     history_enabled: true
+    semantic_type: equipment_status
 
   - key: nhap
     node_id: 'ns=3;s="Nhap"'
-    display_name: "Số sản phẩm nhập"
-    description: "Bộ đếm sản phẩm đầu vào"
+    display_name: "Target production quantity"
+    description: "Number of products to be processed"
     data_type: Int16
-    group: counters
+    group: production
     writable: false
     history_enabled: true
+    semantic_type: production_target
 
   - key: hien_thi
     node_id: 'ns=3;s="HienThi"'
-    display_name: "Số sản phẩm xuất"
-    description: "Bộ đếm sản phẩm đầu ra"
+    display_name: "Completed production quantity"
+    description: "Number of products completed by the process"
     data_type: Int16
-    group: counters
+    group: production
     writable: false
     history_enabled: true
+    semantic_type: production_actual
 
   - key: cd1
     node_id: 'ns=3;s="CD1"'
-    display_name: "Thời gian công đoạn 1"
-    description: "Timer countdown cho vật thể 1"
+    display_name: "Stage 1 timer"
+    description: "Timer value for production stage 1"
     unit: ms
     data_type: Int32
-    group: parameters
+    group: stage_timers
     writable: false
     minimum: 500
     maximum: 10000
     history_enabled: true
+    semantic_type: stage_timer
 
   - key: cd2
     node_id: 'ns=3;s="CD2"'
-    display_name: "Thời gian công đoạn 2"
-    description: "Timer countdown cho vật thể 2"
+    display_name: "Stage 2 timer"
+    description: "Timer value for production stage 2"
     unit: ms
     data_type: Int32
-    group: parameters
+    group: stage_timers
     writable: false
     minimum: 500
     maximum: 10000
     history_enabled: true
+    semantic_type: stage_timer
 
   - key: cd3
     node_id: 'ns=3;s="CD3"'
-    display_name: "Thời gian công đoạn 3"
-    description: "Timer countdown cho vật thể 3"
+    display_name: "Stage 3 timer"
+    description: "Timer value for production stage 3"
     unit: ms
     data_type: Int32
-    group: parameters
+    group: stage_timers
     writable: false
     minimum: 500
     maximum: 10000
     history_enabled: true
+    semantic_type: stage_timer

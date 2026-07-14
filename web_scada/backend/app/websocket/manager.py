@@ -27,6 +27,17 @@ class ConnectionManager:
             except Exception:
                 pass
 
+    async def broadcast_event(self, event: dict):
+        for ws in self._connections:
+            try:
+                await ws.send_json({
+                    "type": "event",
+                    "event": event,
+                    "active_count": event.get("active_count"),
+                })
+            except Exception:
+                pass
+
     @property
     def count(self):
         return len(self._connections)

@@ -1,4 +1,4 @@
-export default function TagCard({ label, value, unit, quality, stale, className }) {
+export default function TagCard({ label, sublabel, value, unit, quality, stale, className }) {
   const isStale = stale;
   const bgColor = isStale ? "bg-red-950/20 border-red-900/50" : "bg-gray-800 border-gray-700";
   let displayValue;
@@ -16,6 +16,7 @@ export default function TagCard({ label, value, unit, quality, stale, className 
   return (
     <div className={`rounded border p-3 ${bgColor} ${className || ""}`}>
       <div className="text-xs text-gray-500">{label}</div>
+      {sublabel && <div className="text-[10px] text-gray-600">{sublabel}</div>}
       <div className={`text-xl font-mono font-bold mt-1 ${textColor}`}>
         {displayValue}
         {!isStale && unit && <span className="text-sm ml-1 text-gray-500">{unit}</span>}

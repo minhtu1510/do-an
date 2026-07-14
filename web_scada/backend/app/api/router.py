@@ -6,6 +6,9 @@ from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 from datetime import datetime, timezone, timedelta
 
+from ..alarms import alarm_engine
+from ..events import event_service
+
 load_dotenv()
 
 TZ = timezone(timedelta(hours=7))
@@ -25,7 +28,9 @@ def _tag_registry():
 @api_router.get("/plc/status")
 async def plc_status():
     g = _gateway()
-    return {**g.status, "timestamp": datetime.now(TZ).isoformat()}
+    status = {**g.status, "timestamp": datetime.now(TZ).isoformat()}
+    event_service.add_many(alarm_engine.process_gateway_status(status))
+    return status
 
 
 @api_router.get("/tags")
@@ -59,3 +64,32 @@ async def get_tag(tag_key: str):
             "message": "Tag configured but not yet subscribed",
         }
     return value
+
+
+@api_router.get("/events")
+async def get_events(limit: int = 100):
+    return {
+        "events": event_service.list(limit),
+        "active_count": alarm_engine.active_alarm_count(),
+        "timestamp": datetime.now(TZ).isoformat(),
+    }
+
+
+@api_router.get("/security/status")
+async def security_status():
+    g = _gateway()
+    metrics = alarm_engine.security_metrics()
+    return {
+        "plc_connection": "CONNECTED" if g.status.get("connected") else "DISCONNECTED",
+        "opcua_connection": "CONNECTED" if g.status.get("connected") else "DISCONNECTED",
+        "reconnect_count": g.status.get("reconnect_count", 0),
+        "active_alarm_count": metrics["active_alarm_count"],
+        "stale_event_count": metrics["stale_event_count"],
+        "rejected_operation_count": metrics["rejected_operation_count"],
+        "capture_status": "Not configured",
+        "dataset_session_id": "No active collection",
+        "scenario_id": "Not configured",
+        "current_label": "Not configured",
+        "ids_module": "IDS module unavailable",
+        "timestamp": datetime.now(TZ).isoformat(),
+    }

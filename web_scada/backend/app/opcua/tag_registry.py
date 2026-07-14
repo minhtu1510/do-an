@@ -32,6 +32,7 @@ class TagConfig:
     key: str
     node_id: str
     display_name: str = ""
+    description: str = ""
     data_type: str = "String"
     unit: str = ""
     group: str = "default"
@@ -40,6 +41,7 @@ class TagConfig:
     maximum: Optional[float] = None
     history_enabled: bool = True
     stale_timeout: int = 10
+    semantic_type: str = ""
 
 
 @dataclass(slots=True)
@@ -63,9 +65,11 @@ class TagValue:
             "received_timestamp": self.received_timestamp,
             "stale": self.stale,
             "display_name": self.config.display_name if self.config else "",
+            "description": self.config.description if self.config else "",
             "unit": self.config.unit if self.config else "",
             "group": self.config.group if self.config else "default",
             "writable": self.config.writable if self.config else False,
+            "semantic_type": self.config.semantic_type if self.config else "",
         }
 
 
@@ -100,6 +104,7 @@ class TagRegistry:
             cfg = TagConfig(
                 key=key, node_id=nid,
                 display_name=item.get("display_name", key),
+                description=item.get("description", ""),
                 data_type=item.get("data_type", "String"),
                 unit=item.get("unit", ""),
                 group=item.get("group", "default"),
@@ -108,6 +113,7 @@ class TagRegistry:
                 maximum=item.get("maximum"),
                 history_enabled=bool(item.get("history_enabled", True)),
                 stale_timeout=int(item.get("stale_timeout", 10)),
+                semantic_type=item.get("semantic_type", ""),
             )
             self.tags.append(cfg)
             self._by_key[key] = cfg

@@ -46,10 +46,7 @@ export default function StatusBar() {
       ) : (
         <>
           <Dot label="PLC" status={plcConnected ? "on" : "off"} />
-          <Dot
-            label="OPC UA"
-            status={plcDisconnected ? "off" : allStale ? "warn" : anyStale ? "warn" : "on"}
-          />
+          <Dot label="OPC UA" status={plcDisconnected ? "off" : anyStale ? "warn" : "on"} />
           <Dot label="WS" status={wsOpen ? "on" : "off"} />
         </>
       )}
@@ -67,7 +64,7 @@ export default function StatusBar() {
       )}
       {!plcDisconnected && anyStale && (
         <span className="bg-yellow-900/30 text-yellow-400 px-2 py-0.5 rounded text-[10px]">
-          STALE — reconnect backend
+          STALE TAGS
         </span>
       )}
     </div>
