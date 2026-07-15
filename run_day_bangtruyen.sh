@@ -50,6 +50,7 @@ CAPTURE_DIR="${CAPTURE_DIR:-captures}"
 LOG_DIR="${LOG_DIR:-logs}"
 LABEL_DIR="${LABEL_DIR:-labels}"
 ATTACK_EVENT_LOG_ENABLED="${ATTACK_EVENT_LOG_ENABLED:-1}"
+RESET_OUTPUTS="${RESET_OUTPUTS:-1}"
 
 DAY1_DURATION_S="${DAY1_DURATION_S:-${DUR_DAY1:-14400}}"
 DAY2_DURATION_S="${DAY2_DURATION_S:-${DUR_DAY2:-14400}}"
@@ -145,6 +146,7 @@ Options:
 Environment:
   COLLECTION_PROFILE=standard|extended_300k
                           extended_300k lengthens runs, repeats attacks, and varies rates for a larger dataset.
+  RESET_OUTPUTS=1|0       Default 1 resets this role's timeline/tag/event outputs at run start.
   CONTROLLER_PROFILE=standard|mixed|tia_portal_attack|attack_mixed|day4_mixed
                           If unset, controller uses mixed background; Day 4 uses day4_mixed.
 
@@ -294,6 +296,18 @@ label_file() {
 
 attack_event_file() {
     echo "$LABEL_DIR/day${DAY}_${SESSION_ID}_${HOST_ID}_attack_events.csv"
+}
+
+init_role_outputs() {
+    [[ "$RESET_OUTPUTS" == "1" ]] || return 0
+    local lf
+    lf="$(label_file)"
+    echo "attacker_timestamp_ms,scenario_label,action,session_id,host_id,episode_id,day,note" > "$lf"
+    if [[ "$ROLE" == "attacker" && "$ATTACK_EVENT_LOG_ENABLED" == "1" ]]; then
+        rm -f "$(attack_event_file)"
+    fi
+    TAG_LOG_FILE_INITIALIZED="0"
+    echo "[init] reset role outputs: timeline=$lf reset_outputs=$RESET_OUTPUTS"
 }
 
 label() {
@@ -528,18 +542,27 @@ PYEOF
 
 start_tag_logger() {
     [[ "$ENABLE_TAG_LOGGER" == "1" ]] || { echo "[ctrl] tag logger disabled"; return 0; }
+    local output
+    local append_args=()
+    output="$LOG_DIR/day${DAY}_${SESSION_ID}_${HOST_ID}_tags.csv"
+    if [[ "${TAG_LOG_FILE_INITIALIZED:-0}" == "1" ]]; then
+        append_args+=("--append")
+    else
+        TAG_LOG_FILE_INITIALIZED="1"
+    fi
     "$PY_CMD" log_tags_bangtruyen.py \
         --target "$TARGET_IP" \
         --rack "$RACK" \
         --slot "$SLOT" \
         --interval "$TAG_LOG_INTERVAL" \
         --q0-allowed-mask "$Q0_ALLOWED_MASK" \
-        --output "$LOG_DIR/day${DAY}_${SESSION_ID}_${HOST_ID}_tags.csv" \
+        --output "$output" \
         --session-id "$SESSION_ID" \
         --host-id "$HOST_ID" \
         --scenario-id "BENIGN_READER" \
         --episode-id "${SESSION_ID}:controller:tag_logger" \
-        --day "$DAY" &
+        --day "$DAY" \
+        "${append_args[@]}" &
     TAG_LOGGER_PID="$!"
     PIDS+=("$!")
     echo "[ctrl] tag logger started"
@@ -1471,6 +1494,8 @@ if [[ "${PREFLIGHT_ONLY:-0}" == "1" ]]; then
     echo "[preflight] done"
     exit 0
 fi
+
+init_role_outputs
 
 case "$ROLE" in
     controller) run_controller ;;

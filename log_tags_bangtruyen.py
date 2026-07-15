@@ -375,6 +375,7 @@ def main():
     parser.add_argument('--interval', type=float, default=0.5,
                         help='Poll interval (giây). Mặc định 0.5s = 2Hz')
     parser.add_argument('--output',   required=True)
+    parser.add_argument('--append', action='store_true', help='Append to an existing CSV and write header only if the file is empty')
     parser.add_argument('--session-id', default='')
     parser.add_argument('--host-id', default='')
     parser.add_argument('--scenario-id', default='BENIGN_READER')
@@ -391,9 +392,11 @@ def main():
     header = build_header()
 
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
-    fh = open(args.output, 'w', newline='', buffering=1)
+    needs_header = not args.append or not os.path.exists(args.output) or os.path.getsize(args.output) == 0
+    fh = open(args.output, 'a' if args.append else 'w', newline='', buffering=1)
     writer = csv.writer(fh)
-    writer.writerow(header)
+    if needs_header:
+        writer.writerow(header)
     fh.flush()
 
     client = snap7.client.Client()
