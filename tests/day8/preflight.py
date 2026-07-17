@@ -47,6 +47,10 @@ def parse_opc_host_port(url: str) -> tuple[str, int]:
     return host_port, 4840
 
 
+def make_opc_url(host: str, port: int = 4840) -> str:
+    return f"opc.tcp://{host}:{port}"
+
+
 def http_json(path: str, timeout: float = 3.0) -> tuple[bool, object]:
     try:
         with urlopen(f"{WEB_SCADA_API}{path}", timeout=timeout) as res:
@@ -118,6 +122,9 @@ def main() -> int:
     ok(f"S7 TCP/102: {s7_msg}") if s7_ok else warn(f"S7 TCP/102: {s7_msg}")
 
     opc_host, opc_port = parse_opc_host_port(OPC_URL)
+    if opc_host != PLC_IP:
+        warn(f"OPC_URL host ({opc_host}) differs from PLC_IP ({PLC_IP}); verify which device exposes the PLC tags.")
+
     opc_tcp_ok, opc_tcp_msg = tcp_check(opc_host, opc_port)
     results["opcua_tcp"] = {"ok": opc_tcp_ok, "detail": opc_tcp_msg}
     ok(f"OPC UA TCP/{opc_port}: {opc_tcp_msg}") if opc_tcp_ok else warn(f"OPC UA TCP/{opc_port}: {opc_tcp_msg}")
@@ -126,9 +133,28 @@ def main() -> int:
     results["opcua_client"] = {"ok": opc_ok, "detail": opc_msg}
     ok(f"OPC UA client: {opc_msg}") if opc_ok else warn(f"OPC UA client: {opc_msg}")
 
+    alternate_opc_ok = False
+    if not opc_ok and opc_host != PLC_IP:
+        alternate_url = make_opc_url(PLC_IP, 4840)
+        alt_tcp_ok, alt_tcp_msg = tcp_check(PLC_IP, 4840)
+        results["opcua_tcp_plc_ip"] = {"ok": alt_tcp_ok, "url": alternate_url, "detail": alt_tcp_msg}
+        if alt_tcp_ok:
+            warn(f"Trying alternate PLC OPC UA endpoint: {alternate_url}")
+            alternate_opc_ok, alternate_opc_msg = asyncio.run(opcua_check(alternate_url))
+            results["opcua_client_plc_ip"] = {"ok": alternate_opc_ok, "url": alternate_url, "detail": alternate_opc_msg}
+            if alternate_opc_ok:
+                ok(f"Alternate OPC UA client works: {alternate_opc_msg}")
+                warn(f"Set OPC_URL={alternate_url} for Day 8 OPC UA scenarios.")
+            else:
+                warn(f"Alternate OPC UA client failed: {alternate_opc_msg}")
+        else:
+            warn(f"Alternate PLC OPC UA TCP/4840: {alt_tcp_msg}")
+
     api_status_ok, api_status = http_json("/plc/status")
     results["web_scada_status"] = {"ok": api_status_ok, "detail": api_status}
     ok("Web-SCADA /plc/status reachable") if api_status_ok else warn(f"Web-SCADA /plc/status: {api_status}")
+    if not api_status_ok and ("10061" in str(api_status) or "Connection refused" in str(api_status)):
+        warn("Web-SCADA backend is not listening on WEB_SCADA_API; start FastAPI or set WEB_SCADA_API to the running backend.")
 
     api_tags_ok, api_tags = http_json("/tags")
     tag_count = len(api_tags.get("tags", [])) if isinstance(api_tags, dict) else 0
@@ -145,7 +171,7 @@ def main() -> int:
     out_file.write_text(json.dumps(results, indent=2, ensure_ascii=False), encoding="utf-8")
     info(f"Saved: {out_file}")
 
-    if not opc_tcp_ok and not api_status_ok:
+    if not (opc_ok or alternate_opc_ok or opc_tcp_ok) and not api_status_ok:
         fail("Neither OPC UA nor Web-SCADA API is reachable; Day 8 cannot run yet.")
         return 2
     return 0
