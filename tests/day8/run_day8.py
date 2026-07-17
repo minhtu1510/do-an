@@ -26,7 +26,9 @@ from tests.common import OPC_URL, info, ok, warn, fail  # noqa: E402
 
 CATALOG_PATH = Path(__file__).with_name("scenarios.yaml")
 WEB_SCADA_API = os.getenv("WEB_SCADA_API", "http://127.0.0.1:8000/api").rstrip("/")
-CONTROLLED_GATED_SCENARIOS = {"OPCUA_WRITE_DENIED", "OPCUA_INVALID_WRITE"}
+CONTROLLED_GATED_SCENARIOS = {"OPCUA_WRITE_DENIED", "OPCUA_INVALID_WRITE", "OPCUA_SESSION_BURST"}
+MAX_SESSION_BURST_COUNT = 10
+MIN_SESSION_BURST_DELAY_S = 0.2
 NOT_CONFIGURED_SAFE_SCENARIOS = {
     "WEB_LOGIN_FAILURE": "Auth/login endpoint is not implemented in the current Web-SCADA backend.",
     "WEB_ROLE_VIOLATION": "Role-based authorization is not implemented in the current Web-SCADA backend.",
@@ -188,6 +190,49 @@ async def opcua_invalid_write() -> list[str]:
     return evidence
 
 
+async def opcua_session_burst() -> list[str]:
+    """Create a small bounded burst of OPC UA sessions.
+
+    This is a characterization scenario, not a DoS attempt. Hard caps prevent
+    accidentally turning the runner into an aggressive flood tool.
+    """
+    from asyncua import Client
+
+    requested_count = int(os.getenv("DAY8_SESSION_BURST_COUNT", "5"))
+    requested_delay = float(os.getenv("DAY8_SESSION_BURST_DELAY_S", "0.5"))
+    count = max(1, min(requested_count, MAX_SESSION_BURST_COUNT))
+    delay_s = max(requested_delay, MIN_SESSION_BURST_DELAY_S)
+    evidence = [
+        f"configured_count={requested_count}; effective_count={count}; max_count={MAX_SESSION_BURST_COUNT}",
+        f"configured_delay_s={requested_delay}; effective_delay_s={delay_s}",
+    ]
+
+    before_status, before_body = http_request("GET", "/plc/status")
+    evidence.append(f"web_scada_before_status={before_status}: {before_body}")
+
+    successes = 0
+    failures = 0
+    for i in range(count):
+        try:
+            async with Client(url=OPC_URL, timeout=5) as client:
+                namespace_array = await client.get_namespace_array()
+                successes += 1
+                evidence.append(f"session_{i + 1}: connected namespaces={len(namespace_array)}")
+        except Exception as exc:
+            failures += 1
+            evidence.append(f"session_{i + 1}: failed={type(exc).__name__}: {exc}")
+        await asyncio.sleep(delay_s)
+
+    # Give the Web-SCADA poller one cycle to reflect any transient effects.
+    await asyncio.sleep(1.0)
+    after_status, after_body = http_request("GET", "/plc/status")
+    tags_status, tags_body = http_request("GET", "/tags")
+    evidence.append(f"summary: successes={successes} failures={failures}")
+    evidence.append(f"web_scada_after_status={after_status}: {after_body}")
+    evidence.append(f"web_scada_tags_after={tags_status}: {tags_body}")
+    return evidence
+
+
 def http_request(method: str, path: str, body: bytes | None = None) -> tuple[int | None, str]:
     try:
         req = Request(f"{WEB_SCADA_API}{path}", data=body, method=method)
@@ -235,6 +280,8 @@ async def execute_controlled_gated(scenario_id: str) -> list[str] | None:
         return await opcua_write_denied()
     if scenario_id == "OPCUA_INVALID_WRITE":
         return await opcua_invalid_write()
+    if scenario_id == "OPCUA_SESSION_BURST":
+        return await opcua_session_burst()
     return None
 
 
@@ -288,7 +335,7 @@ async def run_items(items, execute: bool, allow_gated: bool) -> int:
                     status = "BLOCKED"
                     warn("Blocked because safe_to_execute=false.")
                 else:
-                    notes.append("Executed with --allow-gated; bounded OPC UA write-denial/invalid-write check only.")
+                    notes.append("Executed with --allow-gated; controlled bounded gated check only.")
                     status = "EXECUTED_GATED"
                     ok(f"Executed controlled gated scenario; evidence={len(evidence)}")
             except ImportError as exc:
