@@ -25,13 +25,40 @@ def _load_conf(name, default=""):
     return default
 
 
-PLC_IP = os.getenv("TARGET_IP") or _load_conf("TARGET_IP", "192.168.1.10")
-HMI_IP = os.getenv("HMI_IP") or _load_conf("HMI_IP", "192.168.1.20")
-OPC_URL = os.getenv("OPC_URL") or _load_conf("OPC_URL", f"opc.tcp://{HMI_IP}:4840")
-HMI_URL = os.getenv("HMI_WEB_URL") or _load_conf("HMI_WEB_URL", f"http://{HMI_IP}:5000")
-RACK = int(_load_conf("RACK", "0"))
-SLOT = int(_load_conf("SLOT", "1"))
-IFACE = os.getenv("CAPTURE_IFACE") or _load_conf("CAPTURE_IFACE", "eth0")
+PLC_IP = (
+    os.getenv("PLC_IP")
+    or _load_conf("TARGET_IP", "192.168.210.211")
+)
+
+HMI_IP = (
+    os.getenv("HMI_IP")
+    or _load_conf("HMI_IP", "192.168.210.31")
+)
+
+RACK = int(
+    os.getenv("PLC_RACK")
+    or _load_conf("RACK", "0")
+)
+
+SLOT = int(
+    os.getenv("PLC_SLOT")
+    or _load_conf("SLOT", "1")
+)
+
+OPC_URL = (
+    os.getenv("OPC_URL")
+    or _load_conf("OPC_URL", f"opc.tcp://{PLC_IP}:4840")
+)
+
+HMI_URL = (
+    os.getenv("HMI_URL")
+    or _load_conf("HMI_WEB_URL", f"http://{HMI_IP}:5000")
+)
+
+IFACE = (
+    os.getenv("CAPTURE_IFACE")
+    or _load_conf("CAPTURE_IFACE", "")
+)
 
 # ── Màu terminal ─────────────────────────────────────────────────
 G = "\033[92m"

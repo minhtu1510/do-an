@@ -19,6 +19,16 @@ from tests.common import HMI_URL, OPC_URL, PLC_IP, RACK, SLOT, ok, warn, fail, i
 
 
 WEB_SCADA_API = os.getenv("WEB_SCADA_API", "http://127.0.0.1:8000/api").rstrip("/")
+WEB_SCADA_API_CANDIDATES = []
+for candidate in [
+    WEB_SCADA_API,
+    "http://127.0.0.1:8000/api",
+    "http://localhost:8000/api",
+    "http://127.0.0.1:5173/api",
+    "http://localhost:5173/api",
+]:
+    if candidate not in WEB_SCADA_API_CANDIDATES:
+        WEB_SCADA_API_CANDIDATES.append(candidate)
 KNOWN_OPCUA_NODES = [
     'ns=3;s="BangTai"',
     'ns=3;s="Nhap"',
@@ -51,13 +61,24 @@ def make_opc_url(host: str, port: int = 4840) -> str:
     return f"opc.tcp://{host}:{port}"
 
 
-def http_json(path: str, timeout: float = 3.0) -> tuple[bool, object]:
+def http_json(base_url: str, path: str, timeout: float = 3.0) -> tuple[bool, object]:
     try:
-        with urlopen(f"{WEB_SCADA_API}{path}", timeout=timeout) as res:
+        with urlopen(f"{base_url}{path}", timeout=timeout) as res:
             body = res.read().decode("utf-8", errors="replace")
             return True, json.loads(body) if body else {}
     except (OSError, URLError, ValueError) as exc:
         return False, str(exc)
+
+
+def discover_web_scada_api() -> tuple[str, bool, object]:
+    first_error = None
+    for base_url in WEB_SCADA_API_CANDIDATES:
+        ok_status, status = http_json(base_url, "/plc/status")
+        if ok_status:
+            return base_url, True, status
+        if first_error is None:
+            first_error = status
+    return WEB_SCADA_API, False, first_error
 
 
 async def opcua_check(url: str) -> tuple[bool, str]:
@@ -150,13 +171,18 @@ def main() -> int:
         else:
             warn(f"Alternate PLC OPC UA TCP/4840: {alt_tcp_msg}")
 
-    api_status_ok, api_status = http_json("/plc/status")
-    results["web_scada_status"] = {"ok": api_status_ok, "detail": api_status}
-    ok("Web-SCADA /plc/status reachable") if api_status_ok else warn(f"Web-SCADA /plc/status: {api_status}")
+    active_web_api, api_status_ok, api_status = discover_web_scada_api()
+    results["web_scada_status"] = {"ok": api_status_ok, "base_url": active_web_api, "detail": api_status}
+    if api_status_ok:
+        ok(f"Web-SCADA /plc/status reachable at {active_web_api}")
+        if isinstance(api_status, dict) and "uptime_seconds" not in api_status:
+            warn("Web-SCADA status lacks uptime_seconds/backend_started_at; restart backend after pulling the latest code if you need backend uptime.")
+    else:
+        warn(f"Web-SCADA /plc/status at {active_web_api}: {api_status}")
     if not api_status_ok and ("10061" in str(api_status) or "Connection refused" in str(api_status)):
         warn("Web-SCADA backend is not listening on WEB_SCADA_API; start FastAPI or set WEB_SCADA_API to the running backend.")
 
-    api_tags_ok, api_tags = http_json("/tags")
+    api_tags_ok, api_tags = http_json(active_web_api, "/tags")
     tag_count = len(api_tags.get("tags", [])) if isinstance(api_tags, dict) else 0
     stale_count = sum(1 for tag in api_tags.get("tags", []) if tag.get("stale")) if isinstance(api_tags, dict) else 0
     results["web_scada_tags"] = {"ok": api_tags_ok, "tag_count": tag_count, "stale_count": stale_count}
