@@ -26,6 +26,12 @@ from tests.common import OPC_URL, info, ok, warn, fail  # noqa: E402
 
 CATALOG_PATH = Path(__file__).with_name("scenarios.yaml")
 WEB_SCADA_API = os.getenv("WEB_SCADA_API", "http://127.0.0.1:8000/api").rstrip("/")
+NOT_CONFIGURED_SAFE_SCENARIOS = {
+    "WEB_LOGIN_FAILURE": "Auth/login endpoint is not implemented in the current Web-SCADA backend.",
+    "WEB_ROLE_VIOLATION": "Role-based authorization is not implemented in the current Web-SCADA backend.",
+    "OPCUA_UNAUTHORIZED_SESSION": "No OPC UA username/password policy is configured in the current testbed.",
+    "OPCUA_CERTIFICATE_REJECTED": "No OPC UA certificate trust-list scenario is configured in the current testbed.",
+}
 
 
 def load_catalog() -> dict:
@@ -149,7 +155,7 @@ def web_command_rejected() -> list[str]:
     return [f"POST /commands/start -> {status}: {body or 'empty'}"]
 
 
-async def execute_safe(scenario_id: str) -> list[str]:
+async def execute_safe(scenario_id: str) -> list[str] | None:
     if scenario_id == "OPCUA_BENIGN_RECONNECT":
         return await opcua_benign_reconnect()
     if scenario_id == "OPCUA_NODE_BROWSE":
@@ -165,7 +171,7 @@ async def execute_safe(scenario_id: str) -> list[str]:
     if scenario_id == "WEB_LOG_AND_PLC_STATE_DIVERGENCE":
         status, body = http_request("GET", "/events")
         return [f"GET /events -> {status}: {body}"]
-    return ["No safe executor implemented; catalog-only scenario."]
+    return None
 
 
 def save_result(group_id: str, scenario: dict, status: str, evidence: list[str], notes: list[str], start: float) -> Path:
@@ -210,11 +216,20 @@ async def run_items(items, execute: bool) -> int:
             notes.append("safe_to_execute=false; blocked")
             status = "BLOCKED"
             warn("Blocked because safe_to_execute=false.")
+        elif scenario_id in NOT_CONFIGURED_SAFE_SCENARIOS:
+            notes.append(NOT_CONFIGURED_SAFE_SCENARIOS[scenario_id])
+            status = "NOT_CONFIGURED"
+            warn(NOT_CONFIGURED_SAFE_SCENARIOS[scenario_id])
         else:
             try:
                 evidence = await execute_safe(scenario_id)
-                status = "EXECUTED"
-                ok(f"Executed safe scenario; evidence={len(evidence)}")
+                if evidence is None:
+                    notes.append("No safe executor implemented for this catalog scenario.")
+                    status = "NO_EXECUTOR"
+                    warn("No safe executor implemented; catalog entry recorded only.")
+                else:
+                    status = "EXECUTED"
+                    ok(f"Executed safe scenario; evidence={len(evidence)}")
             except ImportError as exc:
                 status = "FAILED"
                 rc = 1
