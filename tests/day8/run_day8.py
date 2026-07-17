@@ -26,6 +26,7 @@ from tests.common import OPC_URL, info, ok, warn, fail  # noqa: E402
 
 CATALOG_PATH = Path(__file__).with_name("scenarios.yaml")
 WEB_SCADA_API = os.getenv("WEB_SCADA_API", "http://127.0.0.1:8000/api").rstrip("/")
+CONTROLLED_GATED_SCENARIOS = {"OPCUA_WRITE_DENIED", "OPCUA_INVALID_WRITE"}
 NOT_CONFIGURED_SAFE_SCENARIOS = {
     "WEB_LOGIN_FAILURE": "Auth/login endpoint is not implemented in the current Web-SCADA backend.",
     "WEB_ROLE_VIOLATION": "Role-based authorization is not implemented in the current Web-SCADA backend.",
@@ -132,6 +133,61 @@ async def opcua_benign_subscription(duration: float = 5.0) -> list[str]:
     return evidence
 
 
+async def opcua_write_denied() -> list[str]:
+    """Attempt same-value writes to read-mostly nodes and record server response.
+
+    Writing the current value is intentional: if the server unexpectedly accepts
+    the write, the process value should not change.
+    """
+    from asyncua import Client
+
+    nodes = [
+        'ns=3;s="HienThi"',
+        'ns=3;s="Nhap"',
+        'ns=3;s="BangTai"',
+    ]
+    evidence = []
+    async with Client(url=OPC_URL, timeout=5) as client:
+        for node_id in nodes:
+            node = client.get_node(node_id)
+            try:
+                before = await node.read_value()
+                await node.write_value(before)
+                after = await node.read_value()
+                evidence.append(f"{node_id}: UNEXPECTED_WRITE_SUCCESS same_value={before!r} after={after!r}")
+            except Exception as exc:
+                evidence.append(f"{node_id}: write_rejected={type(exc).__name__}: {exc}")
+                return evidence
+    evidence.append("No node rejected same-value write; review PLC OPC UA write permissions before using this as WRITE_DENIED evidence.")
+    return evidence
+
+
+async def opcua_invalid_write() -> list[str]:
+    """Attempt invalid typed writes that should be rejected by the OPC UA server."""
+    from asyncua import Client, ua
+
+    attempts = [
+        ('ns=3;s="BangTai"', ua.Variant("invalid_boolean", ua.VariantType.String)),
+        ('ns=3;s="Nhap"', ua.Variant("invalid_int", ua.VariantType.String)),
+        ('ns=3;s="HienThi"', ua.Variant(True, ua.VariantType.Boolean)),
+    ]
+    evidence = []
+    async with Client(url=OPC_URL, timeout=5) as client:
+        for node_id, variant in attempts:
+            node = client.get_node(node_id)
+            before = None
+            try:
+                before = await node.read_value()
+                await node.write_value(ua.DataValue(variant))
+                after = await node.read_value()
+                evidence.append(f"{node_id}: UNEXPECTED_INVALID_WRITE_SUCCESS before={before!r} after={after!r} variant={variant.Value!r}/{variant.VariantType.name}")
+            except Exception as exc:
+                evidence.append(f"{node_id}: invalid_write_rejected={type(exc).__name__}: {exc}; before={before!r}")
+                return evidence
+    evidence.append("All invalid-write attempts unexpectedly succeeded; stop and review OPC UA permissions/types.")
+    return evidence
+
+
 def http_request(method: str, path: str, body: bytes | None = None) -> tuple[int | None, str]:
     try:
         req = Request(f"{WEB_SCADA_API}{path}", data=body, method=method)
@@ -174,6 +230,14 @@ async def execute_safe(scenario_id: str) -> list[str] | None:
     return None
 
 
+async def execute_controlled_gated(scenario_id: str) -> list[str] | None:
+    if scenario_id == "OPCUA_WRITE_DENIED":
+        return await opcua_write_denied()
+    if scenario_id == "OPCUA_INVALID_WRITE":
+        return await opcua_invalid_write()
+    return None
+
+
 def save_result(group_id: str, scenario: dict, status: str, evidence: list[str], notes: list[str], start: float) -> Path:
     out_dir = Path("test_results/day8")
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -194,7 +258,7 @@ def save_result(group_id: str, scenario: dict, status: str, evidence: list[str],
     return path
 
 
-async def run_items(items, execute: bool) -> int:
+async def run_items(items, execute: bool, allow_gated: bool) -> int:
     rc = 0
     for group_id, _group, scenario in items:
         start = time.time()
@@ -204,18 +268,39 @@ async def run_items(items, execute: bool) -> int:
         notes = []
         evidence = []
 
-        if scenario.get("requires_manual_gate"):
+        if scenario.get("requires_manual_gate") and not allow_gated:
             notes.append("requires_manual_gate=true; not executed by runner")
             status = "GATED"
             warn("Manual safety gate required; catalog entry recorded only.")
+        elif scenario.get("requires_manual_gate") and scenario_id not in CONTROLLED_GATED_SCENARIOS:
+            notes.append("requires_manual_gate=true; no controlled executor is available for this scenario")
+            status = "GATED"
+            warn("Manual safety gate required; no controlled executor available.")
         elif not execute:
             notes.append("dry-run only; add --execute for safe executor")
             status = "DRY_RUN"
             info("Dry-run; no traffic generated.")
         elif not scenario.get("safe_to_execute"):
-            notes.append("safe_to_execute=false; blocked")
-            status = "BLOCKED"
-            warn("Blocked because safe_to_execute=false.")
+            try:
+                evidence = await execute_controlled_gated(scenario_id)
+                if evidence is None:
+                    notes.append("safe_to_execute=false; no controlled gated executor implemented")
+                    status = "BLOCKED"
+                    warn("Blocked because safe_to_execute=false.")
+                else:
+                    notes.append("Executed with --allow-gated; bounded OPC UA write-denial/invalid-write check only.")
+                    status = "EXECUTED_GATED"
+                    ok(f"Executed controlled gated scenario; evidence={len(evidence)}")
+            except ImportError as exc:
+                status = "FAILED"
+                rc = 1
+                fail(f"Missing dependency: {exc}")
+                notes.append(f"Missing dependency: {exc}")
+            except Exception as exc:
+                status = "FAILED"
+                rc = 1
+                fail(str(exc))
+                notes.append(str(exc))
         elif scenario_id in NOT_CONFIGURED_SAFE_SCENARIOS:
             notes.append(NOT_CONFIGURED_SAFE_SCENARIOS[scenario_id])
             status = "NOT_CONFIGURED"
@@ -252,6 +337,7 @@ def main() -> int:
     parser.add_argument("--group", choices=["s7_traditional", "opcua", "web_api", "logic_aware", "cross_layer"], help="Run/list one group")
     parser.add_argument("--scenario", help="Run/list one scenario id")
     parser.add_argument("--execute", action="store_true", help="Execute safe scenarios; default is dry-run")
+    parser.add_argument("--allow-gated", action="store_true", help="Allow controlled executors for selected gated scenarios only")
     args = parser.parse_args()
 
     catalog = load_catalog()
@@ -262,7 +348,7 @@ def main() -> int:
     if args.list:
         print_scenarios(items)
         return 0
-    return asyncio.run(run_items(items, args.execute))
+    return asyncio.run(run_items(items, args.execute, args.allow_gated))
 
 
 if __name__ == "__main__":
