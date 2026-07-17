@@ -19,6 +19,14 @@ from tests.common import HMI_URL, OPC_URL, PLC_IP, RACK, SLOT, ok, warn, fail, i
 
 
 WEB_SCADA_API = os.getenv("WEB_SCADA_API", "http://127.0.0.1:8000/api").rstrip("/")
+KNOWN_OPCUA_NODES = [
+    'ns=3;s="BangTai"',
+    'ns=3;s="Nhap"',
+    'ns=3;s="HienThi"',
+    'ns=3;s="Vat 1"',
+    'ns=3;s="Vat 2"',
+    'ns=3;s="Vat 3"',
+]
 
 
 def tcp_check(host: str, port: int, timeout: float = 3.0) -> tuple[bool, str]:
@@ -56,9 +64,42 @@ async def opcua_check(url: str) -> tuple[bool, str]:
 
     try:
         async with Client(url=url, timeout=5) as client:
-            namespace_array = await client.get_namespace_array()
-            children = await client.nodes.objects.get_children()
-            return True, f"connected; namespaces={len(namespace_array)} objects={len(children)}"
+            details = ["connected"]
+
+            try:
+                namespace_array = await client.get_namespace_array()
+                details.append(f"namespaces={len(namespace_array)}")
+            except Exception as exc:
+                details.append(f"namespace_array_unsupported={exc}")
+
+            try:
+                children = await client.nodes.objects.get_children()
+                details.append(f"objects={len(children)}")
+            except Exception as exc:
+                details.append(f"browse_unsupported={exc}")
+
+            read_ok = 0
+            read_errors = []
+            for node_id in KNOWN_OPCUA_NODES:
+                try:
+                    value = await client.get_node(node_id).read_value()
+                    read_ok += 1
+                    details.append(f"read:{node_id}={value!r}")
+                except Exception as exc:
+                    read_errors.append(f"{node_id}:{exc}")
+
+            if read_ok > 0:
+                details.append(f"known_node_reads={read_ok}/{len(KNOWN_OPCUA_NODES)}")
+                return True, "; ".join(details)
+
+            if any(item.startswith("namespaces=") or item.startswith("objects=") for item in details):
+                details.append("known_node_reads=0")
+                return True, "; ".join(details)
+
+            details.append("known_node_reads=0")
+            if read_errors:
+                details.append(f"first_read_error={read_errors[0]}")
+            return False, "; ".join(details)
     except Exception as exc:
         return False, str(exc)
 

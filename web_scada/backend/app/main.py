@@ -28,12 +28,25 @@ OPCUA_ENDPOINT = os.getenv("OPCUA_ENDPOINT", "opc.tcp://192.168.210.211:4840")
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
 
 gateway: OPCUAGateway = None
+backend_started_at: datetime | None = None
+
+
+def get_backend_status() -> dict:
+    now = datetime.now(TZ)
+    started_at = backend_started_at or now
+    base_status = gateway.status if gateway else {"connected": False, "endpoint": OPCUA_ENDPOINT}
+    return {
+        **base_status,
+        "backend_started_at": started_at.isoformat(),
+        "uptime_seconds": int((now - started_at).total_seconds()),
+    }
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global gateway
+    global gateway, backend_started_at
     logger.info("Web-SCADA backend starting...")
+    backend_started_at = datetime.now(TZ)
 
     tag_registry = get_tag_registry()
     logger.info(f"Loaded {len(tag_registry.tags)} tags from registry")
@@ -96,10 +109,10 @@ async def websocket_endpoint(ws: WebSocket):
         await ws.send_json({
             "type": "full_state",
             "tags": gateway.get_all_values(),
-            "status": gateway.status,
+            "status": get_backend_status(),
             "timestamp": datetime.now(TZ).isoformat(),
         })
-        events = event_service.add_many(alarm_engine.process_gateway_status(gateway.status))
+        events = event_service.add_many(alarm_engine.process_gateway_status(get_backend_status()))
         for event in events:
             payload = event.to_dict()
             payload["active_count"] = alarm_engine.active_alarm_count()

@@ -5,7 +5,6 @@ import { connectWebSocket } from "../services/websocket";
 export default function SystemStatus() {
   const [status, setStatus] = useState(null);
   const [tags, setTags] = useState({});
-  const [uptime, setUptime] = useState(0);
 
   useEffect(() => {
     fetchPlcStatus().then(setStatus);
@@ -40,11 +39,8 @@ export default function SystemStatus() {
       }
     });
 
-    const uptimeTimer = setInterval(() => setUptime((p) => p + 1), 1000);
-
     return () => {
       clearInterval(timer);
-      clearInterval(uptimeTimer);
       unsub();
     };
   }, []);
@@ -59,13 +55,14 @@ export default function SystemStatus() {
 
       <div className="grid grid-cols-2 gap-3">
         <InfoRow label="PLC IP" value="192.168.210.211" />
-        <InfoRow label="OPC UA" value="opc.tcp://192.168.210.211:4840" />
+        <InfoRow label="OPC UA" value={status?.endpoint || "opc.tcp://192.168.210.211:4840"} />
         <InfoRow label="State" value={status?.connected ? "CONNECTED" : "DISCONNECTED"} color={status?.connected ? "text-green-400" : "text-red-400"} />
         <InfoRow label="Reconnect count" value={status?.reconnect_count ?? 0} />
         <InfoRow label="Tags Total" value={totalTags} />
         <InfoRow label="Tags Good" value={goodTags} color="text-green-400" />
         <InfoRow label="Tags Stale" value={staleTags} color={staleTags > 0 ? "text-red-400" : "text-gray-400"} />
-        <InfoRow label="Backend uptime" value={formatUptime(uptime)} />
+        <InfoRow label="Backend uptime" value={formatUptime(status?.uptime_seconds)} />
+        <InfoRow label="Backend started" value={status?.backend_started_at ? new Date(status.backend_started_at).toLocaleTimeString() : "—"} />
         <InfoRow label="WebSocket" value="ONLINE" color="text-green-400" />
         <InfoRow label="Last connected" value={status?.last_connected_at ? new Date(status.last_connected_at).toLocaleTimeString() : "—"} />
         <InfoRow label="Last data" value={status?.last_data_at ? new Date(status.last_data_at).toLocaleTimeString() : "—"} />
@@ -84,6 +81,7 @@ function InfoRow({ label, value, color = "text-gray-300" }) {
 }
 
 function formatUptime(secs) {
+  if (secs === null || secs === undefined) return "—";
   const h = Math.floor(secs / 3600);
   const m = Math.floor((secs % 3600) / 60);
   const s = secs % 60;

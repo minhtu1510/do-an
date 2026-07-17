@@ -20,6 +20,11 @@ def _gateway():
     return gateway
 
 
+def _backend_status():
+    from ..main import get_backend_status
+    return get_backend_status()
+
+
 def _tag_registry():
     from ..opcua.tag_registry import get_tag_registry
     return get_tag_registry()
@@ -27,8 +32,7 @@ def _tag_registry():
 
 @api_router.get("/plc/status")
 async def plc_status():
-    g = _gateway()
-    status = {**g.status, "timestamp": datetime.now(TZ).isoformat()}
+    status = {**_backend_status(), "timestamp": datetime.now(TZ).isoformat()}
     event_service.add_many(alarm_engine.process_gateway_status(status))
     return status
 
