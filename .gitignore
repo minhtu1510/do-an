@@ -56,3 +56,7 @@ htmlcov/
 
 # Day 8 scenario runner output (regenerated per run)
 /test_results/
+
+# Node / frontend
+node_modules/
+npm-debug.log*
