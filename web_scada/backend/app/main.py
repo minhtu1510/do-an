@@ -18,6 +18,7 @@ from .api.router import api_router
 from .alarms import alarm_engine
 from .events import event_service
 from .history.router import history_router
+from .ml_results.router import ml_results_router
 from .websocket.manager import ws_manager
 
 logger = logging.getLogger("web_scada")
@@ -99,6 +100,7 @@ app.add_middleware(
 
 app.include_router(api_router, prefix="/api")
 app.include_router(history_router, prefix="/api/history")
+app.include_router(ml_results_router, prefix="/api/ml")
 
 
 @app.websocket("/ws/process")

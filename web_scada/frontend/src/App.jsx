@@ -6,6 +6,7 @@ import AlarmEvents from "./pages/AlarmEvents";
 import Trends from "./pages/Trends";
 import SecurityView from "./pages/SecurityView";
 import SystemStatus from "./pages/SystemStatus";
+import DatasetStats from "./pages/DatasetStats";
 
 const NAV = [
   { to: "/", label: "Overview", end: true },
@@ -13,6 +14,7 @@ const NAV = [
   { to: "/alarms", label: "Alarms & Events", end: false },
   { to: "/trends", label: "Trends & History", end: false },
   { to: "/security", label: "Security / IDS", end: false },
+  { to: "/dataset", label: "Dataset & Model Stats", end: false },
   { to: "/system", label: "System Status", end: false },
 ];
 
@@ -39,14 +41,17 @@ export default function App() {
           </NavLink>
         ))}
       </nav>
-      <Routes>
-        <Route path="/" element={<Overview />} />
-        <Route path="/process" element={<ProcessMonitor />} />
-        <Route path="/alarms" element={<AlarmEvents />} />
-        <Route path="/trends" element={<Trends />} />
-        <Route path="/security" element={<SecurityView />} />
-        <Route path="/system" element={<SystemStatus />} />
-      </Routes>
+      <div className="mx-auto max-w-[1600px]">
+        <Routes>
+          <Route path="/" element={<Overview />} />
+          <Route path="/process" element={<ProcessMonitor />} />
+          <Route path="/alarms" element={<AlarmEvents />} />
+          <Route path="/trends" element={<Trends />} />
+          <Route path="/security" element={<SecurityView />} />
+          <Route path="/dataset" element={<DatasetStats />} />
+          <Route path="/system" element={<SystemStatus />} />
+        </Routes>
+      </div>
     </div>
   );
 }

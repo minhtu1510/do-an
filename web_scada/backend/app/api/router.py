@@ -1,13 +1,17 @@
 """API routes — read-only OPC UA tags. No Write endpoints."""
 
+import csv
+import io
 import os
-from fastapi import APIRouter
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse, Response
 from dotenv import load_dotenv
 from datetime import datetime, timezone, timedelta
 
 from ..alarms import alarm_engine
 from ..events import event_service
+from ..scenarios import scenario_catalog, scenario_store
+from ..scenarios.models import ScenarioResult
 
 load_dotenv()
 
@@ -79,10 +83,34 @@ async def get_events(limit: int = 100):
     }
 
 
+@api_router.get("/events/export/csv")
+async def export_events_csv(limit: int = 1000, severity: str | None = None, status: str | None = None):
+    events = event_service.list(limit)
+    if severity:
+        events = [e for e in events if e["severity"] == severity.upper()]
+    if status:
+        events = [e for e in events if e["status"] == status.upper()]
+
+    fieldnames = ["timestamp", "severity", "event_type", "message", "tag_key", "old_value", "new_value", "status"]
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+    for event in events:
+        writer.writerow({key: event.get(key) for key in fieldnames})
+
+    filename = f"web_scada_events_{datetime.now(TZ).strftime('%Y%m%d_%H%M%S')}.csv"
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
 @api_router.get("/security/status")
 async def security_status():
     g = _gateway()
     metrics = alarm_engine.security_metrics()
+    scenario_summary = scenario_store.summary()
     return {
         "plc_connection": "CONNECTED" if g.status.get("connected") else "DISCONNECTED",
         "opcua_connection": "CONNECTED" if g.status.get("connected") else "DISCONNECTED",
@@ -92,8 +120,58 @@ async def security_status():
         "rejected_operation_count": metrics["rejected_operation_count"],
         "capture_status": "Not configured",
         "dataset_session_id": "No active collection",
-        "scenario_id": "Not configured",
-        "current_label": "Not configured",
+        "scenario_id": scenario_summary["latest_scenario_id"] or "Not configured",
+        "current_label": scenario_summary["latest_status"] or "Not configured",
         "ids_module": "IDS module unavailable",
+        "scenario_runs_total": scenario_summary["total_runs"],
+        "scenario_runs_executed": scenario_summary["executed_count"],
         "timestamp": datetime.now(TZ).isoformat(),
     }
+
+
+@api_router.get("/security/scenarios")
+async def list_scenario_results(limit: int = 50):
+    return {
+        "results": scenario_store.list(limit),
+        "summary": scenario_store.summary(),
+        "timestamp": datetime.now(TZ).isoformat(),
+    }
+
+
+@api_router.get("/security/comparator")
+async def security_mode_comparator(group: str = "opcua"):
+    return {
+        **scenario_store.security_mode_comparator(group),
+        "timestamp": datetime.now(TZ).isoformat(),
+    }
+
+
+@api_router.post("/security/scenario-result")
+async def ingest_scenario_result(request: Request):
+    """Ingestion endpoint for tests/day8/run_day8.py — one POST per finished scenario.
+
+    This is what turns a day8 scenario run into a live demo: run the scenario
+    runner while this backend is up and the result appears here immediately.
+    """
+    from ..websocket.manager import ws_manager
+
+    body = await request.json()
+    scenario_id = body.get("scenario_id", "UNKNOWN")
+    mitre = scenario_catalog.lookup(scenario_id)
+    result = ScenarioResult(
+        scenario_id=scenario_id,
+        group=body.get("group", "unknown"),
+        status=body.get("status", "UNKNOWN"),
+        label=body.get("label", ""),
+        duration_s=body.get("duration_s"),
+        preconditions=body.get("preconditions", []),
+        evidence=body.get("evidence", []),
+        notes=body.get("notes", []),
+        mitre_technique=mitre["mitre_technique"],
+        mitre_technique_name=mitre["mitre_technique_name"],
+        security_mode=body.get("security_mode"),
+    )
+    scenario_store.add(result)
+    payload = result.to_dict()
+    await ws_manager.broadcast_scenario_result(payload)
+    return {"stored": True, "result": payload}

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { fetchProcessHistory } from "../services/api";
+import PageHeader from "../components/PageHeader";
 
 export default function Trends() {
   const [historyStatus, setHistoryStatus] = useState(null);
@@ -10,10 +11,10 @@ export default function Trends() {
 
   return (
     <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-xl font-bold text-gray-100">Trends & History</h1>
-        <p className="text-sm text-gray-500">Historical trends require PostgreSQL historian storage. No synthetic trend data is displayed.</p>
-      </div>
+      <PageHeader
+        title="Trends & History"
+        subtitle="Historical trends require PostgreSQL historian storage. No synthetic trend data is displayed."
+      />
 
       <div className="bg-gray-800 rounded border border-gray-700 p-6">
         <div className="text-sm font-semibold text-gray-200">Historian status</div>

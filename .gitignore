@@ -53,3 +53,6 @@ htmlcov/
 *.tmp
 *.temp
 /data
+
+# Day 8 scenario runner output (regenerated per run)
+/test_results/

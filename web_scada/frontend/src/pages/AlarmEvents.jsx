@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { fetchEvents } from "../services/api";
 import { connectWebSocket } from "../services/websocket";
+import PageHeader from "../components/PageHeader";
+import ExportCsvButton from "../components/ExportCsvButton";
 
 export default function AlarmEvents() {
   const [events, setEvents] = useState([]);
@@ -31,10 +33,11 @@ export default function AlarmEvents() {
 
   return (
     <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-xl font-bold text-gray-100">Alarms & Events</h1>
-        <p className="text-sm text-gray-500">In-memory events generated from live OPC UA tag and connection changes.</p>
-      </div>
+      <PageHeader
+        title="Alarms & Events"
+        subtitle="In-memory events generated from live OPC UA tag and connection changes."
+        right={<ExportCsvButton />}
+      />
 
       <div className="grid gap-4 sm:grid-cols-3">
         <SummaryCard label="Active alarms" value={activeCount} color={activeCount > 0 ? "text-red-400" : "text-green-400"} />

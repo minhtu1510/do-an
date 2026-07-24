@@ -3,6 +3,8 @@
 from fastapi import WebSocket
 from typing import List
 
+from ..notify import notify_event, telegram_configured
+
 
 class ConnectionManager:
     def __init__(self):
@@ -34,6 +36,20 @@ class ConnectionManager:
                     "type": "event",
                     "event": event,
                     "active_count": event.get("active_count"),
+                })
+            except Exception:
+                pass
+
+        is_notify_worthy = event.get("severity") == "ERROR" or str(event.get("event_type", "")).startswith("ATTACK_")
+        if is_notify_worthy and telegram_configured():
+            await notify_event(event)
+
+    async def broadcast_scenario_result(self, result: dict):
+        for ws in self._connections:
+            try:
+                await ws.send_json({
+                    "type": "scenario_result",
+                    "result": result,
                 })
             except Exception:
                 pass

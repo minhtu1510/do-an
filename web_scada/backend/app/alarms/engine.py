@@ -7,6 +7,11 @@ from ..events.models import EventRecord
 
 _MISSING = object()
 
+# Stage sensor bits that can never all be True at once on a single-lane
+# conveyor — if they are, the tag source is reporting an impossible physical
+# state (spoofed/replayed values rather than a real sensor read).
+_SPOOF_WATCH_KEYS = ("vat_1", "vat_2", "vat_3")
+
 
 class AlarmEngine:
     def __init__(self):
@@ -67,6 +72,39 @@ class AlarmEngine:
 
         self._last_values[key] = new_value
         self._last_stale[key] = is_stale
+
+        if key in _SPOOF_WATCH_KEYS:
+            events.extend(self._check_sensor_spoof())
+
+        return events
+
+    def _check_sensor_spoof(self) -> list[EventRecord]:
+        events: list[EventRecord] = []
+        spoof_values = {k: self._last_values.get(k) for k in _SPOOF_WATCH_KEYS}
+        all_active = all(v is True for v in spoof_values.values())
+        was_active = "sensor_spoof" in self._active_alarms
+
+        if all_active and not was_active:
+            self._active_alarms.add("sensor_spoof")
+            events.append(EventRecord(
+                severity="ERROR",
+                event_type="ATTACK_SENSOR_SPOOF_SUSPECTED",
+                message="All 3 stage sensors (vat_1/vat_2/vat_3) are active simultaneously "
+                        "— physically impossible on this conveyor, possible sensor spoofing",
+                tag_key="process_integrity",
+                new_value=spoof_values,
+                status="ACTIVE",
+            ))
+        elif not all_active and was_active:
+            self._active_alarms.discard("sensor_spoof")
+            events.append(EventRecord(
+                event_type="ATTACK_SENSOR_SPOOF_CLEARED",
+                message="Stage sensors no longer all active — spoof condition cleared",
+                tag_key="process_integrity",
+                new_value=spoof_values,
+                status="CLEARED",
+            ))
+
         return events
 
     def process_gateway_status(self, status: dict[str, Any]) -> list[EventRecord]:

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { connectWebSocket } from "../services/websocket";
 import { fetchAllTags, fetchPlcStatus } from "../services/api";
 import TagCard from "../components/TagCard";
+import PageHeader from "../components/PageHeader";
 
 export default function Overview() {
   const [tags, setTags] = useState({});
@@ -79,10 +80,10 @@ export default function Overview() {
 
   return (
     <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-xl font-bold text-gray-100">Production Overview</h1>
-        <p className="text-sm text-gray-500">Live summary from OPC UA tags. Internal stage bits are not treated as physical sensors.</p>
-      </div>
+      <PageHeader
+        title="Production Overview"
+        subtitle="Live summary from OPC UA tags. Internal stage bits are not treated as physical sensors."
+      />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
         <KPICard label="Conveyor status" value={conveyorStatus} color={statusColor(conveyorStatus)} />

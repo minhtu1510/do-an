@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { connectWebSocket } from "../services/websocket";
 import { fetchAllTags } from "../services/api";
 import TagCard from "../components/TagCard";
+import PageHeader from "../components/PageHeader";
 
 export default function ProcessMonitor() {
   const [tags, setTags] = useState({});
@@ -32,12 +33,16 @@ export default function ProcessMonitor() {
   const offline = !bangTai || bangTai.stale;
   const conveyorLabel = offline ? "OFFLINE" : isRunning ? "RUNNING" : "STOPPED";
 
+  const stageTagsFresh = ["vat_1", "vat_2", "vat_3"].every((k) => tags[k] && !tags[k].stale);
+  const sensorSpoofSuspected =
+    stageTagsFresh && tags.vat_1.value === true && tags.vat_2.value === true && tags.vat_3.value === true;
+
   return (
     <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-xl font-bold text-gray-100">Process Monitor</h1>
-        <p className="text-sm text-gray-500">Motor/conveyor, internal stage bits, counters, and stage timers from live OPC UA tags.</p>
-      </div>
+      <PageHeader
+        title="Process Monitor"
+        subtitle="Motor/conveyor, internal stage bits, counters, and stage timers from live OPC UA tags."
+      />
 
       <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
         <div className="bg-gray-800 rounded border border-gray-700 p-6">
@@ -51,14 +56,21 @@ export default function ProcessMonitor() {
             </span>
           </div>
 
+          {sensorSpoofSuspected && (
+            <div className="mb-4 rounded border border-red-600 bg-red-950/40 px-4 py-3 text-sm font-semibold text-red-300">
+              ⚠ Sensor spoof suspected — vat_1, vat_2 and vat_3 are all active at the same time,
+              which is not physically possible on a single-lane conveyor.
+            </div>
+          )}
+
           <div className="flex flex-col items-center gap-3">
             <FlowNode label="Motor / Conveyor" tag={bangTai} active={isRunning} offline={offline} value={conveyorLabel} />
             <Arrow />
-            <FlowNode label="Stage 1" tag={tags.vat_1} active={!tags.vat_1?.stale && tags.vat_1?.value === true} value={stageValue(tags.vat_1)} />
+            <FlowNode label="Stage 1" tag={tags.vat_1} active={!tags.vat_1?.stale && tags.vat_1?.value === true} value={stageValue(tags.vat_1)} danger={sensorSpoofSuspected} />
             <Arrow />
-            <FlowNode label="Stage 2" tag={tags.vat_2} active={!tags.vat_2?.stale && tags.vat_2?.value === true} value={stageValue(tags.vat_2)} />
+            <FlowNode label="Stage 2" tag={tags.vat_2} active={!tags.vat_2?.stale && tags.vat_2?.value === true} value={stageValue(tags.vat_2)} danger={sensorSpoofSuspected} />
             <Arrow />
-            <FlowNode label="Stage 3" tag={tags.vat_3} active={!tags.vat_3?.stale && tags.vat_3?.value === true} value={stageValue(tags.vat_3)} />
+            <FlowNode label="Stage 3" tag={tags.vat_3} active={!tags.vat_3?.stale && tags.vat_3?.value === true} value={stageValue(tags.vat_3)} danger={sensorSpoofSuspected} />
             <Arrow />
             <FlowNode label="Product counter" tag={tags.hien_thi} active={!tags.hien_thi?.stale} value={counterValue(tags.hien_thi)} />
           </div>
@@ -97,10 +109,16 @@ export default function ProcessMonitor() {
   );
 }
 
-function FlowNode({ label, tag, active, offline, value }) {
+function FlowNode({ label, tag, active, offline, value, danger }) {
   const stale = offline || !tag || tag.stale;
-  const border = stale ? "border-gray-700 bg-gray-900/50" : active ? "border-green-500 bg-green-950/30" : "border-gray-600 bg-gray-900/30";
-  const text = stale ? "text-gray-600" : active ? "text-green-300" : "text-gray-300";
+  const border = stale
+    ? "border-gray-700 bg-gray-900/50"
+    : danger
+      ? "border-red-500 bg-red-950/30"
+      : active
+        ? "border-green-500 bg-green-950/30"
+        : "border-gray-600 bg-gray-900/30";
+  const text = stale ? "text-gray-600" : danger ? "text-red-300" : active ? "text-green-300" : "text-gray-300";
 
   return (
     <div className={`w-full max-w-md rounded border px-5 py-4 ${border}`}>

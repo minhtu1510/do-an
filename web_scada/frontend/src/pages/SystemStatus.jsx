@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { fetchAllTags, fetchPlcStatus } from "../services/api";
 import { connectWebSocket } from "../services/websocket";
+import PageHeader from "../components/PageHeader";
 
 export default function SystemStatus() {
   const [status, setStatus] = useState(null);
@@ -50,8 +51,8 @@ export default function SystemStatus() {
   const goodTags = Object.values(tags).length > 0 ? Object.values(tags).filter((t) => !t.stale).length : totalTags - staleTags;
 
   return (
-    <div className="p-6 space-y-4">
-      <h2 className="text-lg font-bold">Trang thai he thong</h2>
+    <div className="p-6 space-y-6">
+      <PageHeader title="System Status" subtitle="Backend, OPC UA gateway and websocket health at a glance." />
 
       <div className="grid grid-cols-2 gap-3">
         <InfoRow label="PLC IP" value="192.168.210.211" />

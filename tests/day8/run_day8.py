@@ -26,15 +26,76 @@ from tests.common import OPC_URL, info, ok, warn, fail  # noqa: E402
 
 CATALOG_PATH = Path(__file__).with_name("scenarios.yaml")
 WEB_SCADA_API = os.getenv("WEB_SCADA_API", "http://127.0.0.1:8000/api").rstrip("/")
-CONTROLLED_GATED_SCENARIOS = {"OPCUA_WRITE_DENIED", "OPCUA_INVALID_WRITE", "OPCUA_SESSION_BURST"}
+CONTROLLED_GATED_SCENARIOS = {
+    "OPCUA_WRITE_DENIED",
+    "OPCUA_INVALID_WRITE",
+    "OPCUA_SESSION_BURST",
+    "OPCUA_SUBSCRIPTION_FLOOD",
+    "OPCUA_MALICIOUS_WRITE",
+    "VALID_VALUE_WRONG_CONTEXT",
+    "VALID_VALUE_WRONG_TIME",
+    "LOW_RATE_PARAMETER_CHANGE",
+    "COMMAND_WITHOUT_VALID_WEB_SESSION",
+    "MULTI_STAGE_WEB_OPCUA_PLC_ATTACK",
+}
 MAX_SESSION_BURST_COUNT = 10
 MIN_SESSION_BURST_DELAY_S = 0.2
-NOT_CONFIGURED_SAFE_SCENARIOS = {
+MAX_SUBSCRIPTION_ITEMS = 200
+MIN_SUBSCRIPTION_INTERVAL_MS = 50
+DEFAULT_SUBSCRIPTION_HOLD_S = 10.0
+
+# The only node this runner will ever write a *changed* value to. It must stay
+# a single, deliberately chosen node so every write-impact scenario touches
+# the same well-understood tag instead of spreading risk across the registry.
+WRITABLE_TEST_NODE = os.getenv("DAY8_WRITABLE_TEST_NODE", 'ns=3;s="Nhap"')
+MALICIOUS_WRITE_DELTA = int(os.getenv("DAY8_MALICIOUS_WRITE_DELTA", "3"))
+LOW_RATE_STEP = int(os.getenv("DAY8_LOW_RATE_STEP", "1"))
+LOW_RATE_STEPS = max(1, min(int(os.getenv("DAY8_LOW_RATE_STEPS", "5")), 10))
+LOW_RATE_INTERVAL_S = max(1.0, float(os.getenv("DAY8_LOW_RATE_INTERVAL_S", "2.0")))
+
+# Tags this run's results with the OPC UA server security policy that was
+# actually active when the run happened (e.g. "Anonymous", "Basic256Sha256").
+# Set by the operator per run -- never inferred -- so the Security/IDS
+# comparator can group real outcomes by mode instead of guessing.
+OPCUA_SECURITY_MODE = os.getenv("OPCUA_SECURITY_MODE", "").strip() or None
+
+# Any scenario that actually changes a live value on the real PLC (not just a
+# same-value or invalid-type probe) requires this explicit opt-in on top of
+# --execute --allow-gated. This is intentionally separate from
+# CONTROLLED_GATED_SCENARIOS so a operator cannot trigger real process impact
+# by muscle memory alone.
+REQUIRE_IMPACT_OPT_IN_ENV = "DAY8_ALLOW_PROCESS_IMPACT"
+IMPACT_SCENARIOS = {
+    "OPCUA_MALICIOUS_WRITE",
+    "VALID_VALUE_WRONG_CONTEXT",
+    "VALID_VALUE_WRONG_TIME",
+    "LOW_RATE_PARAMETER_CHANGE",
+    "COMMAND_WITHOUT_VALID_WEB_SESSION",
+    "MULTI_STAGE_WEB_OPCUA_PLC_ATTACK",
+}
+
+NOT_CONFIGURED_SCENARIOS = {
     "WEB_LOGIN_FAILURE": "Auth/login endpoint is not implemented in the current Web-SCADA backend.",
     "WEB_ROLE_VIOLATION": "Role-based authorization is not implemented in the current Web-SCADA backend.",
     "OPCUA_UNAUTHORIZED_SESSION": "No OPC UA username/password policy is configured in the current testbed.",
     "OPCUA_CERTIFICATE_REJECTED": "No OPC UA certificate trust-list scenario is configured in the current testbed.",
+    "COMPROMISED_OPERATOR_SESSION": "No web session/auth telemetry exists in the current backend; add an auth module before enabling this scenario.",
+    "COMMAND_SEQUENCE_VIOLATION": "No writable stage-advance command path exists on this PLC/testbed; add a simulator or a dedicated sequence-control tag before enabling this scenario.",
+    "SETPOINT_CHANGE_DURING_FAULT": "No fault-state tag is registered in config/opcua_tags.yaml; add one before enabling this scenario.",
+    "START_DURING_MAINTENANCE": "No maintenance-mode tag is registered in config/opcua_tags.yaml; add one before enabling this scenario.",
 }
+
+
+class ProcessImpactNotAuthorized(Exception):
+    """Raised when an impact scenario is selected without the explicit env opt-in."""
+
+
+def require_impact_opt_in(scenario_id: str) -> None:
+    if scenario_id in IMPACT_SCENARIOS and os.getenv(REQUIRE_IMPACT_OPT_IN_ENV) != "1":
+        raise ProcessImpactNotAuthorized(
+            f"{scenario_id} writes a changed value to a real PLC node ({WRITABLE_TEST_NODE}). "
+            f"Set {REQUIRE_IMPACT_OPT_IN_ENV}=1 to confirm this is authorized before rerunning."
+        )
 
 
 def load_catalog() -> dict:
@@ -233,12 +294,116 @@ async def opcua_session_burst() -> list[str]:
     return evidence
 
 
-def http_request(method: str, path: str, body: bytes | None = None) -> tuple[int | None, str]:
+async def opcua_subscription_flood() -> list[str]:
+    """Single session, bounded number of monitored items at a short publishing interval.
+
+    Targets the OPC UA *application* layer (subscription/monitored-item
+    handling), distinct from S7_FLOOD (transport/session-level) and from
+    OPCUA_SESSION_BURST (many short-lived sessions). Item count, interval and
+    hold time are all hard-capped so this stays a characterization run and
+    not the naive "5000 items / 10ms" flood tooling this scenario is
+    sometimes prototyped with.
+    """
+    from asyncua import Client
+
+    requested_items = int(os.getenv("DAY8_SUBSCRIPTION_FLOOD_ITEMS", "50"))
+    requested_interval_ms = int(os.getenv("DAY8_SUBSCRIPTION_FLOOD_INTERVAL_MS", "200"))
+    requested_hold_s = float(os.getenv("DAY8_SUBSCRIPTION_FLOOD_HOLD_S", str(DEFAULT_SUBSCRIPTION_HOLD_S)))
+
+    item_count = max(1, min(requested_items, MAX_SUBSCRIPTION_ITEMS))
+    interval_ms = max(requested_interval_ms, MIN_SUBSCRIPTION_INTERVAL_MS)
+    hold_s = min(requested_hold_s, 30.0)
+
+    evidence = [
+        f"configured_items={requested_items}; effective_items={item_count}; max_items={MAX_SUBSCRIPTION_ITEMS}",
+        f"configured_interval_ms={requested_interval_ms}; effective_interval_ms={interval_ms}; min_interval_ms={MIN_SUBSCRIPTION_INTERVAL_MS}",
+        f"effective_hold_s={hold_s} (hard capped at 30s)",
+    ]
+
+    before_status, before_body = http_request("GET", "/plc/status")
+    evidence.append(f"web_scada_before_status={before_status}: {before_body}")
+
+    class _QuietHandler:
+        def datachange_notification(self, node, val, data):
+            pass
+
+    node_id = 'ns=3;s="HienThi"'
+    async with Client(url=OPC_URL, timeout=5) as client:
+        node = client.get_node(node_id)
+        sub = await client.create_subscription(interval_ms, _QuietHandler())
+        try:
+            handles = await sub.subscribe_data_change([node for _ in range(item_count)])
+            evidence.append(f"subscribed monitored_items={len(handles)} on node={node_id}")
+            await asyncio.sleep(hold_s)
+        finally:
+            await sub.delete()
+            evidence.append("subscription deleted")
+
+    after_status, after_body = http_request("GET", "/plc/status")
+    evidence.append(f"web_scada_after_status={after_status}: {after_body}")
+    return evidence
+
+
+async def _attempt_write_and_rollback(client, node_id: str, compute_new_value, evidence: list[str]) -> bool:
+    """Write compute_new_value(baseline) to node_id, confirm it landed, then always roll back.
+
+    Returns True if the write actually changed the live value (the
+    successful-manipulation case), False if the server rejected the write
+    outright (no process impact occurred). A failed rollback is never
+    swallowed — it is always appended to evidence as ROLLBACK_FAILED so it
+    cannot be missed when reviewing a run.
+    """
+    node = client.get_node(node_id)
+    baseline = await node.read_value()
+    new_value = compute_new_value(baseline)
+    evidence.append(f"baseline_value={baseline!r} target_node={node_id} attempted_value={new_value!r}")
+
+    try:
+        await node.write_value(new_value)
+    except Exception as exc:
+        evidence.append(f"write_rejected={type(exc).__name__}: {exc}; no process impact occurred")
+        return False
+
+    confirmed = await node.read_value()
+    evidence.append(f"WRITE_SUCCEEDED: wrote={new_value!r} confirmed_value={confirmed!r}")
+
+    try:
+        await node.write_value(baseline)
+        restored = await node.read_value()
+        if restored == baseline:
+            evidence.append(f"rollback_confirmed: restored_value={restored!r}")
+        else:
+            evidence.append(f"ROLLBACK_MISMATCH: expected={baseline!r} got={restored!r}; manual correction required")
+    except Exception as exc:
+        evidence.append(f"ROLLBACK_FAILED={type(exc).__name__}: {exc}; manual correction required on node {node_id}")
+    return True
+
+
+def _bounded_delta(baseline):
+    return baseline + MALICIOUS_WRITE_DELTA if isinstance(baseline, int) else baseline
+
+
+async def opcua_malicious_write() -> list[str]:
+    """Successfully write a plausible-but-wrong value to a real writable node.
+
+    Unlike OPCUA_WRITE_DENIED/OPCUA_INVALID_WRITE (which expect rejection),
+    this is the successful-manipulation case: change a real value, confirm
+    the change (process anomaly, not just protocol noise), then roll back.
+    """
+    from asyncua import Client
+
+    evidence = [f"target_node={WRITABLE_TEST_NODE}; delta={MALICIOUS_WRITE_DELTA}"]
+    async with Client(url=OPC_URL, timeout=5) as client:
+        await _attempt_write_and_rollback(client, WRITABLE_TEST_NODE, _bounded_delta, evidence)
+    return evidence
+
+
+def http_request(method: str, path: str, body: bytes | None = None, timeout: float = 5) -> tuple[int | None, str]:
     try:
         req = Request(f"{WEB_SCADA_API}{path}", data=body, method=method)
         if body is not None:
             req.add_header("Content-Type", "application/json")
-        with urlopen(req, timeout=5) as res:
+        with urlopen(req, timeout=timeout) as res:
             return res.status, res.read().decode("utf-8", errors="replace")[:300]
     except HTTPError as exc:
         return exc.code, exc.read().decode("utf-8", errors="replace")[:300]
@@ -256,6 +421,218 @@ def web_command_rejected() -> list[str]:
     return [f"POST /commands/start -> {status}: {body or 'empty'}"]
 
 
+# --- Group D: logic-aware ---------------------------------------------------
+# Only scenarios backed by real tags in config/opcua_tags.yaml are executed
+# here (bang_tai, vat_2, nhap). COMMAND_SEQUENCE_VIOLATION,
+# SETPOINT_CHANGE_DURING_FAULT and START_DURING_MAINTENANCE have no
+# corresponding tag (no sequence-control, fault or maintenance bit exists) and
+# are reported through NOT_CONFIGURED_SCENARIOS instead of being faked.
+
+async def logic_valid_value_wrong_context() -> list[str]:
+    """Write an in-range Nhap value while the conveyor (bang_tai) is running.
+
+    The value itself would be perfectly valid at rest; writing it while the
+    line is active is the logic violation.
+    """
+    from asyncua import Client
+
+    evidence = []
+    async with Client(url=OPC_URL, timeout=5) as client:
+        running = await client.get_node('ns=3;s="BangTai"').read_value()
+        evidence.append(f"context: bang_tai(running)={running!r}")
+        if not running:
+            evidence.append("Conveyor is not running at execution time; wrong-context condition not observed (not forced/faked).")
+            return evidence
+        await _attempt_write_and_rollback(client, WRITABLE_TEST_NODE, _bounded_delta, evidence)
+    return evidence
+
+
+async def logic_valid_value_wrong_time() -> list[str]:
+    """Write an in-range Nhap value while internal stage bit vat_2 shows a mid-cycle phase."""
+    from asyncua import Client
+
+    evidence = []
+    async with Client(url=OPC_URL, timeout=5) as client:
+        stage_2_active = await client.get_node('ns=3;s="Vat 2"').read_value()
+        evidence.append(f"context: vat_2(stage_2_active)={stage_2_active!r}")
+        if not stage_2_active:
+            evidence.append("Stage 2 is not active at execution time; wrong-time condition not observed (not forced/faked).")
+            return evidence
+        await _attempt_write_and_rollback(client, WRITABLE_TEST_NODE, _bounded_delta, evidence)
+    return evidence
+
+
+async def logic_low_rate_drift() -> list[str]:
+    """Apply several small single-step Nhap writes that individually look benign
+    but accumulate into a real drift, then roll back to the true baseline.
+    """
+    from asyncua import Client
+
+    evidence = [f"step={LOW_RATE_STEP}; steps={LOW_RATE_STEPS}; interval_s={LOW_RATE_INTERVAL_S}"]
+    async with Client(url=OPC_URL, timeout=5) as client:
+        node = client.get_node(WRITABLE_TEST_NODE)
+        true_baseline = await node.read_value()
+        evidence.append(f"true_baseline={true_baseline!r}")
+
+        if not isinstance(true_baseline, int):
+            evidence.append("Target node value is not numeric; low-rate drift is not applicable to this node.")
+            return evidence
+
+        current = true_baseline
+        for i in range(LOW_RATE_STEPS):
+            current += LOW_RATE_STEP
+            try:
+                await node.write_value(current)
+            except Exception as exc:
+                evidence.append(f"step_{i + 1}_rejected={type(exc).__name__}: {exc}")
+                current -= LOW_RATE_STEP
+                break
+            confirmed = await node.read_value()
+            evidence.append(f"step_{i + 1}: wrote={current!r} confirmed={confirmed!r} cumulative_drift={confirmed - true_baseline}")
+            await asyncio.sleep(LOW_RATE_INTERVAL_S)
+
+        try:
+            await node.write_value(true_baseline)
+            restored = await node.read_value()
+            if restored == true_baseline:
+                evidence.append(f"rollback_confirmed: restored_value={restored!r}")
+            else:
+                evidence.append(f"ROLLBACK_MISMATCH: expected={true_baseline!r} got={restored!r}; manual correction required")
+        except Exception as exc:
+            evidence.append(f"ROLLBACK_FAILED={type(exc).__name__}: {exc}; manual correction required on node {WRITABLE_TEST_NODE}")
+    return evidence
+
+
+# --- Group E: cross-layer ----------------------------------------------------
+# COMPROMISED_OPERATOR_SESSION is reported through NOT_CONFIGURED_SCENARIOS —
+# there is no auth/session telemetry in the current backend to compromise.
+
+async def cross_web_to_opcua_unauthorized_write() -> list[str]:
+    """Correlate a rejected web command with an independent OPC UA read confirming no PLC state change."""
+    from asyncua import Client
+
+    evidence = []
+    async with Client(url=OPC_URL, timeout=5) as client:
+        before = await client.get_node(WRITABLE_TEST_NODE).read_value()
+
+    status, body = http_request("POST", "/commands/start", b'{"tag": "nhap", "value": 9999}')
+    evidence.append(f"POST /commands/start -> {status}: {body or 'empty'}")
+
+    async with Client(url=OPC_URL, timeout=5) as client:
+        after = await client.get_node(WRITABLE_TEST_NODE).read_value()
+    evidence.append(f"opcua_value_before={before!r} opcua_value_after={after!r}; unchanged={before == after}")
+    return evidence
+
+
+async def cross_false_display_divergence(samples: int = 5, interval_s: float = 1.0) -> list[str]:
+    """Compare direct OPC UA reads against the Web-SCADA API's tag view to detect display/state divergence."""
+    from asyncua import Client
+
+    evidence = []
+    divergences = 0
+    async with Client(url=OPC_URL, timeout=5) as client:
+        node = client.get_node('ns=3;s="HienThi"')
+        for i in range(samples):
+            direct_value = await node.read_value()
+            status, body = http_request("GET", "/tags/hien_thi")
+            web_value = None
+            if status == 200:
+                try:
+                    web_value = json.loads(body).get("value")
+                except json.JSONDecodeError:
+                    web_value = None
+            evidence.append(f"sample_{i + 1}: direct_opcua={direct_value!r} web_api_status={status} web_api_value={web_value!r}")
+            if status == 200 and web_value is not None and web_value != direct_value:
+                divergences += 1
+            await asyncio.sleep(interval_s)
+    evidence.append(f"summary: samples={samples} divergences_observed={divergences}")
+    return evidence
+
+
+async def cross_web_log_plc_divergence() -> list[str]:
+    """Compare the most recent web event log entry for hien_thi against its current live OPC UA value."""
+    from asyncua import Client
+
+    evidence = []
+    status, body = http_request("GET", "/events?limit=50")
+    evidence.append(f"GET /events -> {status}: {body[:200]}")
+
+    events = []
+    if status == 200:
+        try:
+            events = json.loads(body).get("events", [])
+        except json.JSONDecodeError:
+            events = []
+
+    tag_events = [e for e in events if e.get("tag_key") == "hien_thi"]
+    if not tag_events:
+        evidence.append("No hien_thi event found in recent log; nothing to correlate against.")
+        return evidence
+
+    latest_event = tag_events[0]
+    logged_value = latest_event.get("new_value")
+    async with Client(url=OPC_URL, timeout=5) as client:
+        live_value = await client.get_node('ns=3;s="HienThi"').read_value()
+    evidence.append(
+        f"latest_logged_value={logged_value!r} (at {latest_event.get('timestamp')}) "
+        f"live_value={live_value!r} match={logged_value == live_value}"
+    )
+    return evidence
+
+
+async def cross_command_without_web_session() -> list[str]:
+    """Perform a direct OPC UA write bypassing any web session, then check whether the
+    web event log can attribute it to one — it cannot, since no session/user field
+    exists on EventRecord yet. That gap is the evidence.
+    """
+    from asyncua import Client
+
+    evidence = []
+    async with Client(url=OPC_URL, timeout=5) as client:
+        changed = await _attempt_write_and_rollback(client, WRITABLE_TEST_NODE, _bounded_delta, evidence)
+
+    if not changed:
+        evidence.append("Write was rejected; no PLC-affecting command occurred to correlate.")
+        return evidence
+
+    await asyncio.sleep(1.0)
+    status, body = http_request("GET", "/events?limit=10")
+    evidence.append(f"GET /events -> {status}: {body[:200]}")
+    evidence.append(
+        "EventRecord has no web-session/user field; a direct OPC UA write cannot be "
+        "attributed to, or ruled out from, any web session with current telemetry."
+    )
+    return evidence
+
+
+async def cross_multi_stage_attack() -> list[str]:
+    """Chain reconnaissance, web misuse and (if authorized) a real write into one timeline.
+
+    Stages 1-3 reuse already-safe scenario functions; stage 4 only runs when
+    the process-impact opt-in is set, matching OPCUA_MALICIOUS_WRITE's gate.
+    """
+    evidence = []
+    t0 = time.time()
+
+    stage1 = await opcua_endpoint_discovery()
+    evidence.append(f"STAGE 1 (recon/endpoint_discovery) @ {time.time() - t0:.1f}s: {'; '.join(stage1)}")
+
+    stage2 = await opcua_node_browse(limit=10)
+    evidence.append(f"STAGE 2 (recon/node_browse) @ {time.time() - t0:.1f}s: {'; '.join(stage2)}")
+
+    stage3 = web_command_rejected()
+    evidence.append(f"STAGE 3 (web misuse/unauthorized_command) @ {time.time() - t0:.1f}s: {'; '.join(stage3)}")
+
+    if os.getenv(REQUIRE_IMPACT_OPT_IN_ENV) == "1":
+        stage4 = await opcua_malicious_write()
+        evidence.append(f"STAGE 4 (process impact/malicious_write) @ {time.time() - t0:.1f}s: {'; '.join(stage4)}")
+    else:
+        evidence.append(f"STAGE 4 (process impact) skipped: set {REQUIRE_IMPACT_OPT_IN_ENV}=1 to include the real-write stage in the timeline.")
+
+    evidence.append(f"timeline_total_duration_s={time.time() - t0:.1f}")
+    return evidence
+
+
 async def execute_safe(scenario_id: str) -> list[str] | None:
     if scenario_id == "OPCUA_BENIGN_RECONNECT":
         return await opcua_benign_reconnect()
@@ -269,9 +646,12 @@ async def execute_safe(scenario_id: str) -> list[str] | None:
         return web_invalid_parameter()
     if scenario_id in {"API_COMMAND_REJECTED", "WEB_UNAUTHORIZED_COMMAND"}:
         return web_command_rejected()
+    if scenario_id == "WEB_TO_OPCUA_UNAUTHORIZED_WRITE":
+        return await cross_web_to_opcua_unauthorized_write()
+    if scenario_id == "FALSE_DISPLAY_WITH_PROCESS_CHANGE":
+        return await cross_false_display_divergence()
     if scenario_id == "WEB_LOG_AND_PLC_STATE_DIVERGENCE":
-        status, body = http_request("GET", "/events")
-        return [f"GET /events -> {status}: {body}"]
+        return await cross_web_log_plc_divergence()
     return None
 
 
@@ -282,7 +662,40 @@ async def execute_controlled_gated(scenario_id: str) -> list[str] | None:
         return await opcua_invalid_write()
     if scenario_id == "OPCUA_SESSION_BURST":
         return await opcua_session_burst()
+    if scenario_id == "OPCUA_SUBSCRIPTION_FLOOD":
+        return await opcua_subscription_flood()
+    if scenario_id == "OPCUA_MALICIOUS_WRITE":
+        require_impact_opt_in(scenario_id)
+        return await opcua_malicious_write()
+    if scenario_id == "VALID_VALUE_WRONG_CONTEXT":
+        require_impact_opt_in(scenario_id)
+        return await logic_valid_value_wrong_context()
+    if scenario_id == "VALID_VALUE_WRONG_TIME":
+        require_impact_opt_in(scenario_id)
+        return await logic_valid_value_wrong_time()
+    if scenario_id == "LOW_RATE_PARAMETER_CHANGE":
+        require_impact_opt_in(scenario_id)
+        return await logic_low_rate_drift()
+    if scenario_id == "COMMAND_WITHOUT_VALID_WEB_SESSION":
+        require_impact_opt_in(scenario_id)
+        return await cross_command_without_web_session()
+    if scenario_id == "MULTI_STAGE_WEB_OPCUA_PLC_ATTACK":
+        return await cross_multi_stage_attack()
     return None
+
+
+def push_result_to_webscada(result: dict) -> None:
+    """Best-effort live demo feed: POST to the Web-SCADA Security/IDS console.
+
+    Failures are swallowed on purpose — the runner's job is to produce the
+    JSON file in test_results/day8/; the web push is a bonus for live demos
+    and must never fail the run if the backend isn't up.
+    """
+    try:
+        body = json.dumps(result, ensure_ascii=False).encode("utf-8")
+        http_request("POST", "/security/scenario-result", body, timeout=1)
+    except Exception:
+        pass
 
 
 def save_result(group_id: str, scenario: dict, status: str, evidence: list[str], notes: list[str], start: float) -> Path:
@@ -299,9 +712,12 @@ def save_result(group_id: str, scenario: dict, status: str, evidence: list[str],
         "preconditions": scenario.get("preconditions", []),
         "evidence": evidence,
         "notes": notes,
+        "security_mode": OPCUA_SECURITY_MODE,
     }
     path = out_dir / f"{scenario['id']}_{time.strftime('%Y%m%d_%H%M%S')}.json"
     path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
+    if status != "DRY_RUN":
+        push_result_to_webscada(result)
     return path
 
 
@@ -315,7 +731,15 @@ async def run_items(items, execute: bool, allow_gated: bool) -> int:
         notes = []
         evidence = []
 
-        if scenario.get("requires_manual_gate") and not allow_gated:
+        if not execute:
+            notes.append("dry-run only; add --execute for safe executor")
+            status = "DRY_RUN"
+            info("Dry-run; no traffic generated.")
+        elif scenario_id in NOT_CONFIGURED_SCENARIOS:
+            notes.append(NOT_CONFIGURED_SCENARIOS[scenario_id])
+            status = "NOT_CONFIGURED"
+            warn(NOT_CONFIGURED_SCENARIOS[scenario_id])
+        elif scenario.get("requires_manual_gate") and not allow_gated:
             notes.append("requires_manual_gate=true; not executed by runner")
             status = "GATED"
             warn("Manual safety gate required; catalog entry recorded only.")
@@ -323,10 +747,6 @@ async def run_items(items, execute: bool, allow_gated: bool) -> int:
             notes.append("requires_manual_gate=true; no controlled executor is available for this scenario")
             status = "GATED"
             warn("Manual safety gate required; no controlled executor available.")
-        elif not execute:
-            notes.append("dry-run only; add --execute for safe executor")
-            status = "DRY_RUN"
-            info("Dry-run; no traffic generated.")
         elif not scenario.get("safe_to_execute"):
             try:
                 evidence = await execute_controlled_gated(scenario_id)
@@ -338,6 +758,10 @@ async def run_items(items, execute: bool, allow_gated: bool) -> int:
                     notes.append("Executed with --allow-gated; controlled bounded gated check only.")
                     status = "EXECUTED_GATED"
                     ok(f"Executed controlled gated scenario; evidence={len(evidence)}")
+            except ProcessImpactNotAuthorized as exc:
+                status = "IMPACT_NOT_AUTHORIZED"
+                notes.append(str(exc))
+                warn(str(exc))
             except ImportError as exc:
                 status = "FAILED"
                 rc = 1
@@ -348,10 +772,6 @@ async def run_items(items, execute: bool, allow_gated: bool) -> int:
                 rc = 1
                 fail(str(exc))
                 notes.append(str(exc))
-        elif scenario_id in NOT_CONFIGURED_SAFE_SCENARIOS:
-            notes.append(NOT_CONFIGURED_SAFE_SCENARIOS[scenario_id])
-            status = "NOT_CONFIGURED"
-            warn(NOT_CONFIGURED_SAFE_SCENARIOS[scenario_id])
         else:
             try:
                 evidence = await execute_safe(scenario_id)

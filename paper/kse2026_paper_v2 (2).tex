@@ -1,0 +1,336 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{multirow}
+
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+\begin{document}
+
+\title{A Semantic-Aware S7comm Intrusion Detection Dataset from a Physical PLC Testbed\\}
+
+\author{
+\IEEEauthorblockN{1\textsuperscript{st} Thai Thi Minh Tu}
+\IEEEauthorblockA{\textit{Le Quy Don Technical University} \\
+Hanoi, Vietnam \\
+thaithiminhtu.338@gmail.com}
+\and
+\IEEEauthorblockN{2\textsuperscript{nd} Vuong Linh Thao}
+\IEEEauthorblockA{\textit{Le Quy Don Technical University} \\
+Hanoi, Vietnam \\
+thaolinh252512@gmail.com}
+\and
+\IEEEauthorblockN{3\textsuperscript{rd} Dang Le Dinh Trang}
+\IEEEauthorblockA{\textit{Le Quy Don Technical University} \\
+Hanoi, Vietnam \\
+trangdld@lqdtu.edu.vn}
+}
+
+\maketitle
+
+\begin{abstract}
+We present a semantic-aware S7comm intrusion detection dataset built on a physical Siemens S7-1500 PLC testbed, synchronizing network traffic (PCAP), PLC process/tag logs, and attack-event timelines across 56{,}046 labeled windows (49{,}029 benign, 7{,}017 attack) collected over six days of reconnaissance, direct-write, logic-manipulation, and availability attacks. Guided by a five-layer semantic modeling framework -- tag-level, operation-level, process-state, scenario-level, and cross-layer fusion -- we construct ML-safe network, process, and fusion feature views with explicit leakage controls (session-grouped cross-validation, dropped metadata/rule-derived columns). Grouped cross-validation achieves 0.919 Macro-F1 for binary detection with a Random Forest baseline, while an external Day-6 holdout, built from a randomized mixture of all attack types, reveals a substantial domain-shift gap (0.710 Macro-F1), highlighting realistic generalization challenges that in-distribution evaluation alone tends to obscure. We additionally report per-hour false-positive rate (FPR/hour) alongside Macro-F1 to reflect operator alarm burden. We position this work as a dataset/benchmark contribution rather than a state-of-the-art detector, and report class-imbalance and protocol-observability limitations explicitly.
+\end{abstract}
+
+\begin{IEEEkeywords}
+industrial control systems, S7comm, intrusion detection dataset, PLC testbed, semantic feature engineering, domain shift
+\end{IEEEkeywords}
+
+\section{Introduction}
+
+Industrial Control Systems (ICS) built around Siemens S7-family PLCs remain widely deployed in manufacturing, utilities, and distributed infrastructure such as traffic-light control and irrigation/pumping systems. The S7comm protocol that governs HMI-PLC and engineering-station communication was not designed with authentication or encryption as a default, and a recent taxonomic review of 23 public ICS/IIoT intrusion-detection datasets found that protocol coverage remains heavily skewed toward Modbus, while S7comm, OPC UA, and IEC 61850 remain comparatively underrepresented, and that multi-stage, kill-chain-style adversary behavior is sparsely captured across the surveyed corpus \cite{termanini2026}. This leaves a gap for datasets that (i) target S7comm specifically, (ii) are collected on physical rather than purely simulated hardware, and (iii) organize attacks along a reconnaissance-to-impact progression rather than as isolated, disconnected episodes, while also exercising more than one control application on the same physical PLC.
+
+Existing S7comm-oriented work has largely focused on protocol modeling for signature- or automaton-based detection \cite{kleinmann2014}, on a physical mining/refinery testbed with a fixed process and attack catalogue \cite{rodofile2017}, or on injecting attacks into a single-process capture \cite{alduwairi2025}. What is comparatively rare is a dataset that (a) preserves the relationship between the sender, the command type, the targeted memory area, the timing, and the resulting change in process state -- since in S7comm a single correctly addressed write can silently corrupt a control cycle without triggering any protocol-level anomaly -- (b) exercises multiple, functionally distinct control applications on the same physical PLC to demonstrate generality, and (c) reports session-disjoint, out-of-distribution evaluation rather than in-distribution cross-validation alone.
+
+This paper makes the following contributions:
+\begin{itemize}
+\item A physical S7-1500 PLC testbed with ERSPAN GRE traffic mirroring to a dedicated capture and logging host, exercising two industrial control applications currently instrumented for data collection (a conveyor-belt sequential-logic process and an urban traffic-light controller), with a third (irrigation pump control) implemented but not yet included in the released capture.
+\item Three synchronized data sources -- network capture, PLC tag/process log, and an attack-event timeline -- combined through a five-layer semantic modeling framework that enriches raw S7comm traffic with tag-level, operation-level, process-state, scenario-level, and cross-layer semantics.
+\item A six-day (Day~1--Day~6) scenario suite spanning benign operation, reconnaissance, direct write, logic manipulation, and availability attacks, with Day~6 held out entirely as an external, session-disjoint, mixed-order evaluation set.
+\item An honest benchmark: grouped cross-validation and external-holdout results for Random Forest and Logistic Regression baselines, reporting Macro-F1, balanced accuracy, PR-AUC, and per-hour false-positive rate, including a negative result showing that naively fusing network and process features does not uniformly outperform network-only features under domain shift.
+\end{itemize}
+
+We deliberately position this work as a \emph{dataset/benchmark} contribution rather than a proposal for a state-of-the-art detector, and we report class-imbalance and protocol-observability limitations explicitly rather than omit them.
+
+\section{Related Work}
+
+\textbf{S7comm protocol modeling.} Kleinmann and Wool model the highly periodic nature of S7 traffic between an HMI and a PLC as a per-channel Deterministic Finite Automaton, flagging messages that appear out of sequence or reference unexpected memory locations \cite{kleinmann2014}. This establishes that S7comm traffic has strong structural regularity exploitable for anomaly detection, but it does not couple network observations with the resulting process-state change, nor does it release a labeled, scenario-organized dataset.
+
+\textbf{Physical S7comm testbeds and datasets.} Rodofile et al. release the QUT\_S7comm dataset, collected on a physical critical-infrastructure testbed simulating a mining/refinery process, comprising roughly nine hours of network traffic and process logs with 64 attacks across 13 attack types \cite{rodofile2017}. This is the closest prior work in spirit -- a physical S7 testbed with process logs -- but it targets a single process (a mining/refinery simulation) and does not organize attacks along a kill-chain progression or report session-disjoint, out-of-distribution evaluation. Al-Duwairi et al. release SCADA traffic captures from a Siemens S7-1500-based medical waste incinerator, injecting eight categories of synthetic attacks (including command flooding and stealthy command injection) into benign OPC/PROFINET captures \cite{alduwairi2025}; attacks are injected into existing captures rather than executed live against the PLC through the S7comm channel.
+
+\textbf{Multi-protocol and cross-domain ICS datasets.} G\'omez et al. propose a four-step methodology (attack selection, deployment, capture, feature computation) to build the Electra dataset from an electric traction substation testbed using both Modbus TCP and S7comm devices \cite{gomez2019electra}. Dehlaghi-Ghadim et al. present a more recent ICS anomaly-detection dataset collected on a purpose-built physical testbed with heterogeneous protocols \cite{dehlaghi2023}. Outside the S7/Modbus family, the SWaT \cite{mathur2016swat} and WADI \cite{ahmed2017wadi} water-treatment/distribution testbeds remain the most widely used physical ICS security benchmarks, though neither targets S7comm; we position our work as filling the equivalent role specifically for physical S7comm traffic with process-state fusion.
+
+\textbf{ICS/IIoT dataset landscape.} A 2026 taxonomic review of 23 ICS/OT/IIoT intrusion-detection datasets finds that 14 of 23 (60.9\%) are built on physical testbeds, that Modbus appears in 13 of 23 datasets versus S7comm in only five, and that datasets which pair high realism with high reproducibility are rare; the same review finds that most datasets model short, isolated attack episodes rather than a reconnaissance-through-impact progression \cite{termanini2026}. This motivates our choice to (i) target the underrepresented S7comm protocol, (ii) use a physical rather than purely simulated testbed, (iii) exercise more than one control application, and (iv) organize the six collection days explicitly along a kill-chain-style progression, culminating in a mixed, out-of-distribution holdout day.
+
+Historically, the 2010 Stuxnet incident is widely credited as the event that first demonstrated that a cyberattack on a PLC-based control process could produce physical consequences \cite{chen2010stuxnet}, and it remains the standard motivating reference for treating ICS network security as distinct from conventional IT network security.
+
+\section{Testbed Architecture}
+
+Unlike testbeds built purely on PLCSIM or fully simulated physical processes, our testbed deploys a physical Siemens S7-1500 PLC executing real industrial control logic, connected to a genuine engineering/HMI station (TIA Portal / WinCC Runtime V18) over an isolated, network-segmented industrial environment. This design choice ensures that captured S7comm traffic reflects authentic timing behavior, cyclic scan-based polling, and protocol-level responses under both normal and adversarial conditions -- characteristics that are difficult to reproduce faithfully in simulation-only environments.
+
+Fig.~\ref{fig:testbed} shows the overall architecture. The \emph{Field OT segment} (VLAN~10, 192.168.210.0/24) contains the PLC S7-1500 (.211), an auxiliary PLC (PLC2), an engineering/HMI/controller host (.31) running TIA Portal and WinCC Runtime, and an attacker host (.32) running Python, Scapy, and python-snap7; all four hosts connect through an Aruba switch (.254) configured for ERSPAN GRE traffic mirroring. Mirrored traffic is relayed over ERSPAN GRE to a dedicated \emph{capture and logging host} running TShark/Npcap, which independently records (i) network capture (PCAP/PCAPNG), (ii) the PLC tag/process log (tag CSV with timestamps), and (iii) the attack-event timeline used as audit ground truth; these three streams are merged by timestamp into the semantic-aware labeled dataset described in Section~VI. Table~\ref{tab:testbed_components} summarizes the core components.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.98\linewidth]{testbed_final.png}
+\caption{Physical PLC testbed architecture: Field OT segment mirrored over ERSPAN GRE to a capture and logging host that produces the three synchronized data streams merged into the dataset.}
+\label{fig:testbed}
+\end{figure}
+
+\begin{table}[t]
+\centering
+\caption{Core Testbed Components}
+\label{tab:testbed_components}
+\begin{tabular}{p{1.7cm}p{2.4cm}p{3.6cm}}
+\toprule
+\textbf{Component} & \textbf{Configuration} & \textbf{Role} \\
+\midrule
+PLC & Siemens S7-1500, 192.168.210.211 & Executes control program; real memory areas, scan cycle, protocol responses. \\
+Engineering/HMI & Windows 11, TIA Portal / WinCC V18, 192.168.210.31 & Legitimate HMI polling, tag logging, engineering traffic. \\
+Attacker & Python, Scapy, python-snap7, 192.168.210.32 & Scan, enumeration, write manipulation, setpoint attack, spoofing, flood, fuzz. \\
+Aruba switch & ERSPAN GRE mirror, 192.168.210.254 & Mirrors Field OT traffic to the capture host. \\
+Capture/Logger & TShark/Npcap; PCAP/PCAPNG, tag CSV, event timeline & Synchronizes network, process, and ground-truth timelines by timestamp. \\
+Safety boundary & CPU~STOP disabled by default; restore after write episodes & Bounds operational risk to the physical process. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Industrial control use cases.} To demonstrate generality across control domains rather than a single narrow logic program, we implement three representative control applications: an urban \emph{traffic-light} controller, a \emph{conveyor-belt} sequential-logic process, and an \emph{irrigation/water-pump} distributed-control application. The traffic-light and conveyor-belt applications are currently instrumented and included in the released capture; the water-pump application has been implemented on the same PLC but data collection for it has not yet been carried out, and it is reported here as ongoing work rather than as part of the current benchmark.
+
+\section{Threat Model and Protocol Observability}
+
+\textbf{Threat model and scope.} We assume an attacker who already has network access to the Field OT segment and can reach the PLC's S7 service on TCP/102; we do not simulate the full chain of an initial compromise (e.g., phishing or an Internet-facing pivot). All experiments run on authorized equipment inside an isolated, segmented network, with dedicated test memory areas and a restore step after each write-style episode to limit unintended impact. Explicitly out of scope: physical sabotage, bypassing a dedicated Safety PLC, genuine firmware-level persistence, exploitation of a production network, and functional-safety evaluation.
+
+\textbf{Protocol observability limits.} We report this limitation explicitly because it directly bounds which features are trustworthy. The WinCC-to-PLC channel can use S7CommPlus, which may be protected in ways that make application-layer payload not always decodable from the mirrored PCAP alone. Read/write, memory-area, and offset fields are extracted directly only when an S7 session is unencrypted or when the parser supports the observed variant; for protected sessions only transport/session-level metadata (IP/port, direction, timing, size, session and retransmission behavior) is available. The attack-event log is used only to construct ground truth and for audit purposes; it is excluded from the machine-learning feature set to prevent label leakage. Table~\ref{tab:observability} summarizes this observability matrix.
+
+\begin{table}[t]
+\centering
+\caption{Observability and Leakage-Control Matrix}
+\label{tab:observability}
+\begin{tabular}{p{2.2cm}p{2.7cm}p{2.6cm}}
+\toprule
+\textbf{Source} & \textbf{Observable} & \textbf{Usage rule} \\
+\midrule
+Unencrypted S7 / Snap7 & Function, read/write, memory area, offset, payload length & May be used as protocol semantics. \\
+S7CommPlus / TLS & IP/port, direction, timing, size, session/retransmission & Transport metadata only; command content not claimed unless decoded. \\
+PLC tag log & Sensor / control / timer / setpoint values over time & Captures logic/process impact. \\
+Attack event log & Time, scenario, old/new value & Ground truth/audit only; excluded from ML features. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Data Collection Scenarios}
+
+Each episode consists of a warm-up, a main action, a benign gap, a cooldown, and a restore step. Days~2--5 repeat each scenario three times with randomized duration and inter-episode gaps; the default warm-up is 300~s and the end-of-day cooldown is 600~s. Table~\ref{tab:days} summarizes the six collection days and their integration status in the benchmark.
+
+\begin{table}[t]
+\centering
+\caption{Six-Day Collection Schedule}
+\label{tab:days}
+\begin{tabular}{p{0.5cm}p{1.6cm}p{3.6cm}p{1.1cm}}
+\toprule
+\textbf{Day} & \textbf{Group} & \textbf{Main content} & \textbf{Split} \\
+\midrule
+1 & BENIGN & Mixed benign HMI, sparse HMI, idle & Baseline \\
+2 & SCAN, ENUM & TCP port-102 scan and Snap7 tag enumeration & Train/CV \\
+3 & RWRITE & Write to M5.0 START / M5.1 STOP, then restore & Train/CV \\
+4 & SETPOINT, SPOOF, STEALTHY & Timer/setpoint change, sensor spoof, low-rate stealthy write & Train/CV \\
+5 & FLOOD, FUZZ & S7 connection flood, SYN-style flood, malformed TPKT/S7 payload & Train/CV \\
+6 & Mixed & Random shuffle of Day~2--5 scenarios, lower rate, wider gaps & External holdout \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:scenarios} connects each scenario group to its real-world operational analogue, motivating the realism of the collection design.
+
+\begin{table}[t]
+\centering
+\caption{Operational Relevance of Attack Scenarios}
+\label{tab:scenarios}
+\begin{tabular}{p{1.7cm}p{5.8cm}}
+\toprule
+\textbf{Scenario} & \textbf{Operational relevance} \\
+\midrule
+Reconnaissance & Locating the PLC and reachable services before manipulation. \\
+Direct write & Stopping/starting a pump or conveyor at the wrong time. \\
+Sensor spoofing & False-data injection so control logic reacts to a fabricated state. \\
+Timer/setpoint & Shifting a control cycle, threshold, or timing window. \\
+Low-rate/stealthy & Few packets, large impact; harder for volume-only IDS to catch. \\
+Benign engineering write & Hard negative so the model does not learn ``every write is an attack.'' \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Semantic-Aware Dataset Construction}
+
+\subsection{Motivation}
+
+Existing S7comm datasets typically represent traffic at the packet or flow level (function code, area, offset, size) without capturing the semantic meaning of the underlying industrial process. This limits a detector's ability to reason about \emph{what} an operation does to the control logic rather than only \emph{how} it appears on the wire. We address this gap with a five-layer semantic modeling framework, illustrated in Fig.~\ref{fig:pipeline}, that progressively enriches raw S7comm traffic with process-level, operational, and scenario-level context.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.98\textwidth]{semantic_pipeline_v4.pdf}
+\caption{Five-layer semantic modeling framework transforming raw S7comm traffic into a semantic-aware labeled dataset.}
+\label{fig:pipeline}
+\end{figure*}
+
+\textbf{L1 -- Tag-level semantics.} We map S7 memory area/offset addresses to process-meaningful tag names (Table~\ref{tab:tagmap}). A raw packet only exposes \texttt{ReadVar}/\texttt{WriteVar}, area, offset, and size; the tag mapping additionally identifies whether an offset is a START command, a STOP command, a stage timer, or a production counter.
+
+\begin{table}[t]
+\centering
+\caption{Tag-Level Semantic Mapping (Conveyor-Belt Use Case)}
+\label{tab:tagmap}
+\begin{tabular}{ll}
+\toprule
+\textbf{Address / Tag} & \textbf{Process meaning} \\
+\midrule
+M5.0 & START bit \\
+M5.1 & STOP bit \\
+M5.4, M5.6, M6.0 & Tank\_1, Tank\_2, Tank\_3 (sensors) \\
+CD1 / CD2 / CD3 & Stage timers (DINT) \\
+BangTai & Conveyor running state (Boolean) \\
+Nhap & Product input counter (Int) \\
+HienThi & Production display (Int) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{L2 -- Operation-level semantics.} We interpret each S7 transaction not merely by its syntax but by its behavioral intent: a process command, a parameter manipulation, or a sensor/state spoofing attempt (Table~\ref{tab:opsem}).
+
+\begin{table}[t]
+\centering
+\caption{Operation-Level Semantic Interpretation}
+\label{tab:opsem}
+\begin{tabular}{p{1.9cm}p{2.0cm}p{2.5cm}}
+\toprule
+\textbf{Operation} & \textbf{Network view} & \textbf{Semantic intent} \\
+\midrule
+Read M/I/Q/DB & ReadVar & Reconnaissance / enumeration \\
+Write M5.0/M5.1 & WriteVar & Process command \\
+Write CD1--CD3 & WriteVar (DINT) & Parameter manipulation \\
+Write Tank\_1/2/3 & WriteVar (Bool) & Sensor / state spoofing \\
+Repeated connect & TCP/S7 session & Flooding behavior \\
+Malformed payload & Invalid S7-like PDU & Protocol fuzzing \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{L3 -- Process-state semantics.} We log PLC tag/process state in parallel with network traffic, so a write is not just known to have occurred but is known to have occurred while the conveyor was running or stopped, in a given stage, with a measurable before/after state change. This is the foundation for logic-aware detection rather than volume- or signature-only detection.
+
+\textbf{L4 -- Scenario-level semantics.} Each traffic window is tagged with a \texttt{scenario\_id} (e.g., \texttt{SCAN\_PORT}, \texttt{SETPOINT\_ATTACK}, \texttt{STEALTHY\_WRITE}) rather than only a binary attack/benign label, so the label itself carries behavioral semantics.
+
+\textbf{L5 -- Cross-layer fusion.} PCAP/flow records, the PLC tag log, and the attack-event timeline are aligned to a common clock and merged per window. Session/day identifiers, filenames, host identity, absolute timestamps, and rule/anomaly-derived flags are excluded from the ML feature set to prevent leakage; window size, stride, overlap threshold, precedence rule, and clock-offset policy are fixed by configuration. \texttt{merge\_dataset.py} exports four views: \emph{network-only}, \emph{process-only}, \emph{fusion}, and a \emph{leakage-ablation} view used only to quantify the effect of metadata/rule leakage, never as a reported result.
+
+\textbf{Novelty statement.} Unlike conventional packet- or flow-based ICS datasets, this five-layer framework jointly captures protocol-level operations, process-state context, and attack-scenario intent, enabling detectors to learn behavior-aware rather than purely signature-based patterns.
+
+\subsection{Benign Data and Hard Negatives}
+Benign traffic is not limited to idle state; it covers startup, steady-state, shutdown, mode changes, valid sensor/tag transitions, HMI polling, and legitimate engineering writes during maintenance. Legitimate engineering writes are explicitly retained as hard negatives, which is necessary to measure a realistic false-positive rate and to distinguish authorized writes from unauthorized ones by sender, timing, and impact rather than by write type alone.
+
+\subsection{Dataset Distribution}
+Table~\ref{tab:distribution} reports the current network/fusion-view distribution across the six days. The full release contains 56{,}046 windows (49{,}029 benign, 7{,}017 attack). By class: ENUMERATION~1{,}417, SCAN~912, RWRITE~1{,}014, SPOOF~1{,}013, SETPOINT\_ATTACK~875, STEALTHY~8, FLOOD~1{,}236, FUZZ~542. In Table~\ref{tab:distribution}, the Reconnaissance column aggregates ENUMERATION and SCAN (1{,}417~+~912~=~2{,}329); the Direct/Logic column aggregates RWRITE, SPOOF, SETPOINT\_ATTACK, \emph{and} STEALTHY (1{,}014~+~1{,}013~+~875~+~8~=~2{,}910); the Availability column aggregates FLOOD and FUZZ (1{,}236~+~542~=~1{,}778). We flag this grouping explicitly because the STEALTHY class alone is small enough (8 windows) that its inclusion is easy to overlook when re-deriving the column totals. The STEALTHY class is too small to support reliable per-class conclusions on its own; we report it explicitly rather than omit it. The process-only view contains 10{,}799 windows (9{,}924 benign); some network-level labels appear without a clearly measurable process-state change, which we treat as a coverage limitation rather than evidence that the process-only view detects those attacks.
+
+\begin{table}[t]
+\centering
+\caption{Network/Fusion View Distribution by Day and Group}
+\label{tab:distribution}
+\begin{tabular}{lrrrrr}
+\toprule
+\textbf{Day} & \textbf{Benign} & \textbf{Recon} & \textbf{Direct/} & \textbf{Avail.} & \textbf{Total} \\
+ & & & \textbf{Logic}$^*$ & & \\
+\midrule
+1 & 7{,}348 & 0 & 0 & 0 & 7{,}348 \\
+2 & 8{,}766 & 1{,}392 & 0 & 0 & 10{,}158 \\
+3 & 11{,}755 & 0 & 876 & 0 & 12{,}631 \\
+4 & 5{,}662 & 0 & 1{,}796 & 0 & 7{,}458 \\
+5 & 9{,}795 & 0 & 0 & 1{,}332 & 11{,}127 \\
+6 & 5{,}703 & 937 & 238 & 446 & 7{,}324 \\
+\midrule
+\textbf{Total} & \textbf{49{,}029} & \textbf{2{,}329} & \textbf{2{,}910} & \textbf{1{,}778} & \textbf{56{,}046} \\
+\bottomrule
+\multicolumn{5}{l}{\footnotesize $^*$Direct/Logic includes 8 STEALTHY windows; total attack} \\
+\multicolumn{5}{l}{\footnotesize windows~=~2{,}329~+~2{,}910~+~1{,}778~=~7{,}017.}
+\end{tabular}
+\end{table}
+
+\section{Experimental Setup and Results}
+
+\subsection{Setup}
+Binary detection (benign vs. attack) is the primary task; multiclass attack attribution is a secondary task. We evaluate Random Forest and Logistic Regression baselines on the ML-safe network and fusion views, with session/day identifiers, timestamps, and rule-derived flags excluded per Section~VI-A. The process-only view is excluded from the headline results reported here: it is substantially smaller (10{,}799 windows) and some network-level attack labels lack a clearly measurable process-state change (Section~VI-C), so we treat it as a coverage-limited supplementary view rather than a standalone benchmark split; we release it alongside the other views for completeness. Model selection uses grouped $k$-fold cross-validation, grouped by episode/session to avoid within-session leakage between train and validation splits. Beyond Macro-F1, balanced accuracy, and PR-AUC, we additionally report false positives per hour (FPR/hour) to reflect the operator alarm burden implied by each configuration. Day~6 (randomized-order mixed scenarios) is held out entirely as an \emph{external, out-of-distribution} evaluation set and is never used for threshold tuning or feature selection.
+
+\subsection{Grouped Cross-Validation (In-Distribution)}
+Table~\ref{tab:groupedcv} reports grouped-CV results; Random Forest is the best model on both views and both tasks.
+
+\begin{table}[t]
+\centering
+\caption{Grouped Cross-Validation Results (In-Distribution, Random Forest)}
+\label{tab:groupedcv}
+\begin{tabular}{llcccc}
+\toprule
+\textbf{View} & \textbf{Task} & \textbf{Macro-} & \textbf{Bal.} & \textbf{PR-} & \textbf{FPR/} \\
+ & & \textbf{F1} & \textbf{Acc.} & \textbf{AUC} & \textbf{hr} \\
+\midrule
+Network & Binary & 0.919 & 0.897 & 0.942 & 10.66 \\
+Fusion & Binary & 0.919 & 0.897 & 0.947 & 11.36 \\
+Network & Multiclass & 0.701 & 0.732 & 0.734 & 5.15 \\
+Fusion & Multiclass & 0.705 & 0.732 & 0.736 & 3.96 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{External Holdout (Day 6, Out-of-Distribution)}
+Table~\ref{tab:day6} reports Day-6 external-holdout results; Logistic Regression is reported here as it was the best-performing model under this specific out-of-distribution split.
+
+\begin{table}[t]
+\centering
+\caption{External Holdout Results (Day 6, Logistic Regression)}
+\label{tab:day6}
+\begin{tabular}{llcccc}
+\toprule
+\textbf{View} & \textbf{Task} & \textbf{Macro-} & \textbf{Bal.} & \textbf{PR-} & \textbf{FPR/} \\
+ & & \textbf{F1} & \textbf{Acc.} & \textbf{AUC} & \textbf{hr} \\
+\midrule
+Network & Binary & 0.710 & 0.671 & 0.617 & 8.21 \\
+Fusion & Binary & 0.614 & 0.599 & 0.509 & 7.89 \\
+Network & Multiclass & 0.224 & 0.258 & 0.289 & 11.05 \\
+Fusion & Multiclass & 0.224 & 0.257 & 0.287 & 9.47 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\emph{Note on model asymmetry:} Tables~\ref{tab:groupedcv} and \ref{tab:day6} each report only the best-performing model for that split (Random Forest in-distribution, Logistic Regression under Day-6 shift) rather than a full four-cell RF$\times$LR comparison on both splits. We report it this way because Random Forest overfits session-specific artifacts more readily than Logistic Regression, which is consistent with its larger in-distribution/out-of-distribution gap; a complete symmetric comparison table is left as future work once additional baselines (Section~VII-E) are trained under an identical protocol.
+
+\subsection{Discussion}
+While grouped cross-validation achieves strong in-distribution performance (Macro-F1~=~0.919 for binary detection), performance drops substantially under the Day-6 external holdout (Macro-F1~=~0.710 for network-view binary detection), revealing a clear domain shift between training sessions and an independently randomized attack sequence. This gap is consistent with realistic deployment conditions, where attack timing, background traffic, and process state differ from any single training session, and it underscores the value of reporting external, session-disjoint evaluation rather than in-distribution cross-validation alone.
+
+Notably, the fusion view does not consistently outperform the network-only view: fusion binary Macro-F1 under Day~6 (0.614) is \emph{lower} than network-only (0.710), suggesting that naively concatenating process and network features can introduce session-specific artifacts that do not generalize, rather than uniformly improving robustness. We consider this an important negative result, as fusion is frequently assumed to be strictly beneficial in ICS intrusion-detection literature. The FPR/hour column shows a related pattern: fusion reduces FPR/hour relative to network-only under Day~6 multiclass (9.47 vs.\ 11.05), even though its Macro-F1 is essentially tied, indicating that the two metrics can disagree and that a single aggregate score can obscure operationally relevant differences in alarm burden.
+
+Multiclass attribution is markedly harder under domain shift (Macro-F1 falls from approximately 0.70 to 0.224), and class imbalance remains a limitation: the STEALTHY\_WRITE class contains only 8 windows in the current release, insufficient for reliable per-class conclusions. We report this limitation explicitly rather than omit the class, consistent with our goal of presenting this work as a dataset/benchmark contribution rather than a state-of-the-art detector.
+
+\subsection{Planned Baselines}
+The current benchmark deliberately uses two simple, well-understood baselines (Random Forest, Logistic Regression) to keep the reference results easy to reproduce and audit. As future work, we plan to add a gradient-boosting baseline (XGBoost/LightGBM) and a lightweight sequence model (1D-CNN or LSTM) evaluated under the identical grouped-CV and Day-6-holdout protocol, to give the benchmark a longer-lived point of reference as stronger models become standard practice in this area.
+
+\subsection{Dataset Availability}
+The full dataset -- PCAP/PCAPNG captures, PLC tag-log CSV files, attack-event timelines, four feature views (network-only, process-only, fusion, leakage-ablation), and the preprocessing code (\texttt{merge\_dataset.py}, \texttt{train\_ml.py}) -- will be released publicly together with a data card documenting window size, stride, overlap threshold, precedence rule, and clock-offset policy, under a license permitting academic use. The repository link is withheld during double-blind review and will be provided in the camera-ready version. Releasing code alongside data is intended to make the full pipeline, from raw capture to benchmark results, reproducible.
+
+\section{Conclusion}
+We presented a semantic-aware S7comm intrusion detection dataset collected from a physical, network-segmented Siemens S7-1500 PLC testbed running real industrial control applications, synchronizing network traffic, PLC process state, and attack-event timelines through a five-layer semantic modeling framework. Grouped in-distribution cross-validation and an external, session-disjoint Day-6 holdout together show that strong in-distribution performance (0.919 Macro-F1) does not guarantee robustness under a randomized, out-of-distribution attack mixture (0.710 Macro-F1), and that feature fusion is not uniformly beneficial. Future work includes extending data collection to the irrigation/water-pump control application already implemented on the testbed, incorporating OPC-UA and Web-SCADA channels currently under separate collection, adding gradient-boosting and sequence-model baselines under an identical evaluation protocol, and addressing the severe class imbalance of low-footprint attacks such as stealthy writes.
+
+\begin{thebibliography}{00}
+\bibitem{termanini2026} A. Termanini, H. Bourdoucen, D. Al-Abri, and A. Al Maashri, ``Intrusion Detection Datasets for IIoT and ICS: A Taxonomic Review with a Decision-Aid Scoring Rubric,'' \emph{Sensors}, vol. 26, no. 13, Art. no. 4099, 2026.
+\bibitem{kleinmann2014} A. Kleinmann and A. Wool, ``Accurate Modeling of the Siemens S7 SCADA Protocol for Intrusion Detection and Digital Forensics,'' \emph{Journal of Digital Forensics, Security and Law}, vol. 9, no. 2, pp. 37--50, 2014.
+\bibitem{rodofile2017} N. R. Rodofile, T. Schmidt, S. T. Sherry, C. Djamaludin, K. Radke, and E. Foo, ``Process Control Cyber-Attacks and Labelled Datasets on S7Comm Critical Infrastructure,'' in \emph{Information Security and Privacy (ACISP 2017)}, LNCS vol. 10343, Springer, 2017, pp. 452--459.
+\bibitem{alduwairi2025} B. Al-Duwairi, A. Shatnawi, A. Al-Hammouri, and M. Ababneh, ``Dataset of SCADA traffic captures from a medical waste incinerator with injected cyberattacks,'' \emph{Data in Brief}, vol. 63, Art. no. 112294, 2025.
+\bibitem{gomez2019electra} \'A. L. Perales G\'omez, L. Fern\'andez Maim\'o, A. Huertas Celdr\'an, F. J. Garc\'ia Clemente, C. Cadenas Sarmiento, C. J. Del Canto Masa, and R. M\'endez Nistal, ``On the Generation of Anomaly Detection Datasets in Industrial Control Systems,'' \emph{IEEE Access}, vol. 7, pp. 177460--177473, 2019.
+\bibitem{dehlaghi2023} A. Dehlaghi-Ghadim, M. Helali Moghadam, A. Balador, and H. Hansson, ``Anomaly Detection Dataset for Industrial Control Systems,'' \emph{IEEE Access}, vol. 11, pp. 107982--107996, 2023.
+\bibitem{mathur2016swat} A. P. Mathur and N. O. Tippenhauer, ``SWaT: A Water Treatment Testbed for Research and Training on ICS Security,'' in \emph{2016 Int. Workshop on Cyber-physical Systems for Smart Water Networks (CySWater)}, 2016, pp. 31--36.
+\bibitem{ahmed2017wadi} C. M. Ahmed, V. R. Palleti, and A. P. Mathur, ``WADI: A Water Distribution Testbed for Research in the Design of Secure Cyber Physical Systems,'' in \emph{Proc. 3rd Int. Workshop on Cyber-Physical Systems for Smart Water Networks (CySWATER'17)}, ACM, 2017, pp. 25--28.
+\bibitem{chen2010stuxnet} T. M. Chen, ``Stuxnet, the real start of cyber warfare? [Editor's Note],'' \emph{IEEE Network}, vol. 24, no. 2, pp. 2--3, 2010.
+\end{thebibliography}
+
+\end{document}
