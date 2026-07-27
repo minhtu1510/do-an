@@ -458,6 +458,93 @@ def build_process_dataset(
     return proc_win.drop(columns=["_window_mid_ms"], errors="ignore")
 
 
+PROCESS_DERIVED_TAGS = (
+    "Cam_bien", "S1", "Vat_1", "Vat_2", "Vat_3",
+    "BangTai", "START", "STOP", "Start_1", "Stop_1",
+    "CD1", "CD2", "CD3", "Times_1", "HienThi", "Nhap",
+    "q0_raw", "m5_raw", "m6_raw",
+)
+SENSOR_TAGS = ("Cam_bien", "S1", "Vat_1", "Vat_2", "Vat_3")
+CONTROL_TAGS = ("BangTai", "START", "STOP", "Start_1", "Stop_1")
+TIMER_TAGS = ("CD1", "CD2", "CD3", "Times_1")
+
+
+def safe_feature_name(value: object) -> str:
+    return re.sub(r"[^A-Za-z0-9_]+", "_", str(value)).strip("_")
+
+
+def build_process_dynamics(process_df: pd.DataFrame, numeric_cols: Sequence[str]) -> pd.DataFrame:
+    if process_df.empty or "window_start_ms" not in process_df.columns:
+        return pd.DataFrame(columns=["window_start_ms"])
+
+    selected = [col for col in PROCESS_DERIVED_TAGS if col in numeric_cols]
+    if not selected:
+        return pd.DataFrame(columns=["window_start_ms"])
+
+    sort_cols = [c for c in ["timestamp_ms", "poll_seq"] if c in process_df.columns]
+    work = process_df.sort_values(sort_cols or ["window_start_ms"]).copy()
+    derived_data = {"window_start_ms": work["window_start_ms"].astype("int64")}
+
+    changed_cols = []
+    delta_cols = []
+    for col in selected:
+        values = pd.to_numeric(work[col], errors="coerce").fillna(0.0)
+        delta = values.diff().abs().fillna(0.0)
+        changed = (delta > 0).astype(int)
+        name = safe_feature_name(col)
+        delta_col = f"proc__{name}_abs_delta"
+        changed_col = f"proc__{name}_changed"
+        derived_data[delta_col] = delta
+        derived_data[changed_col] = changed
+        delta_cols.append(delta_col)
+        changed_cols.append(changed_col)
+
+    derived = pd.DataFrame(derived_data, index=work.index)
+
+    present_sensor_cols = [col for col in SENSOR_TAGS if col in numeric_cols]
+    present_control_cols = [col for col in CONTROL_TAGS if col in numeric_cols]
+    present_timer_cols = [col for col in TIMER_TAGS if col in numeric_cols]
+
+    if present_sensor_cols:
+        sensor_values = work[present_sensor_cols].apply(pd.to_numeric, errors="coerce").fillna(0.0)
+        derived["proc__sensor_active_sum"] = sensor_values.sum(axis=1)
+    if present_control_cols:
+        control_values = work[present_control_cols].apply(pd.to_numeric, errors="coerce").fillna(0.0)
+        derived["proc__control_active_sum"] = control_values.sum(axis=1)
+    if present_timer_cols:
+        timer_delta_cols = [f"proc__{safe_feature_name(col)}_abs_delta" for col in present_timer_cols]
+        timer_delta_cols = [col for col in timer_delta_cols if col in derived.columns]
+        if timer_delta_cols:
+            derived["proc__timer_abs_delta_sum"] = derived[timer_delta_cols].sum(axis=1)
+
+    if changed_cols:
+        derived["proc__process_change_count"] = derived[changed_cols].sum(axis=1)
+        derived["proc__process_change_ratio"] = derived["proc__process_change_count"] / max(len(changed_cols), 1)
+    sensor_changed_cols = [f"proc__{safe_feature_name(col)}_changed" for col in present_sensor_cols]
+    sensor_changed_cols = [col for col in sensor_changed_cols if col in derived.columns]
+    if sensor_changed_cols:
+        derived["proc__sensor_change_count"] = derived[sensor_changed_cols].sum(axis=1)
+    control_changed_cols = [f"proc__{safe_feature_name(col)}_changed" for col in present_control_cols]
+    control_changed_cols = [col for col in control_changed_cols if col in derived.columns]
+    if control_changed_cols:
+        derived["proc__control_change_count"] = derived[control_changed_cols].sum(axis=1)
+
+    agg_spec = {}
+    for col in derived.columns:
+        if col == "window_start_ms":
+            continue
+        if col.endswith("_changed"):
+            agg_spec[col] = ["max", "sum"]
+        elif col.endswith("_count"):
+            agg_spec[col] = ["max", "sum"]
+        else:
+            agg_spec[col] = ["mean", "max"]
+
+    grouped = derived.groupby("window_start_ms", sort=True).agg(agg_spec)
+    grouped.columns = [f"{col}_{stat}" for col, stat in grouped.columns]
+    return grouped.reset_index()
+
+
 def process_window_snapshot(process_df: pd.DataFrame, window_ms: int) -> pd.DataFrame:
     if process_df.empty:
         return pd.DataFrame(columns=["window_start_ms"])
@@ -483,6 +570,11 @@ def process_window_snapshot(process_df: pd.DataFrame, window_ms: int) -> pd.Data
     grouped = grouped.reset_index()
     std_cols = [c for c in grouped.columns if c.endswith("_std")]
     grouped[std_cols] = grouped[std_cols].fillna(0.0)
+    dynamics = build_process_dynamics(process_df, numeric_cols)
+    if not dynamics.empty:
+        grouped = pd.merge(grouped, dynamics, on="window_start_ms", how="left")
+        proc_cols = [c for c in dynamics.columns if c != "window_start_ms"]
+        grouped[proc_cols] = grouped[proc_cols].fillna(0.0)
     return grouped
 
 

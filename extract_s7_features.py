@@ -594,14 +594,23 @@ def new_window() -> dict:
         "s7_transport_sizes": set(),
         "s7_command_keys": Counter(),
         "s7_unique_commands": set(),
+        "s7_write_dbs": set(),
+        "s7_write_areas": set(),
+        "s7_write_offsets": set(),
+        "s7_write_offsets_ordered": [],
+        "s7_write_command_keys": Counter(),
+        "s7_write_unique_commands": set(),
         "s7_offsets_ordered": [],
         "s7_db_area_count": 0,
         "s7_merker_area_count": 0,
         "s7_input_area_count": 0,
         "s7_output_area_count": 0,
         "s7_other_area_count": 0,
+        "s7_db_write_count": 0,
+        "s7_merker_write_count": 0,
         "s7_input_write_count": 0,
         "s7_output_write_count": 0,
+        "s7_other_write_count": 0,
         "s7_write_payload_bytes": [],
         "s7_write_payload_bytes_total": 0,
         "s7_max_item_count": 0,
@@ -1021,8 +1030,12 @@ def update_area_counters(w: dict, area: str, is_write_cmd: bool) -> None:
     w["s7_areas"].add(area)
     if "db" in s or "data block" in s or "0x84" in s or s == "132":
         w["s7_db_area_count"] += 1
+        if is_write_cmd:
+            w["s7_db_write_count"] += 1
     elif "merker" in s or "0x83" in s or s == "131":
         w["s7_merker_area_count"] += 1
+        if is_write_cmd:
+            w["s7_merker_write_count"] += 1
     elif "input" in s or "0x81" in s or s == "129":
         w["s7_input_area_count"] += 1
         if is_write_cmd:
@@ -1033,6 +1046,8 @@ def update_area_counters(w: dict, area: str, is_write_cmd: bool) -> None:
             w["s7_output_write_count"] += 1
     else:
         w["s7_other_area_count"] += 1
+        if is_write_cmd:
+            w["s7_other_write_count"] += 1
 
 
 def extract_features(
@@ -1563,13 +1578,21 @@ def extract_features(
 
         for db in db_vals:
             w["s7_dbs"].add(db)
+            if is_write_cmd:
+                w["s7_write_dbs"].add(db)
         for area in area_vals:
             update_area_counters(w, area, is_write_cmd)
+            if is_write_cmd:
+                w["s7_write_areas"].add(area)
         for addr in addr_vals:
             w["s7_offsets"].add(addr)
             a = safe_int(addr, -1)
             if a >= 0:
                 w["s7_offsets_ordered"].append(a)
+                if is_write_cmd:
+                    w["s7_write_offsets_ordered"].append(a)
+            if is_write_cmd:
+                w["s7_write_offsets"].add(addr)
         for tsz in tsz_vals:
             w["s7_transport_sizes"].add(tsz)
         if func_vals and (db_vals or addr_vals or tsz_vals):
@@ -1620,13 +1643,21 @@ def extract_features(
 
         for db in s7p_db:
             w["s7_dbs"].add(db)
+            if is_write_cmd:
+                w["s7_write_dbs"].add(db)
         for area in s7p_area:
             update_area_counters(w, area, is_write_cmd)
+            if is_write_cmd:
+                w["s7_write_areas"].add(area)
         for addr in s7p_addr:
             w["s7_offsets"].add(addr)
             a = safe_int(addr, -1)
             if a >= 0:
                 w["s7_offsets_ordered"].append(a)
+                if is_write_cmd:
+                    w["s7_write_offsets_ordered"].append(a)
+            if is_write_cmd:
+                w["s7_write_offsets"].add(addr)
         if s7p_db or s7p_addr:
             update_decode_rank(w, 3)
         for err in s7p_error:
@@ -1653,6 +1684,9 @@ def extract_features(
             if any(key):
                 w["s7_command_keys"][key] += 1
                 w["s7_unique_commands"].add((func, db, area, addr))
+                if is_write_cmd:
+                    w["s7_write_command_keys"][key] += 1
+                    w["s7_write_unique_commands"].add((func, db, area, addr))
 
         max_plus_len = max(len(plus_funcs), len(s7p_db), len(s7p_area), len(s7p_addr), 0)
         for i in range(max_plus_len):
@@ -1664,6 +1698,9 @@ def extract_features(
             if any(key[:-1]):
                 w["s7_command_keys"][key] += 1
                 w["s7_unique_commands"].add((func, db, area, addr))
+                if is_write_cmd:
+                    w["s7_write_command_keys"][key] += 1
+                    w["s7_write_unique_commands"].add((func, db, area, addr))
 
     stderr_output = proc.stderr.read() if proc.stderr is not None else ""
     ret = proc.wait()
@@ -1868,9 +1905,15 @@ def write_output(
         "s7_read_count", "s7_write_count", "s7_setup_count", "s7_cpu_control_count", "s7_error_count",
         "s7_pdu_job_count", "s7_pdu_ack_count", "s7_pdu_ack_data_count", "s7_pdu_userdata_count",
         "s7_unique_db_count", "s7_unique_area_count", "s7_unique_offset_count", "s7_transport_size_count", "s7_repeated_command_count",
+        "s7_write_unique_db_count", "s7_write_unique_area_count", "s7_write_unique_offset_count", "s7_write_unique_commands_count", "s7_write_repeated_command_count",
         "s7_db_area_count", "s7_merker_area_count", "s7_input_area_count", "s7_output_area_count", "s7_other_area_count",
-        "s7_input_write_count", "s7_output_write_count", "s7_write_payload_bytes_total", "s7_write_payload_bytes_mean", "s7_max_item_count",
-        "s7_write_read_ratio", "s7_unique_commands_count", "s7_sequential_offset_score", "s7_negotiation_only_ratio",
+        "s7_db_write_count", "s7_merker_write_count", "s7_input_write_count", "s7_output_write_count", "s7_other_write_count",
+        "s7_write_payload_bytes_total", "s7_write_payload_bytes_mean", "s7_max_item_count",
+        "s7_write_read_ratio", "s7_unique_commands_count", "s7_write_offset_min", "s7_write_offset_max", "s7_write_offset_range",
+        "s7_write_to_s7_packet_ratio", "s7_write_to_semantic_ratio", "s7_write_to_plc_packet_ratio",
+        "s7_db_write_ratio", "s7_merker_write_ratio", "s7_input_write_ratio", "s7_output_write_ratio",
+        "s7_write_unique_offset_ratio", "s7_write_unique_command_ratio",
+        "s7_sequential_offset_score", "s7_write_sequential_offset_ratio", "s7_negotiation_only_ratio",
 
         # payload stats
         "raw_payload_len_mean", "raw_payload_len_std", "raw_payload_len_min", "raw_payload_len_max",
@@ -1960,7 +2003,23 @@ def write_output(
                 plc_gap_max = 0.0
 
             s7_repeated_command_count = sum(max(0, c - 1) for c in w["s7_command_keys"].values())
+            s7_write_repeated_command_count = sum(max(0, c - 1) for c in w["s7_write_command_keys"].values())
+            s7_write_offsets = w["s7_write_offsets_ordered"]
+            s7_write_offset_min = min(s7_write_offsets) if s7_write_offsets else 0
+            s7_write_offset_max = max(s7_write_offsets) if s7_write_offsets else 0
+            s7_write_offset_range = s7_write_offset_max - s7_write_offset_min if s7_write_offsets else 0
             s7_total_sem = w["s7_read_count"] + w["s7_write_count"] + w["s7_setup_count"] + w["s7_cpu_control_count"]
+            s7_packet_total = w["s7comm_packet_count"] + w["s7comm_plus_packet_count"]
+            s7_write_count = w["s7_write_count"]
+            s7_write_to_s7_packet_ratio = s7_write_count / max(s7_packet_total, 1)
+            s7_write_to_semantic_ratio = s7_write_count / max(s7_total_sem, 1)
+            s7_write_to_plc_packet_ratio = s7_write_count / max(w["to_plc_packet_count"], 1)
+            s7_db_write_ratio = w["s7_db_write_count"] / max(s7_write_count, 1)
+            s7_merker_write_ratio = w["s7_merker_write_count"] / max(s7_write_count, 1)
+            s7_input_write_ratio = w["s7_input_write_count"] / max(s7_write_count, 1)
+            s7_output_write_ratio = w["s7_output_write_count"] / max(s7_write_count, 1)
+            s7_write_unique_offset_ratio = len(w["s7_write_offsets"]) / max(s7_write_count, 1)
+            s7_write_unique_command_ratio = len(w["s7_write_unique_commands"]) / max(s7_write_count, 1)
             s7_neg_ratio = w["s7_setup_count"] / max(s7_total_sem, 1)
 
             tag_vals = w["tag_numeric_values"]
@@ -2028,10 +2087,16 @@ def write_output(
                 w["s7_read_count"], w["s7_write_count"], w["s7_setup_count"], w["s7_cpu_control_count"], w["s7_error_count"],
                 w["s7_pdu_job_count"], w["s7_pdu_ack_count"], w["s7_pdu_ack_data_count"], w["s7_pdu_userdata_count"],
                 len(w["s7_dbs"]), len(w["s7_areas"]), len(w["s7_offsets"]), len(w["s7_transport_sizes"]), s7_repeated_command_count,
+                len(w["s7_write_dbs"]), len(w["s7_write_areas"]), len(w["s7_write_offsets"]), len(w["s7_write_unique_commands"]), s7_write_repeated_command_count,
                 w["s7_db_area_count"], w["s7_merker_area_count"], w["s7_input_area_count"], w["s7_output_area_count"], w["s7_other_area_count"],
-                w["s7_input_write_count"], w["s7_output_write_count"], w["s7_write_payload_bytes_total"], round(mean(w["s7_write_payload_bytes"]), 6), w["s7_max_item_count"],
+                w["s7_db_write_count"], w["s7_merker_write_count"], w["s7_input_write_count"], w["s7_output_write_count"], w["s7_other_write_count"],
+                w["s7_write_payload_bytes_total"], round(mean(w["s7_write_payload_bytes"]), 6), w["s7_max_item_count"],
                 round(w["s7_write_count"] / max(w["s7_read_count"], 1), 6), len(w["s7_unique_commands"]),
-                round(compute_sequential_offset_score(w["s7_offsets_ordered"]), 6), round(s7_neg_ratio, 6),
+                s7_write_offset_min, s7_write_offset_max, s7_write_offset_range,
+                round(s7_write_to_s7_packet_ratio, 6), round(s7_write_to_semantic_ratio, 6), round(s7_write_to_plc_packet_ratio, 6),
+                round(s7_db_write_ratio, 6), round(s7_merker_write_ratio, 6), round(s7_input_write_ratio, 6), round(s7_output_write_ratio, 6),
+                round(s7_write_unique_offset_ratio, 6), round(s7_write_unique_command_ratio, 6),
+                round(compute_sequential_offset_score(w["s7_offsets_ordered"]), 6), round(compute_sequential_offset_score(s7_write_offsets), 6), round(s7_neg_ratio, 6),
 
                 round(mean(raw_lengths), 6), round(std(raw_lengths), 6), min(raw_lengths) if raw_lengths else 0, max(raw_lengths) if raw_lengths else 0,
                 round(mean(payload_ents), 6), round(std(payload_ents), 6), round(max(payload_ents) if payload_ents else 0.0, 6),

@@ -36,6 +36,7 @@ from sklearn.metrics import (
     recall_score,
 )
 from sklearn.model_selection import GroupKFold
+from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler, label_binarize
 
@@ -112,6 +113,23 @@ RULE_EXACT = {
 
 UNSAFE_SUFFIXES = ("_score",)
 
+FEATURE_PROFILES = ("safe", "hybrid", "frequency_robust")
+
+# Raw event volume helps with floods/scans, but it can make sparse PLC-logic
+# attacks brittle when another session changes cadence. The hybrid profile keeps
+# safe raw-volume features and adds ratio/presence features; frequency_robust is
+# a stricter ablation that drops raw-volume columns after adding those features.
+FREQUENCY_SENSITIVE_EXACT = {
+    "packet_count", "byte_count", "packet_rate", "byte_rate",
+    "tcp_active_streams", "pkt_len_variance", "down_up_ratio",
+}
+FREQUENCY_SENSITIVE_SUFFIXES = (
+    "_count", "_counts", "_bytes", "_rate", "_per_sec", "_total", "_total_ms",
+)
+FREQUENCY_KEEP_SUFFIXES = (
+    "_ratio", "_mean", "_std", "_min", "_max", "_range", "_variance", "_entropy",
+)
+
 DEFAULT_GROUP_COLUMNS = ("session_id", "host_id", "episode_id")
 AUDIT_METADATA_COLUMNS = (
     "session_id", "host_id", "episode_id", "scenario_id", "dataset_view",
@@ -173,7 +191,88 @@ def load_dataset(paths: Sequence[str], dataset_name: str) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True, sort=False)
 
 
-def select_feature_matrix(df: pd.DataFrame, leakage_mode: bool) -> Tuple[pd.DataFrame, List[str], List[str]]:
+def numeric_column_or_zero(X: pd.DataFrame, column: str) -> pd.Series:
+    if column not in X.columns:
+        return pd.Series(0.0, index=X.index, dtype="float64")
+    return pd.to_numeric(X[column], errors="coerce").fillna(0.0)
+
+
+def safe_ratio(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
+    den = denominator.replace(0, np.nan)
+    return (numerator / den).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+
+
+def add_frequency_robust_features(X: pd.DataFrame) -> pd.DataFrame:
+    """Add cadence-invariant PLC/network features before dropping raw volume.
+
+    These features preserve whether and where a PLC write occurred, plus ratios
+    relative to S7/to-PLC traffic, so day/session frequency changes are less
+    likely to dominate the classifier.
+    """
+    out = X.copy()
+
+    packet_count = numeric_column_or_zero(out, "packet_count")
+    s7_packets = numeric_column_or_zero(out, "s7comm_packet_count") + numeric_column_or_zero(out, "s7comm_plus_packet_count")
+    to_plc_packets = numeric_column_or_zero(out, "to_plc_packet_count")
+    s7_write = numeric_column_or_zero(out, "s7_write_count")
+    s7_read = numeric_column_or_zero(out, "s7_read_count")
+    s7_setup = numeric_column_or_zero(out, "s7_setup_count")
+    s7_cpu = numeric_column_or_zero(out, "s7_cpu_control_count")
+    s7_semantic = s7_read + s7_write + s7_setup + s7_cpu
+
+    merker_write = numeric_column_or_zero(out, "s7_merker_write_count")
+    db_write = numeric_column_or_zero(out, "s7_db_write_count")
+    if "s7_merker_write_count" not in out.columns:
+        merker_write = numeric_column_or_zero(out, "s7_merker_area_count").where(s7_write > 0, 0.0)
+    if "s7_db_write_count" not in out.columns:
+        db_write = numeric_column_or_zero(out, "s7_db_area_count").where(s7_write > 0, 0.0)
+    input_write = numeric_column_or_zero(out, "s7_input_write_count")
+    output_write = numeric_column_or_zero(out, "s7_output_write_count")
+    unique_write_offsets = numeric_column_or_zero(out, "s7_write_unique_offset_count")
+    unique_write_areas = numeric_column_or_zero(out, "s7_write_unique_area_count")
+    unique_write_commands = numeric_column_or_zero(out, "s7_write_unique_commands_count")
+
+    out["fr_s7_present"] = (s7_packets > 0).astype(float)
+    out["fr_s7_write_present"] = (s7_write > 0).astype(float)
+    out["fr_s7_merker_write_present"] = (merker_write > 0).astype(float)
+    out["fr_s7_db_write_present"] = (db_write > 0).astype(float)
+    out["fr_s7_input_write_present"] = (input_write > 0).astype(float)
+    out["fr_s7_output_write_present"] = (output_write > 0).astype(float)
+    out["fr_s7_cpu_control_present"] = (s7_cpu > 0).astype(float)
+    out["fr_s7_error_present"] = (numeric_column_or_zero(out, "s7_error_count") > 0).astype(float)
+    out["fr_malformed_present"] = (numeric_column_or_zero(out, "malformed_packet_count") > 0).astype(float)
+
+    out["fr_s7_packet_share"] = safe_ratio(s7_packets, packet_count)
+    out["fr_to_plc_packet_share"] = safe_ratio(to_plc_packets, packet_count)
+    out["fr_s7_write_to_s7_packet_ratio"] = safe_ratio(s7_write, s7_packets)
+    out["fr_s7_write_to_semantic_ratio"] = safe_ratio(s7_write, s7_semantic)
+    out["fr_s7_write_to_plc_packet_ratio"] = safe_ratio(s7_write, to_plc_packets)
+    out["fr_s7_read_write_balance"] = safe_ratio(s7_write, s7_read + s7_write)
+    out["fr_s7_merker_write_ratio"] = safe_ratio(merker_write, s7_write)
+    out["fr_s7_db_write_ratio"] = safe_ratio(db_write, s7_write)
+    out["fr_s7_input_write_ratio"] = safe_ratio(input_write, s7_write)
+    out["fr_s7_output_write_ratio"] = safe_ratio(output_write, s7_write)
+    out["fr_s7_unique_write_offset_ratio"] = safe_ratio(unique_write_offsets, s7_write)
+    out["fr_s7_unique_write_area_ratio"] = safe_ratio(unique_write_areas, s7_write)
+    out["fr_s7_unique_write_command_ratio"] = safe_ratio(unique_write_commands, s7_write)
+
+    return out
+
+
+def is_frequency_sensitive_column(column: str) -> bool:
+    c = column.lower()
+    if c.startswith("fr_"):
+        return False
+    if c.endswith(FREQUENCY_KEEP_SUFFIXES):
+        return False
+    return column in FREQUENCY_SENSITIVE_EXACT or c.endswith(FREQUENCY_SENSITIVE_SUFFIXES)
+
+
+def select_feature_matrix(
+    df: pd.DataFrame,
+    leakage_mode: bool,
+    feature_profile: str = "safe",
+) -> Tuple[pd.DataFrame, List[str], List[str]]:
     dropped: List[str] = []
     kept: List[str] = []
     for col in df.columns:
@@ -199,6 +298,13 @@ def select_feature_matrix(df: pd.DataFrame, leakage_mode: bool) -> Tuple[pd.Data
         dropped.extend(nonnumeric)
     X = pd.DataFrame(converted, index=df.index)
     X = X.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    if feature_profile in {"hybrid", "frequency_robust"}:
+        X = add_frequency_robust_features(X)
+    if feature_profile == "frequency_robust":
+        frequency_dropped = [col for col in X.columns if is_frequency_sensitive_column(col)]
+        if frequency_dropped:
+            X = X.drop(columns=frequency_dropped)
+            dropped.extend(frequency_dropped)
     return X, list(X.columns), dropped
 
 
@@ -373,6 +479,67 @@ def predict_scores(model: object, X_test: pd.DataFrame, labels: Sequence[object]
         return None
 
 
+def positive_class_scores(y_score: Optional[np.ndarray], labels: Sequence[object]) -> Optional[np.ndarray]:
+    if y_score is None:
+        return None
+    if y_score.ndim == 1:
+        return y_score.ravel()
+    label_list = list(labels)
+    pos_idx = label_list.index(1) if 1 in label_list else len(label_list) - 1
+    if pos_idx < 0 or pos_idx >= y_score.shape[1]:
+        return None
+    return y_score[:, pos_idx]
+
+
+def tune_fbeta_threshold(y_true: pd.Series, scores: np.ndarray, beta: float) -> float:
+    y_true_array = np.asarray(y_true).astype(int)
+    if len(np.unique(y_true_array)) < 2 or scores.size == 0:
+        return 0.5
+    precision, recall, thresholds = precision_recall_curve(y_true_array, scores)
+    if len(thresholds) == 0:
+        return 0.5
+    precision = precision[:-1]
+    recall = recall[:-1]
+    beta_sq = beta * beta
+    denom = (beta_sq * precision) + recall
+    fbeta = np.divide(
+        (1 + beta_sq) * precision * recall,
+        denom,
+        out=np.zeros_like(precision, dtype=float),
+        where=denom > 0,
+    )
+    best_idx = int(np.nanargmax(fbeta))
+    return float(thresholds[best_idx])
+
+
+def predict_with_optional_binary_threshold(
+    model: object,
+    X_train: pd.DataFrame,
+    y_train: pd.Series,
+    X_test: pd.DataFrame,
+    labels: Sequence[object],
+    task: str,
+    threshold_mode: str,
+    threshold_beta: float,
+    threshold_value: Optional[float],
+) -> Tuple[np.ndarray, Optional[np.ndarray], float]:
+    y_score = predict_scores(model, X_test, labels)
+    if task != "binary" or threshold_mode == "default":
+        return model.predict(X_test), y_score, float("nan")
+
+    train_score = predict_scores(model, X_train, labels)
+    train_positive = positive_class_scores(train_score, labels)
+    test_positive = positive_class_scores(y_score, labels)
+    if train_positive is None or test_positive is None:
+        return model.predict(X_test), y_score, float("nan")
+
+    if threshold_mode == "fixed":
+        threshold = 0.5 if threshold_value is None else float(threshold_value)
+    else:
+        threshold = tune_fbeta_threshold(y_train, train_positive, threshold_beta)
+    return (test_positive >= threshold).astype(int), y_score, threshold
+
+
 def save_confusion_matrix(
     y_true: pd.Series,
     y_pred: np.ndarray,
@@ -453,6 +620,10 @@ def run_ml_experiment(
     tasks: Sequence[str],
     corr_threshold: float,
     default_window_seconds: float,
+    feature_profile: str,
+    binary_threshold_mode: str,
+    binary_threshold_beta: float,
+    binary_threshold_value: Optional[float],
 ) -> List[Dict[str, object]]:
     if df.empty or "label" not in df.columns:
         print(f"[SKIP] {experiment}: no rows or no label column")
@@ -472,7 +643,11 @@ def run_ml_experiment(
             print(f"[SKIP] {experiment}/{task}: only one class")
             continue
 
-        X_all, feature_cols, dropped = select_feature_matrix(data, leakage_mode=leakage_mode)
+        X_all, feature_cols, dropped = select_feature_matrix(
+            data,
+            leakage_mode=leakage_mode,
+            feature_profile=feature_profile,
+        )
         if X_all.empty:
             print(f"[SKIP] {experiment}/{task}: no usable features")
             continue
@@ -481,7 +656,8 @@ def run_ml_experiment(
         labels = sorted(y.unique().tolist())
         print(
             f"[EXP] {experiment}/{task}: rows={len(data)} features={len(feature_cols)} "
-            f"groups={groups.nunique()} dropped={len(dropped)} leakage_mode={leakage_mode}"
+            f"groups={groups.nunique()} dropped={len(dropped)} leakage_mode={leakage_mode} "
+            f"feature_profile={feature_profile}"
         )
 
         for seed in seeds:
@@ -502,12 +678,22 @@ def run_ml_experiment(
 
                 for model_name, model in make_models(seed).items():
                     model.fit(X_train, y_train)
-                    y_pred = model.predict(X_test)
-                    y_score = predict_scores(model, X_test, labels)
+                    y_pred, y_score, binary_threshold = predict_with_optional_binary_threshold(
+                        model,
+                        X_train,
+                        y_train,
+                        X_test,
+                        labels,
+                        task,
+                        binary_threshold_mode,
+                        binary_threshold_beta,
+                        binary_threshold_value,
+                    )
                     metrics = compute_metrics(y_test, y_pred, labels, y_score, task, sample_hours.iloc[test_idx])
                     row = {
                         "experiment": experiment,
                         "validation_type": "group_cv",
+                        "feature_profile": feature_profile,
                         "task": task,
                         "model": model_name,
                         "seed": seed,
@@ -518,6 +704,10 @@ def run_ml_experiment(
                         "n_groups_train": groups.iloc[train_idx].nunique(),
                         "n_groups_test": groups.iloc[test_idx].nunique(),
                         "removed_fold_columns": len(removed_fold_cols),
+                        "binary_threshold_mode": binary_threshold_mode if task == "binary" else "NA",
+                        "binary_threshold_beta": binary_threshold_beta if task == "binary" else np.nan,
+                        "binary_threshold_value": binary_threshold_value if task == "binary" and binary_threshold_value is not None else np.nan,
+                        "binary_threshold": binary_threshold,
                         **metrics,
                     }
                     rows.append(row)
@@ -623,6 +813,10 @@ def run_holdout_experiment(
     tasks: Sequence[str],
     corr_threshold: float,
     default_window_seconds: float,
+    feature_profile: str,
+    binary_threshold_mode: str,
+    binary_threshold_beta: float,
+    binary_threshold_value: Optional[float],
 ) -> List[Dict[str, object]]:
     if df.empty or "label" not in df.columns:
         return []
@@ -636,6 +830,14 @@ def run_holdout_experiment(
     if validation_mask.all():
         print(f"[HOLDOUT] {experiment}: validation selection leaves no training rows")
         return []
+
+    if validation_session_ids and validation_host_ids:
+        holdout_scope = "host_session_holdout"
+    elif validation_session_ids:
+        holdout_scope = "session_holdout"
+    else:
+        holdout_scope = "host_holdout"
+    holdout_interpretation = "external_domain_shift_stress_test"
 
     exp_dir = os.path.join(output_dir, slug(experiment + "_host_holdout"))
     os.makedirs(exp_dir, exist_ok=True)
@@ -660,7 +862,11 @@ def run_holdout_experiment(
         if y_test.empty:
             continue
 
-        X_all, feature_cols, dropped = select_feature_matrix(data, leakage_mode=leakage_mode)
+        X_all, feature_cols, dropped = select_feature_matrix(
+            data,
+            leakage_mode=leakage_mode,
+            feature_profile=feature_profile,
+        )
         if X_all.empty:
             continue
         sample_hours = infer_sample_hours(data, default_window_seconds).reset_index(drop=True)
@@ -668,7 +874,8 @@ def run_holdout_experiment(
         print(
             f"[HOLDOUT] {experiment}/{task}: train={len(train_idx)} test={len(test_idx)} "
             f"features={len(feature_cols)} dropped={len(dropped)} hosts={list(validation_host_ids)} "
-            f"sessions={list(validation_session_ids)}"
+            f"sessions={list(validation_session_ids)} feature_profile={feature_profile} "
+            f"scope={holdout_scope} interpretation={holdout_interpretation}"
         )
 
         for seed in seeds:
@@ -680,12 +887,22 @@ def run_holdout_experiment(
 
             for model_name, model in make_models(seed).items():
                 model.fit(X_train, y_train)
-                y_pred = model.predict(X_test)
-                y_score = predict_scores(model, X_test, labels)
+                y_pred, y_score, binary_threshold = predict_with_optional_binary_threshold(
+                    model,
+                    X_train,
+                    y_train,
+                    X_test,
+                    labels,
+                    task,
+                    binary_threshold_mode,
+                    binary_threshold_beta,
+                    binary_threshold_value,
+                )
                 metrics = compute_metrics(y_test, y_pred, labels, y_score, task, sample_hours.iloc[test_idx])
                 row = {
                     "experiment": experiment,
                     "validation_type": "host_holdout",
+                    "feature_profile": feature_profile,
                     "task": task,
                     "model": model_name,
                     "seed": seed,
@@ -698,6 +915,12 @@ def run_holdout_experiment(
                     "removed_fold_columns": len(removed_fold_cols),
                     "validation_host_ids": ",".join(map(str, validation_host_ids)),
                     "validation_session_ids": ",".join(map(str, validation_session_ids)),
+                    "holdout_scope": holdout_scope,
+                    "holdout_interpretation": holdout_interpretation,
+                    "binary_threshold_mode": binary_threshold_mode if task == "binary" else "NA",
+                    "binary_threshold_beta": binary_threshold_beta if task == "binary" else np.nan,
+                    "binary_threshold_value": binary_threshold_value if task == "binary" and binary_threshold_value is not None else np.nan,
+                    "binary_threshold": binary_threshold,
                     **metrics,
                 }
                 rows.append(row)
@@ -713,11 +936,127 @@ def run_holdout_experiment(
     return rows
 
 
+def run_random_split_experiment(
+    df: pd.DataFrame,
+    experiment: str,
+    output_dir: str,
+    leakage_mode: bool,
+    seeds: Sequence[int],
+    tasks: Sequence[str],
+    corr_threshold: float,
+    default_window_seconds: float,
+    test_size: float,
+    feature_profile: str,
+    binary_threshold_mode: str,
+    binary_threshold_beta: float,
+    binary_threshold_value: Optional[float],
+) -> List[Dict[str, object]]:
+    if df.empty or "label" not in df.columns:
+        return []
+
+    exp_dir = os.path.join(output_dir, slug(experiment + "_random_split"))
+    os.makedirs(exp_dir, exist_ok=True)
+    rows: List[Dict[str, object]] = []
+
+    for task in tasks:
+        y = (~df["label"].map(is_benign_label)).astype(int) if task == "binary" else df["label"].astype(str)
+        valid = y.notna()
+        data = df.loc[valid].reset_index(drop=True)
+        y = y.loc[valid].reset_index(drop=True)
+        if y.nunique() < 2:
+            continue
+
+        X_all, feature_cols, dropped = select_feature_matrix(
+            data,
+            leakage_mode=leakage_mode,
+            feature_profile=feature_profile,
+        )
+        if X_all.empty:
+            continue
+        sample_hours = infer_sample_hours(data, default_window_seconds).reset_index(drop=True)
+        labels = sorted(y.unique().tolist())
+        print(
+            f"[RANDOM_SPLIT] {experiment}/{task}: rows={len(data)} "
+            f"features={len(feature_cols)} dropped={len(dropped)} test_size={test_size} "
+            f"feature_profile={feature_profile}"
+        )
+
+        indices = np.arange(len(data))
+        stratify = y if y.nunique() > 1 else None
+        for seed in seeds:
+            train_idx, test_idx = train_test_split(
+                indices,
+                test_size=test_size,
+                random_state=seed,
+                shuffle=True,
+                stratify=stratify,
+            )
+            X_train = X_all.iloc[train_idx].copy()
+            X_test = X_all.iloc[test_idx].copy()
+            y_train = y.iloc[train_idx]
+            y_test = y.iloc[test_idx]
+            X_train, X_test, removed_fold_cols = fold_filter_features(X_train, X_test, corr_threshold)
+            if X_train.empty:
+                continue
+
+            for model_name, model in make_models(seed).items():
+                model.fit(X_train, y_train)
+                y_pred, y_score, binary_threshold = predict_with_optional_binary_threshold(
+                    model,
+                    X_train,
+                    y_train,
+                    X_test,
+                    labels,
+                    task,
+                    binary_threshold_mode,
+                    binary_threshold_beta,
+                    binary_threshold_value,
+                )
+                metrics = compute_metrics(y_test, y_pred, labels, y_score, task, sample_hours.iloc[test_idx])
+                row = {
+                    "experiment": experiment,
+                    "validation_type": "random_split",
+                    "feature_profile": feature_profile,
+                    "task": task,
+                    "model": model_name,
+                    "seed": seed,
+                    "fold": 0,
+                    "n_train": len(train_idx),
+                    "n_test": len(test_idx),
+                    "n_features": X_train.shape[1],
+                    "n_groups_train": np.nan,
+                    "n_groups_test": np.nan,
+                    "removed_fold_columns": len(removed_fold_cols),
+                    "binary_threshold_mode": binary_threshold_mode if task == "binary" else "NA",
+                    "binary_threshold_beta": binary_threshold_beta if task == "binary" else np.nan,
+                    "binary_threshold_value": binary_threshold_value if task == "binary" and binary_threshold_value is not None else np.nan,
+                    "binary_threshold": binary_threshold,
+                    **metrics,
+                }
+                rows.append(row)
+
+                base = os.path.join(exp_dir, f"{task}_{model_name}_seed{seed}_random_split")
+                save_confusion_matrix(y_test, y_pred, labels, base + "_confusion")
+                if task == "binary":
+                    save_pr_curve(y_test, y_score, base + "_pr_curve.png")
+                with open(base + "_report.json", "w", encoding="utf-8") as f:
+                    json.dump(classification_report(y_test, y_pred, output_dict=True, zero_division=0), f, indent=2)
+                save_feature_importance(model, list(X_train.columns), base + "_feature_importance")
+
+    return rows
+
+
 def write_metric_tables(rows: List[Dict[str, object]], output_dir: str) -> None:
     if not rows:
         print("[WARN] No metrics produced")
         return
     metrics = pd.DataFrame(rows)
+    if "feature_profile" not in metrics.columns:
+        metrics["feature_profile"] = "NA"
+    metrics["feature_profile"] = metrics["feature_profile"].fillna("NA").replace("", "NA")
+    if "binary_threshold_mode" not in metrics.columns:
+        metrics["binary_threshold_mode"] = "NA"
+    metrics["binary_threshold_mode"] = metrics["binary_threshold_mode"].fillna("NA").replace("", "NA")
     os.makedirs(output_dir, exist_ok=True)
     metrics.to_csv(os.path.join(output_dir, "all_fold_metrics.csv"), index=False)
     metric_cols = [
@@ -725,7 +1064,7 @@ def write_metric_tables(rows: List[Dict[str, object]], output_dir: str) -> None:
         "mcc", "false_positive_rate_macro", "false_positive_count",
         "benign_hours", "fpr_per_hour", "pr_auc_macro",
     ]
-    summary = metrics.groupby(["experiment", "validation_type", "task", "model"])[metric_cols].agg(["mean", "std"])
+    summary = metrics.groupby(["experiment", "validation_type", "feature_profile", "binary_threshold_mode", "task", "model"])[metric_cols].agg(["mean", "std"])
     summary.to_csv(os.path.join(output_dir, "summary_mean_std.csv"))
     print("\n[SUMMARY]")
     print(summary.to_string())
@@ -737,15 +1076,20 @@ def value_counts_dict(df: pd.DataFrame, col: str) -> Dict[str, int]:
     return {str(k): int(v) for k, v in df[col].fillna("NA").astype(str).value_counts().items()}
 
 
-def audit_dataset(name: str, df: pd.DataFrame, leakage_mode: bool) -> Dict[str, Any]:
+def audit_dataset(name: str, df: pd.DataFrame, leakage_mode: bool, feature_profile: str) -> Dict[str, Any]:
     if df.empty:
-        return {"name": name, "rows": 0, "leakage_mode": leakage_mode}
-    _, kept, dropped = select_feature_matrix(df, leakage_mode=leakage_mode)
+        return {"name": name, "rows": 0, "leakage_mode": leakage_mode, "feature_profile": feature_profile}
+    _, kept, dropped = select_feature_matrix(
+        df,
+        leakage_mode=leakage_mode,
+        feature_profile=feature_profile,
+    )
     return {
         "name": name,
         "rows": int(len(df)),
         "columns": int(len(df.columns)),
         "leakage_mode": leakage_mode,
+        "feature_profile": feature_profile,
         "label_counts": value_counts_dict(df, "label"),
         "dataset_view_counts": value_counts_dict(df, "dataset_view"),
         "session_counts": value_counts_dict(df, "session_id"),
@@ -764,7 +1108,7 @@ def write_leakage_control_report(
     args: argparse.Namespace,
 ) -> None:
     os.makedirs(output_dir, exist_ok=True)
-    dataset_reports = [audit_dataset(name, df, leakage_mode) for name, df, leakage_mode in datasets]
+    dataset_reports = [audit_dataset(name, df, leakage_mode, args.feature_profile) for name, df, leakage_mode in datasets]
     validation_configured = bool(args.validation_host_id or args.validation_session_id)
     report = {
         "view_separation": {
@@ -781,6 +1125,18 @@ def write_leakage_control_report(
             "validation_host_id": list(args.validation_host_id),
             "validation_session_id": list(args.validation_session_id),
             "host_holdout_configured": validation_configured,
+            "external_holdout_configured": validation_configured,
+            "validation_interpretation": "Configured host/session holdout is reported as an external domain-shift stress test, not as the main grouped-CV estimate.",
+            "feature_profile": args.feature_profile,
+            "binary_threshold_mode": args.binary_threshold_mode,
+            "binary_threshold_beta": args.binary_threshold_beta,
+            "binary_threshold_value": args.binary_threshold_value,
+            "binary_threshold_policy": "When enabled, binary thresholds are tuned on the training fold/split only and then applied to the held-out fold/session.",
+        },
+        "feature_profiles": {
+            "safe": "ML-safe features after leakage controls; keeps useful scan/flood count and rate features.",
+            "hybrid": "Safe profile plus S7/process ratio and presence features; intended main profile for mixed volumetric and sparse PLC-logic attacks.",
+            "frequency_robust": "Hybrid-derived ratios/presence features with raw volume columns removed; use as an ablation for cadence robustness.",
         },
         "leakage_policy": {
             "always_drop": sorted(ALWAYS_DROP),
@@ -807,11 +1163,20 @@ def write_leakage_control_report(
         f.write("## Split Policy\n\n")
         f.write(f"- Grouping: `{report['split_policy']['auto_grouping']}`\n")
         f.write(f"- Requested group setting: `{args.group_col}`\n")
+        f.write(f"- Feature profile: `{args.feature_profile}`\n")
+        f.write(f"- Binary threshold mode: `{args.binary_threshold_mode}` beta={args.binary_threshold_beta}\n")
+        if args.binary_threshold_value is not None:
+            f.write(f"- Binary fixed threshold value: `{args.binary_threshold_value}`\n")
+        f.write("- Threshold tuning policy: if enabled, tune on training fold/split only, then apply to held-out data\n")
         f.write("- Row-level random split: disabled\n")
         if validation_configured:
             f.write(f"- Host/session holdout: host={list(args.validation_host_id)} session={list(args.validation_session_id)}\n")
+            f.write("- Holdout interpretation: external domain-shift stress test, not the main grouped-CV estimate\n")
         else:
             f.write("- Host/session holdout: not configured; do not claim attacker-host generalization\n")
+        f.write("\n## Feature Profiles\n\n")
+        for profile_name, profile_note in report["feature_profiles"].items():
+            f.write(f"- `{profile_name}`: {profile_note}\n")
         f.write("\n## Feature Leakage Controls\n\n")
         f.write("- Labels and target-state columns are always dropped from ML features.\n")
         f.write("- Metadata, timestamps, host/session/episode IDs, endpoint identity, stack proxy, and rule/anomaly outputs are dropped in safe views.\n")
@@ -823,7 +1188,7 @@ def write_leakage_control_report(
                 f"kept_features={item.get('kept_feature_count', 0)} "
                 f"dropped_features={item.get('dropped_feature_count', 0)} "
                 f"hosts={len(item.get('host_counts', {}))} episodes={item.get('episode_count', 0)} "
-                f"leakage_mode={item.get('leakage_mode')}\n"
+                f"leakage_mode={item.get('leakage_mode')} feature_profile={item.get('feature_profile')}\n"
             )
         f.write("\n## Required Metrics\n\n")
         f.write("- Report `macro_f1`, `mcc`, `pr_auc_macro`, `fpr_per_hour`, and confusion matrices from the generated files.\n")
@@ -843,8 +1208,24 @@ def main() -> None:
     parser.add_argument("--tasks", nargs="*", choices=["binary", "multiclass"], default=["binary", "multiclass"])
     parser.add_argument("--corr-threshold", type=float, default=0.98)
     parser.add_argument("--default-window-seconds", type=float, default=5.0, help="Fallback window duration for FPR/hour when window_end_ms is absent")
+    parser.add_argument(
+        "--feature-profile",
+        choices=FEATURE_PROFILES,
+        default="safe",
+        help=(
+            "safe keeps current ML-safe features; hybrid adds S7/process ratio "
+            "and presence features while keeping scan/flood counts; "
+            "frequency_robust drops raw volume columns as an ablation"
+        ),
+    )
     parser.add_argument("--validation-host-id", nargs="*", default=[], help="Host ID(s) reserved for attacker-host holdout validation")
     parser.add_argument("--validation-session-id", nargs="*", default=[], help="Session ID(s) reserved for holdout validation")
+    parser.add_argument("--binary-threshold-mode", choices=["default", "fbeta", "fixed"], default="default", help="For binary tasks, tune or set the positive-class probability threshold")
+    parser.add_argument("--binary-threshold-beta", type=float, default=2.0, help="F-beta beta for --binary-threshold-mode fbeta; beta>1 prioritizes attack recall")
+    parser.add_argument("--binary-threshold-value", type=float, default=None, help="Fixed positive-class probability threshold when --binary-threshold-mode fixed")
+    parser.add_argument("--skip-group-cv", action="store_true", help="Skip grouped CV/rule baseline and run only explicit holdout validation")
+    parser.add_argument("--random-split", action="store_true", help="Run a shuffled row-level train/test split for quick sanity checks only")
+    parser.add_argument("--random-test-size", type=float, default=0.2, help="Test fraction for --random-split")
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -862,18 +1243,39 @@ def main() -> None:
     for name, df, leakage_mode in datasets:
         if df.empty:
             continue
-        all_rows.extend(run_ml_experiment(
-            df=df,
-            experiment=name,
-            output_dir=args.output_dir,
-            leakage_mode=leakage_mode,
-            n_splits=args.n_splits,
-            seeds=args.seeds,
-            group_col=args.group_col,
-            tasks=args.tasks,
-            corr_threshold=args.corr_threshold,
-            default_window_seconds=args.default_window_seconds,
-        ))
+        if not args.skip_group_cv:
+            all_rows.extend(run_ml_experiment(
+                df=df,
+                experiment=name,
+                output_dir=args.output_dir,
+                leakage_mode=leakage_mode,
+                n_splits=args.n_splits,
+                seeds=args.seeds,
+                group_col=args.group_col,
+                tasks=args.tasks,
+                corr_threshold=args.corr_threshold,
+                default_window_seconds=args.default_window_seconds,
+                feature_profile=args.feature_profile,
+                binary_threshold_mode=args.binary_threshold_mode,
+                binary_threshold_beta=args.binary_threshold_beta,
+                binary_threshold_value=args.binary_threshold_value,
+            ))
+        if args.random_split:
+            all_rows.extend(run_random_split_experiment(
+                df=df,
+                experiment=name,
+                output_dir=args.output_dir,
+                leakage_mode=leakage_mode,
+                seeds=args.seeds,
+                tasks=args.tasks,
+                corr_threshold=args.corr_threshold,
+                default_window_seconds=args.default_window_seconds,
+                test_size=args.random_test_size,
+                feature_profile=args.feature_profile,
+                binary_threshold_mode=args.binary_threshold_mode,
+                binary_threshold_beta=args.binary_threshold_beta,
+                binary_threshold_value=args.binary_threshold_value,
+            ))
         all_rows.extend(run_holdout_experiment(
             df=df,
             experiment=name,
@@ -885,8 +1287,12 @@ def main() -> None:
             tasks=args.tasks,
             corr_threshold=args.corr_threshold,
             default_window_seconds=args.default_window_seconds,
+            feature_profile=args.feature_profile,
+            binary_threshold_mode=args.binary_threshold_mode,
+            binary_threshold_beta=args.binary_threshold_beta,
+            binary_threshold_value=args.binary_threshold_value,
         ))
-        if not leakage_mode:
+        if not args.skip_group_cv and not leakage_mode:
             all_rows.extend(run_rule_baseline(
                 df=df,
                 experiment=name,

