@@ -189,14 +189,54 @@ groups:
         evidence: [MonitoredItemCreate burst, Server diagnostics, Publish latency/backlog]
       - id: OPCUA_MALICIOUS_WRITE
         label: OPCUA_MALICIOUS_WRITE
-        objective: Successfully write a plausible-but-wrong value to a real writable node to produce a process anomaly (not just a protocol rejection), then roll back.
+        objective: Successful write caused by an unsafe human configuration where an Anonymous/No-Security OPC UA endpoint exposes a real writable production node; write is bounded and rolled back.
         protocol: OPC UA
         mitre_technique: T0836
         mitre_technique_name: Modify Parameter
         safe_to_execute: false
         requires_manual_gate: true
-        preconditions: [Dedicated writable test node confirmed, Baseline value captured, Mandatory rollback verified, Operator approval]
+        preconditions: [Writable node intentionally confirmed in TIA Portal, Human misconfiguration documented, Baseline value captured, Mandatory rollback verified, Operator approval]
         evidence: [Write request, Confirmed value change, Rollback confirmation]
+      - id: OPCUA_CONFIG_MANIPULATION
+        label: OPCUA_CONFIG_MANIPULATION
+        objective: Modify a writable configuration/threshold node rather than a live state value, then roll back; only valid when such a real config node exists.
+        protocol: OPC UA
+        mitre_technique: T0836
+        mitre_technique_name: Modify Parameter
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Real writable configuration node exists, Safe bounds documented, Rollback verified, Operator approval]
+        evidence: [Config node write, Confirmed threshold/config change, Rollback confirmation]
+      - id: OPCUA_ALARM_FLOOD
+        label: OPCUA_ALARM_FLOOD
+        objective: Generate bounded OPC UA Alarms & Conditions event load to evaluate operator visibility and alarm-channel saturation.
+        protocol: OPC UA A&C
+        mitre_technique: T0832
+        mitre_technique_name: Manipulation of View
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [OPC UA Alarms & Conditions enabled, Real alarm source exists, Bounded trigger count, Operator approval]
+        evidence: [EventNotification burst, Alarm/event count, HMI/Web visibility effect]
+      - id: OPCUA_REPLAY_ATTEMPT
+        label: OPCUA_REPLAY_ATTEMPT
+        objective: Attempt replay-style behavior or repeated legitimate client operation under a different timing context; packet-level replay is expected to be constrained by OPC UA session/channel state.
+        protocol: OPC UA
+        mitre_technique: T0856
+        mitre_technique_name: Spoof Reporting Message
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Captured legitimate sequence, Session/channel constraints documented, Replay tool bounded, Lab window]
+        evidence: [Replay attempt trace, Server rejection or accepted repeated operation, Timing anomaly]
+      - id: READ_TIMING_COVERT
+        label: READ_TIMING_COVERT
+        objective: Encode a low-bandwidth covert signal using benign-looking OPC UA read timing without modifying PLC state.
+        protocol: OPC UA
+        mitre_technique: T0856
+        mitre_technique_name: Spoof Reporting Message
+        safe_to_execute: true
+        requires_manual_gate: false
+        preconditions: [OPC UA read access available, Timing pattern documented, Capture enabled]
+        evidence: [Read timing sequence, Encoded bit pattern, No PLC state change]
       - id: OPCUA_CERTIFICATE_REJECTED
         label: OPCUA_CERTIFICATE_REJECTED
         objective: Attempt connection with untrusted client certificate.
@@ -364,14 +404,14 @@ groups:
         evidence: [Valid session token, Abnormal command, PLC state effect/rejection]
       - id: FALSE_DISPLAY_WITH_PROCESS_CHANGE
         label: FALSE_DISPLAY_WITH_PROCESS_CHANGE
-        objective: Process changes while display/log does not reflect it correctly.
+        objective: Use a bounded S7 process change, then measure whether OPC UA/Web-SCADA visibility reflects the true PLC state without stale or divergence.
         protocol: WebSocket/OPC UA/S7comm
         mitre_technique: T0832
         mitre_technique_name: Manipulation of View
-        safe_to_execute: true
-        requires_manual_gate: false
-        preconditions: [Independent PLC read path, Web display capture]
-        evidence: [Direct OPC UA sample, Web API sample, Divergence count]
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Independent PLC read path, Web display capture, S7 STOP pulse authorized, Rollback verified]
+        evidence: [S7 state before/after/rollback, Direct OPC UA sample, Web API sample, Divergence count]
       - id: COMMAND_WITHOUT_VALID_WEB_SESSION
         label: COMMAND_WITHOUT_VALID_WEB_SESSION
         objective: PLC-affecting command observed without corresponding valid web session.
