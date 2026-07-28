@@ -35,7 +35,7 @@ from sklearn.metrics import (
     precision_score,
     recall_score,
 )
-from sklearn.model_selection import GroupKFold
+from sklearn.model_selection import GroupKFold, StratifiedKFold
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler, label_binarize
@@ -52,6 +52,54 @@ try:
 except Exception:  # pragma: no cover - optional plotting dependency
     sns = None
 
+try:
+    from xgboost import XGBClassifier  # type: ignore
+    _HAS_XGB = True
+except Exception:  # pragma: no cover - optional dependency
+    _HAS_XGB = False
+
+try:
+    from catboost import CatBoostClassifier  # type: ignore
+    _HAS_CATBOOST = True
+except Exception:  # pragma: no cover - optional dependency
+    _HAS_CATBOOST = False
+
+
+# ---------------------------------------------------------------------------
+# Label-encoding wrapper for classifiers that require integer labels
+# ---------------------------------------------------------------------------
+
+class _LabelEncodedClassifier:
+    """Wraps a classifier so it accepts string labels (encodes to int internally).
+
+    Exposes predict / predict_proba / classes_ / feature_importances_ so it is
+    transparent to the rest of the pipeline.
+    """
+
+    def __init__(self, clf: object) -> None:
+        self._clf = clf
+        self.classes_: List[object] = []
+        self._le = None
+
+    def fit(self, X, y):
+        from sklearn.preprocessing import LabelEncoder
+        self._le = LabelEncoder()
+        y_enc = self._le.fit_transform(y)
+        self.classes_ = list(self._le.classes_)
+        self._clf.fit(X, y_enc)  # type: ignore[attr-defined]
+        return self
+
+    def predict(self, X):
+        y_enc = self._clf.predict(X)  # type: ignore[attr-defined]
+        return self._le.inverse_transform(y_enc.astype(int))
+
+    def predict_proba(self, X):
+        return self._clf.predict_proba(X)  # type: ignore[attr-defined]
+
+    @property
+    def feature_importances_(self):
+        return getattr(self._clf, "feature_importances_", None)
+
 
 # ---------------------------------------------------------------------------
 # Leakage policy
@@ -63,6 +111,11 @@ ALWAYS_DROP = {
     "label_system",
     "plc_under_attack",
     "extractor_label",
+    # proc_data_valid is a data-availability mask, NOT a process feature.
+    # It must NOT be used directly as an ML feature because proc_data_valid=0
+    # correlates strongly with certain attack classes where the process logger
+    # was not running during collection.
+    "proc_data_valid",
 }
 
 SAFE_DROP_EXACT = {
@@ -376,8 +429,12 @@ def fold_filter_features(
     return X_train, X_test, constant_cols + corr_drop
 
 
-def make_models(seed: int) -> Dict[str, object]:
-    return {
+def make_models(seed: int, task: Optional[str] = None) -> Dict[str, object]:
+    models: Dict[str, object] = {
+        "logistic_regression": Pipeline([
+            ("scaler", StandardScaler()),
+            ("clf", LogisticRegression(max_iter=2000, class_weight="balanced", n_jobs=-1)),
+        ]),
         "random_forest": RandomForestClassifier(
             n_estimators=300,
             random_state=seed,
@@ -385,11 +442,36 @@ def make_models(seed: int) -> Dict[str, object]:
             class_weight="balanced_subsample",
             min_samples_leaf=2,
         ),
-        "logistic_regression": Pipeline([
-            ("scaler", StandardScaler()),
-            ("clf", LogisticRegression(max_iter=2000, class_weight="balanced", n_jobs=-1)),
-        ]),
     }
+    if _HAS_XGB:
+        xgb_eval_metric = "logloss" if task == "binary" else "mlogloss"
+        models["xgboost"] = _LabelEncodedClassifier(XGBClassifier(
+            n_estimators=300,
+            max_depth=6,
+            learning_rate=0.1,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            eval_metric=xgb_eval_metric,
+            random_state=seed,
+            n_jobs=-1,
+            verbosity=0,
+        ))
+    else:
+        print("[WARN] xgboost not installed — skipping xgboost model (pip install xgboost)")
+    if _HAS_CATBOOST:
+        models["catboost"] = _LabelEncodedClassifier(CatBoostClassifier(
+            iterations=300,
+            depth=6,
+            learning_rate=0.1,
+            random_seed=seed,
+            verbose=0,
+            auto_class_weights="Balanced",
+            allow_writing_files=False,
+            thread_count=-1,
+        ))
+    else:
+        print("[WARN] catboost not installed — skipping catboost model (pip install catboost)")
+    return models
 
 
 def macro_false_positive_rate(y_true: np.ndarray, y_pred: np.ndarray, labels: Sequence[object]) -> float:
@@ -449,16 +531,41 @@ def compute_metrics(
         "false_positive_count": float(false_positive_mask.sum()),
         "benign_hours": benign_hours,
         "fpr_per_hour": false_positives_per_hour,
+        "attack_precision": float("nan"),
+        "attack_recall": float("nan"),
+        "attack_f1": float("nan"),
+        "tn": float("nan"),
+        "fp": float("nan"),
+        "fn": float("nan"),
+        "tp": float("nan"),
+        "pr_auc": float("nan"),
+        "average_precision": float("nan"),
         "pr_auc_macro": float("nan"),
     }
+    if task == "binary":
+        tn, fp, fn, tp = confusion_matrix(y_true_array, y_pred_array, labels=[0, 1]).ravel()
+        out.update({
+            "attack_precision": precision_score(y_true, y_pred, pos_label=1, zero_division=0),
+            "attack_recall": recall_score(y_true, y_pred, pos_label=1, zero_division=0),
+            "attack_f1": f1_score(y_true, y_pred, pos_label=1, zero_division=0),
+            "tn": float(tn),
+            "fp": float(fp),
+            "fn": float(fn),
+            "tp": float(tp),
+        })
     if y_score is not None:
         try:
             if task == "binary":
                 score = y_score[:, 1] if y_score.ndim == 2 and y_score.shape[1] > 1 else y_score.ravel()
-                out["pr_auc_macro"] = average_precision_score(y_true, score)
+                average_precision = average_precision_score(y_true, score)
+                out["pr_auc_macro"] = average_precision
+                out["pr_auc"] = average_precision
+                out["average_precision"] = average_precision
             else:
                 y_bin = label_binarize(y_true, classes=list(labels))
-                out["pr_auc_macro"] = average_precision_score(y_bin, y_score, average="macro")
+                pr_auc_macro = average_precision_score(y_bin, y_score, average="macro")
+                out["pr_auc_macro"] = pr_auc_macro
+                out["pr_auc"] = pr_auc_macro
         except Exception:
             pass
     return out
@@ -512,6 +619,64 @@ def tune_fbeta_threshold(y_true: pd.Series, scores: np.ndarray, beta: float) -> 
     return float(thresholds[best_idx])
 
 
+def tune_fbeta_threshold_oof(
+    X_train: pd.DataFrame,
+    y_train: pd.Series,
+    groups_train: Optional[pd.Series],
+    model_name: str,
+    seed: int,
+    n_splits: int,
+    corr_threshold: float,
+    labels: Sequence[object],
+    beta: float,
+) -> float:
+    """Tune a binary threshold from out-of-fold scores inside the training split."""
+    y_train = y_train.reset_index(drop=True)
+    X_train = X_train.reset_index(drop=True)
+    groups = groups_train.reset_index(drop=True) if groups_train is not None else None
+    if y_train.nunique() < 2 or len(y_train) < 2:
+        return 0.5
+
+    try:
+        if groups is not None and groups.nunique(dropna=True) >= 2:
+            split_iter = list(make_splits(y_train, groups, n_splits, seed))
+        else:
+            split_count = min(n_splits, int(y_train.value_counts().min()))
+            if split_count < 2:
+                return 0.5
+            splitter = StratifiedKFold(n_splits=split_count, shuffle=True, random_state=seed)
+            split_iter = list(splitter.split(np.zeros(len(y_train)), y_train))
+    except ValueError:
+        return 0.5
+
+    oof_scores = np.full(len(y_train), np.nan, dtype="float64")
+    for inner_train_idx, inner_valid_idx in split_iter:
+        y_inner_train = y_train.iloc[inner_train_idx]
+        if y_inner_train.nunique() < 2:
+            continue
+        X_inner_train = X_train.iloc[inner_train_idx].copy()
+        X_inner_valid = X_train.iloc[inner_valid_idx].copy()
+        X_inner_train, X_inner_valid, _ = fold_filter_features(
+            X_inner_train,
+            X_inner_valid,
+            corr_threshold,
+        )
+        if X_inner_train.empty:
+            continue
+        inner_model = make_models(seed, task="binary").get(model_name)
+        if inner_model is None:
+            continue
+        inner_model.fit(X_inner_train, y_inner_train)
+        valid_scores = positive_class_scores(predict_scores(inner_model, X_inner_valid, labels), labels)
+        if valid_scores is not None:
+            oof_scores[inner_valid_idx] = valid_scores
+
+    valid_score_mask = np.isfinite(oof_scores)
+    if valid_score_mask.sum() == 0 or y_train[valid_score_mask].nunique() < 2:
+        return 0.5
+    return tune_fbeta_threshold(y_train[valid_score_mask], oof_scores[valid_score_mask], beta)
+
+
 def predict_with_optional_binary_threshold(
     model: object,
     X_train: pd.DataFrame,
@@ -522,20 +687,25 @@ def predict_with_optional_binary_threshold(
     threshold_mode: str,
     threshold_beta: float,
     threshold_value: Optional[float],
+    calibrated_threshold: Optional[float] = None,
 ) -> Tuple[np.ndarray, Optional[np.ndarray], float]:
     y_score = predict_scores(model, X_test, labels)
     if task != "binary" or threshold_mode == "default":
         return model.predict(X_test), y_score, float("nan")
 
-    train_score = predict_scores(model, X_train, labels)
-    train_positive = positive_class_scores(train_score, labels)
     test_positive = positive_class_scores(y_score, labels)
-    if train_positive is None or test_positive is None:
+    if test_positive is None:
         return model.predict(X_test), y_score, float("nan")
 
     if threshold_mode == "fixed":
         threshold = 0.5 if threshold_value is None else float(threshold_value)
+    elif threshold_mode == "fbeta_oof":
+        threshold = 0.5 if calibrated_threshold is None or not np.isfinite(calibrated_threshold) else float(calibrated_threshold)
     else:
+        train_score = predict_scores(model, X_train, labels)
+        train_positive = positive_class_scores(train_score, labels)
+        if train_positive is None:
+            return model.predict(X_test), y_score, float("nan")
         threshold = tune_fbeta_threshold(y_train, train_positive, threshold_beta)
     return (test_positive >= threshold).astype(int), y_score, threshold
 
@@ -563,6 +733,31 @@ def save_confusion_matrix(
     plt.ylabel("True")
     plt.tight_layout()
     plt.savefig(path_base + ".png", dpi=180)
+    plt.close()
+
+    row_sums = cm.sum(axis=1, keepdims=True)
+    cm_normalized = np.divide(
+        cm,
+        row_sums,
+        out=np.zeros_like(cm, dtype="float64"),
+        where=row_sums != 0,
+    )
+    pd.DataFrame(cm_normalized, index=labels, columns=labels).to_csv(path_base + "_normalized_true.csv")
+    plt.figure(figsize=(max(6, len(labels) * 0.8), max(5, len(labels) * 0.7)))
+    if sns is not None:
+        sns.heatmap(cm_normalized, annot=True, fmt=".2f", cmap="Blues", xticklabels=labels, yticklabels=labels)
+    else:
+        plt.imshow(cm_normalized, interpolation="nearest", cmap="Blues", vmin=0.0, vmax=1.0)
+        plt.colorbar()
+        plt.xticks(range(len(labels)), labels, rotation=45, ha="right")
+        plt.yticks(range(len(labels)), labels)
+        for i in range(cm_normalized.shape[0]):
+            for j in range(cm_normalized.shape[1]):
+                plt.text(j, i, f"{cm_normalized[i, j]:.2f}", ha="center", va="center", color="black")
+    plt.xlabel("Predicted")
+    plt.ylabel("True")
+    plt.tight_layout()
+    plt.savefig(path_base + ".pdf", bbox_inches="tight")
     plt.close()
 
 
@@ -672,11 +867,25 @@ def run_ml_experiment(
                 X_test = X_all.iloc[test_idx].copy()
                 y_train = y.iloc[train_idx]
                 y_test = y.iloc[test_idx]
+                X_train_raw = X_train.copy()
                 X_train, X_test, removed_fold_cols = fold_filter_features(X_train, X_test, corr_threshold)
                 if X_train.empty:
                     continue
 
-                for model_name, model in make_models(seed).items():
+                for model_name, model in make_models(seed, task=task).items():
+                    calibrated_threshold = None
+                    if task == "binary" and binary_threshold_mode == "fbeta_oof":
+                        calibrated_threshold = tune_fbeta_threshold_oof(
+                            X_train_raw,
+                            y_train,
+                            groups.iloc[train_idx].reset_index(drop=True),
+                            model_name,
+                            seed,
+                            n_splits,
+                            corr_threshold,
+                            labels,
+                            binary_threshold_beta,
+                        )
                     model.fit(X_train, y_train)
                     y_pred, y_score, binary_threshold = predict_with_optional_binary_threshold(
                         model,
@@ -688,6 +897,7 @@ def run_ml_experiment(
                         binary_threshold_mode,
                         binary_threshold_beta,
                         binary_threshold_value,
+                        calibrated_threshold,
                     )
                     metrics = compute_metrics(y_test, y_pred, labels, y_score, task, sample_hours.iloc[test_idx])
                     row = {
@@ -807,6 +1017,7 @@ def run_holdout_experiment(
     experiment: str,
     output_dir: str,
     leakage_mode: bool,
+    training_session_ids: Sequence[str],
     validation_host_ids: Sequence[str],
     validation_session_ids: Sequence[str],
     seeds: Sequence[int],
@@ -814,6 +1025,8 @@ def run_holdout_experiment(
     corr_threshold: float,
     default_window_seconds: float,
     feature_profile: str,
+    group_col: str,
+    n_splits: int,
     binary_threshold_mode: str,
     binary_threshold_beta: float,
     binary_threshold_value: Optional[float],
@@ -852,7 +1065,15 @@ def run_holdout_experiment(
         if y.nunique() < 2:
             continue
 
-        train_idx = np.flatnonzero(~holdout_mask.to_numpy())
+        train_mask = ~holdout_mask
+        if training_session_ids:
+            if "session_id" not in data.columns:
+                print(f"[HOLDOUT] {experiment}/{task}: requested training sessions but session_id is absent")
+                continue
+            train_session_set = {str(v) for v in training_session_ids}
+            train_mask &= data["session_id"].astype(str).isin(train_session_set)
+
+        train_idx = np.flatnonzero(train_mask.to_numpy())
         test_idx = np.flatnonzero(holdout_mask.to_numpy())
         y_train = y.iloc[train_idx]
         y_test = y.iloc[test_idx]
@@ -869,6 +1090,7 @@ def run_holdout_experiment(
         )
         if X_all.empty:
             continue
+        groups = choose_group_series(data, group_col).reset_index(drop=True)
         sample_hours = infer_sample_hours(data, default_window_seconds).reset_index(drop=True)
         labels = sorted(y.unique().tolist())
         print(
@@ -881,11 +1103,25 @@ def run_holdout_experiment(
         for seed in seeds:
             X_train = X_all.iloc[train_idx].copy()
             X_test = X_all.iloc[test_idx].copy()
+            X_train_raw = X_train.copy()
             X_train, X_test, removed_fold_cols = fold_filter_features(X_train, X_test, corr_threshold)
             if X_train.empty:
                 continue
 
-            for model_name, model in make_models(seed).items():
+            for model_name, model in make_models(seed, task=task).items():
+                calibrated_threshold = None
+                if task == "binary" and binary_threshold_mode == "fbeta_oof":
+                    calibrated_threshold = tune_fbeta_threshold_oof(
+                        X_train_raw,
+                        y_train,
+                        groups.iloc[train_idx].reset_index(drop=True),
+                        model_name,
+                        seed,
+                        n_splits,
+                        corr_threshold,
+                        labels,
+                        binary_threshold_beta,
+                    )
                 model.fit(X_train, y_train)
                 y_pred, y_score, binary_threshold = predict_with_optional_binary_threshold(
                     model,
@@ -897,6 +1133,7 @@ def run_holdout_experiment(
                     binary_threshold_mode,
                     binary_threshold_beta,
                     binary_threshold_value,
+                    calibrated_threshold,
                 )
                 metrics = compute_metrics(y_test, y_pred, labels, y_score, task, sample_hours.iloc[test_idx])
                 row = {
@@ -915,6 +1152,7 @@ def run_holdout_experiment(
                     "removed_fold_columns": len(removed_fold_cols),
                     "validation_host_ids": ",".join(map(str, validation_host_ids)),
                     "validation_session_ids": ",".join(map(str, validation_session_ids)),
+                    "training_session_ids": ",".join(map(str, training_session_ids)),
                     "holdout_scope": holdout_scope,
                     "holdout_interpretation": holdout_interpretation,
                     "binary_threshold_mode": binary_threshold_mode if task == "binary" else "NA",
@@ -995,11 +1233,25 @@ def run_random_split_experiment(
             X_test = X_all.iloc[test_idx].copy()
             y_train = y.iloc[train_idx]
             y_test = y.iloc[test_idx]
+            X_train_raw = X_train.copy()
             X_train, X_test, removed_fold_cols = fold_filter_features(X_train, X_test, corr_threshold)
             if X_train.empty:
                 continue
 
-            for model_name, model in make_models(seed).items():
+            for model_name, model in make_models(seed, task=task).items():
+                calibrated_threshold = None
+                if task == "binary" and binary_threshold_mode == "fbeta_oof":
+                    calibrated_threshold = tune_fbeta_threshold_oof(
+                        X_train_raw,
+                        y_train,
+                        None,
+                        model_name,
+                        seed,
+                        5,
+                        corr_threshold,
+                        labels,
+                        binary_threshold_beta,
+                    )
                 model.fit(X_train, y_train)
                 y_pred, y_score, binary_threshold = predict_with_optional_binary_threshold(
                     model,
@@ -1011,6 +1263,7 @@ def run_random_split_experiment(
                     binary_threshold_mode,
                     binary_threshold_beta,
                     binary_threshold_value,
+                    calibrated_threshold,
                 )
                 metrics = compute_metrics(y_test, y_pred, labels, y_score, task, sample_hours.iloc[test_idx])
                 row = {
@@ -1062,7 +1315,9 @@ def write_metric_tables(rows: List[Dict[str, object]], output_dir: str) -> None:
     metric_cols = [
         "balanced_accuracy", "macro_f1", "macro_precision", "macro_recall",
         "mcc", "false_positive_rate_macro", "false_positive_count",
-        "benign_hours", "fpr_per_hour", "pr_auc_macro",
+        "benign_hours", "fpr_per_hour", "attack_precision", "attack_recall",
+        "attack_f1", "tn", "fp", "fn", "tp", "pr_auc", "average_precision",
+        "pr_auc_macro",
     ]
     summary = metrics.groupby(["experiment", "validation_type", "feature_profile", "binary_threshold_mode", "task", "model"])[metric_cols].agg(["mean", "std"])
     summary.to_csv(os.path.join(output_dir, "summary_mean_std.csv"))
@@ -1124,6 +1379,7 @@ def write_leakage_control_report(
             "fold_feature_filtering": "constant/correlation filtering is fit on train fold only",
             "validation_host_id": list(args.validation_host_id),
             "validation_session_id": list(args.validation_session_id),
+            "train_session_id": list(args.train_session_id),
             "host_holdout_configured": validation_configured,
             "external_holdout_configured": validation_configured,
             "validation_interpretation": "Configured host/session holdout is reported as an external domain-shift stress test, not as the main grouped-CV estimate.",
@@ -1131,7 +1387,7 @@ def write_leakage_control_report(
             "binary_threshold_mode": args.binary_threshold_mode,
             "binary_threshold_beta": args.binary_threshold_beta,
             "binary_threshold_value": args.binary_threshold_value,
-            "binary_threshold_policy": "When enabled, binary thresholds are tuned on the training fold/split only and then applied to the held-out fold/session.",
+            "binary_threshold_policy": "Modes: fbeta tunes on in-sample training scores; fbeta_oof tunes on grouped out-of-fold scores inside the training split; fixed applies a user-specified threshold.",
         },
         "feature_profiles": {
             "safe": "ML-safe features after leakage controls; keeps useful scan/flood count and rate features.",
@@ -1167,9 +1423,11 @@ def write_leakage_control_report(
         f.write(f"- Binary threshold mode: `{args.binary_threshold_mode}` beta={args.binary_threshold_beta}\n")
         if args.binary_threshold_value is not None:
             f.write(f"- Binary fixed threshold value: `{args.binary_threshold_value}`\n")
-        f.write("- Threshold tuning policy: if enabled, tune on training fold/split only, then apply to held-out data\n")
+        f.write("- Threshold tuning policy: `fbeta` tunes on in-sample training scores; `fbeta_oof` tunes on grouped out-of-fold scores inside the training split; `fixed` applies a user-specified threshold\n")
         f.write("- Row-level random split: disabled\n")
         if validation_configured:
+            if args.train_session_id:
+                f.write(f"- Explicit holdout training sessions: {list(args.train_session_id)}\n")
             f.write(f"- Host/session holdout: host={list(args.validation_host_id)} session={list(args.validation_session_id)}\n")
             f.write("- Holdout interpretation: external domain-shift stress test, not the main grouped-CV estimate\n")
         else:
@@ -1220,8 +1478,9 @@ def main() -> None:
     )
     parser.add_argument("--validation-host-id", nargs="*", default=[], help="Host ID(s) reserved for attacker-host holdout validation")
     parser.add_argument("--validation-session-id", nargs="*", default=[], help="Session ID(s) reserved for holdout validation")
-    parser.add_argument("--binary-threshold-mode", choices=["default", "fbeta", "fixed"], default="default", help="For binary tasks, tune or set the positive-class probability threshold")
-    parser.add_argument("--binary-threshold-beta", type=float, default=2.0, help="F-beta beta for --binary-threshold-mode fbeta; beta>1 prioritizes attack recall")
+    parser.add_argument("--train-session-id", nargs="*", default=[], help="Optional session ID(s) retained for training during explicit holdout validation")
+    parser.add_argument("--binary-threshold-mode", choices=["default", "fbeta", "fbeta_oof", "fixed"], default="default", help="For binary tasks, tune or set the positive-class probability threshold")
+    parser.add_argument("--binary-threshold-beta", type=float, default=2.0, help="F-beta beta for --binary-threshold-mode fbeta/fbeta_oof; beta>1 prioritizes attack recall")
     parser.add_argument("--binary-threshold-value", type=float, default=None, help="Fixed positive-class probability threshold when --binary-threshold-mode fixed")
     parser.add_argument("--skip-group-cv", action="store_true", help="Skip grouped CV/rule baseline and run only explicit holdout validation")
     parser.add_argument("--random-split", action="store_true", help="Run a shuffled row-level train/test split for quick sanity checks only")
@@ -1281,6 +1540,7 @@ def main() -> None:
             experiment=name,
             output_dir=args.output_dir,
             leakage_mode=leakage_mode,
+            training_session_ids=args.train_session_id,
             validation_host_ids=args.validation_host_id,
             validation_session_ids=args.validation_session_id,
             seeds=args.seeds,
@@ -1288,6 +1548,8 @@ def main() -> None:
             corr_threshold=args.corr_threshold,
             default_window_seconds=args.default_window_seconds,
             feature_profile=args.feature_profile,
+            group_col=args.group_col,
+            n_splits=args.n_splits,
             binary_threshold_mode=args.binary_threshold_mode,
             binary_threshold_beta=args.binary_threshold_beta,
             binary_threshold_value=args.binary_threshold_value,

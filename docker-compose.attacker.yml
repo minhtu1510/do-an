@@ -1,0 +1,143 @@
+version: '3.8'
+
+# ================================================================
+# docker-compose.attacker.yml — Máy tấn công ICS
+# Dùng trên máy Kali Linux (attacker machine)
+#
+# Cách dùng:
+#   docker compose -f docker-compose.attacker.yml build
+#   docker compose -f docker-compose.attacker.yml run --rm attacker-shell
+#   docker compose -f docker-compose.attacker.yml run --rm attacker-day1
+#   docker compose -f docker-compose.attacker.yml run --rm attacker-day2
+#   ... (tương tự cho day3, day4, day5)
+# ================================================================
+
+services:
+
+  # ── Shell tương tác (debug / chạy lệnh thủ công) ────────────────
+  attacker-shell:
+    build:
+      context: .
+      dockerfile: Dockerfile.attacker
+    image: s7pwn-attacker:latest
+    container_name: s7pwn-attacker-shell
+    network_mode: host
+    privileged: true          # cần cho tcpdump, arp, hping3, scapy raw socket
+    stdin_open: true
+    tty: true
+    environment:
+      - TARGET=${TARGET:-192.168.1.10}
+      - SUBNET=${SUBNET:-192.168.1.0/24}
+      - IFACE=${IFACE:-eth0}
+      - LOGGER_URL=${LOGGER_URL:-http://192.168.1.200:9000/label}
+    volumes:
+      - ./captures:/app/captures
+      - ./logs:/app/logs
+      - ./labels:/app/labels
+      - ./tmp:/app/tmp
+    command: bash
+
+  # ── Ngày 1 — Benign Baseline (Attacker idle) ─────────────────────
+  attacker-day1:
+    build:
+      context: .
+      dockerfile: Dockerfile.attacker
+    image: s7pwn-attacker:latest
+    container_name: s7pwn-attacker-day1
+    network_mode: host
+    privileged: true
+    environment:
+      - TARGET=${TARGET:-192.168.1.10}
+      - SUBNET=${SUBNET:-192.168.1.0/24}
+      - IFACE=${IFACE:-eth0}
+      - LOGGER_URL=${LOGGER_URL:-http://192.168.1.200:9000/label}
+    volumes:
+      - ./captures:/app/captures
+      - ./logs:/app/logs
+      - ./labels:/app/labels
+      - ./tmp:/app/tmp
+    command: bash run_attacker.sh 1 ${TARGET:-192.168.1.10} ${SUBNET:-192.168.1.0/24}
+
+  # ── Ngày 2 — Passive Reconnaissance ─────────────────────────────
+  attacker-day2:
+    build:
+      context: .
+      dockerfile: Dockerfile.attacker
+    image: s7pwn-attacker:latest
+    container_name: s7pwn-attacker-day2
+    network_mode: host
+    privileged: true
+    environment:
+      - TARGET=${TARGET:-192.168.1.10}
+      - SUBNET=${SUBNET:-192.168.1.0/24}
+      - IFACE=${IFACE:-eth0}
+      - LOGGER_URL=${LOGGER_URL:-http://192.168.1.200:9000/label}
+    volumes:
+      - ./captures:/app/captures
+      - ./logs:/app/logs
+      - ./labels:/app/labels
+      - ./tmp:/app/tmp
+    command: bash run_attacker.sh 2 ${TARGET:-192.168.1.10} ${SUBNET:-192.168.1.0/24}
+
+  # ── Ngày 3 — Active Reconnaissance + MITM ───────────────────────
+  attacker-day3:
+    build:
+      context: .
+      dockerfile: Dockerfile.attacker
+    image: s7pwn-attacker:latest
+    container_name: s7pwn-attacker-day3
+    network_mode: host
+    privileged: true
+    environment:
+      - TARGET=${TARGET:-192.168.1.10}
+      - SUBNET=${SUBNET:-192.168.1.0/24}
+      - IFACE=${IFACE:-eth0}
+      - LOGGER_URL=${LOGGER_URL:-http://192.168.1.200:9000/label}
+    volumes:
+      - ./captures:/app/captures
+      - ./logs:/app/logs
+      - ./labels:/app/labels
+      - ./tmp:/app/tmp
+    command: bash run_attacker.sh 3 ${TARGET:-192.168.1.10} ${SUBNET:-192.168.1.0/24}
+
+  # ── Ngày 4 — Integrity Attacks ───────────────────────────────────
+  attacker-day4:
+    build:
+      context: .
+      dockerfile: Dockerfile.attacker
+    image: s7pwn-attacker:latest
+    container_name: s7pwn-attacker-day4
+    network_mode: host
+    privileged: true
+    environment:
+      - TARGET=${TARGET:-192.168.1.10}
+      - SUBNET=${SUBNET:-192.168.1.0/24}
+      - IFACE=${IFACE:-eth0}
+      - LOGGER_URL=${LOGGER_URL:-http://192.168.1.200:9000/label}
+    volumes:
+      - ./captures:/app/captures
+      - ./logs:/app/logs
+      - ./labels:/app/labels
+      - ./tmp:/app/tmp
+    command: bash run_attacker.sh 4 ${TARGET:-192.168.1.10} ${SUBNET:-192.168.1.0/24}
+
+  # ── Ngày 5 — Availability + Replay ──────────────────────────────
+  attacker-day5:
+    build:
+      context: .
+      dockerfile: Dockerfile.attacker
+    image: s7pwn-attacker:latest
+    container_name: s7pwn-attacker-day5
+    network_mode: host
+    privileged: true
+    environment:
+      - TARGET=${TARGET:-192.168.1.10}
+      - SUBNET=${SUBNET:-192.168.1.0/24}
+      - IFACE=${IFACE:-eth0}
+      - LOGGER_URL=${LOGGER_URL:-http://192.168.1.200:9000/label}
+    volumes:
+      - ./captures:/app/captures
+      - ./logs:/app/logs
+      - ./labels:/app/labels
+      - ./tmp:/app/tmp
+    command: bash run_attacker.sh 5 ${TARGET:-192.168.1.10} ${SUBNET:-192.168.1.0/24}

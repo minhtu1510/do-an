@@ -1,0 +1,790 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{url}
+
+% ---- convenience macros -------------------------------------------------
+\newcommand{\todo}[1]{\textcolor{red}{\textbf{[TODO(DATA): #1]}}}
+\newcommand{\fbetaoof}{\texttt{fbeta\_oof}}
+
+\begin{document}
+
+\title{A Physical S7comm Intrusion Detection Dataset\\
+with Session-Shift Evaluation and a Process-Logging Audit}
+
+\author{
+\IEEEauthorblockN{1\textsuperscript{st} Thai Thi Minh Tu, 2\textsuperscript{nd} Vuong Linh Thao, 3\textsuperscript{rd} Dang Le Dinh Trang}
+\IEEEauthorblockA{
+Le Quy Don Technical University, Hanoi, Vietnam\\
+thaithiminhtu.338@gmail.com, thaolinh252512@gmail.com, trangdld@lqdtu.edu.vn}
+}
+% NOTE: remove/blank the author block above if the venue requires double-blind review.
+
+\maketitle
+
+\begin{abstract}
+Intrusion-detection research for Siemens S7comm is constrained by a shortage of datasets collected on
+physical hardware that pair network observations with process state and report evaluation under a
+distribution shift rather than in-distribution cross-validation alone. We present a physical S7comm
+dataset built on an S7-1500 testbed running two industrial control applications, aligning network
+capture, PLC tag/process logs, and an attack-event timeline by timestamp into 55{,}902 labeled 2-second
+windows (47{,}460 benign, 8{,}442 attack) across a six-day collection schedule, organized through a
+four-layer feature taxonomy: network volume, ICS protocol presence, S7 operation semantics, and process
+state. We evaluate four baselines under three protocols: episode-grouped cross-validation, a Day-5
+temporal holdout, and a randomized-order, reduced-rate Day-6 session, treated as exploratory rather than
+confirmatory because its anomalous early result triggered a data-quality audit of our own pipeline. Under
+a grouped out-of-fold threshold calibration, network-only binary Macro-F1 falls from 0.83--0.91
+in-distribution to 0.60--0.66 on Day 6, and the drop is model-dependent. Naive network/process fusion
+shows no consistent binary effect across models. We trace this to a concrete collection defect: the
+process logger was started manually and overlapped only part of each attack period, so only 839 attack
+windows (9.9\%) carry a discriminative process signal, and a matched comparison restricted to real
+process observations is structurally uninformative on this release rather than merely unrun. We report
+this diagnosis in full, together with the leakage it induced in an earlier pipeline
+version, because it determines what the fusion result can and cannot support.
+\end{abstract}
+
+\begin{IEEEkeywords}
+industrial control systems, S7comm, intrusion detection dataset, PLC testbed, distribution shift, data quality
+\end{IEEEkeywords}
+
+\section{Introduction}
+
+Industrial Control Systems built around Siemens S7-family PLCs remain widely deployed in manufacturing,
+utilities, and distributed infrastructure. The S7comm protocol governing HMI--PLC and engineering-station
+communication was not designed with authentication or encryption by default. A 2026 taxonomic review of 23
+public ICS/IIoT intrusion-detection datasets finds protocol coverage heavily skewed toward
+Modbus---appearing in 13 of 23 datasets against S7comm in only five---and that most datasets model short,
+isolated attack episodes rather than a reconnaissance-through-impact progression \cite{b1}.
+
+Three gaps follow. First, S7comm is under-served relative to its deployment footprint. Second, datasets
+that do target it are typically collected on a single control process, making it impossible to tell
+whether a detector has learned protocol behavior or one program's idiosyncrasies. Third, published
+results are usually reported under in-distribution cross-validation, which systematically overstates what
+a detector will do on traffic it has not seen.
+
+The third gap motivates this paper. We designed the collection schedule around an explicit
+session-disjoint split from the outset and evaluate every model under every protocol rather than
+reporting the best model per split. Days 1--6 share the same PLC, attacker host, and network topology, so
+the shift we measure is a within-testbed, session/schedule-level shift (day, episode order, attack
+rate)---not cross-testbed or cross-deployment generalization. We use this narrower framing throughout
+rather than the broader term ``out-of-distribution.''
+
+Existing S7comm work has focused on protocol modeling for automaton-based detection \cite{b2}, a physical
+mining/refinery testbed with a fixed process \cite{b3}, or synthetic attacks injected into a
+single-process capture \cite{b4}. What remains rare is a dataset that preserves the relationship between
+the sender, the command, the targeted memory area, and the resulting process-state change---since in
+S7comm a single correctly addressed write can corrupt a control cycle without any protocol-level
+anomaly---while exercising more than one control application and reporting session-disjoint evaluation.
+
+We organize the work around three research questions:
+\begin{itemize}
+\item \textbf{RQ1 (Coverage).} What operating modes and attack behaviors are represented across the
+six-day collection schedule of a physical S7comm testbed, and how are they distributed by day and class?
+\item \textbf{RQ2 (Semantics and data quality).} What detection signal is contributed by each feature
+layer, and how is that assessment affected by incomplete process-log coverage?
+\item \textbf{RQ3 (Generalization).} How does performance change from episode-grouped in-distribution
+evaluation to temporally disjoint, randomized-order evaluation under a within-testbed schedule shift?
+\end{itemize}
+
+Our contributions are: (i) a physical S7-1500 testbed with ERSPAN mirroring, exercising two instrumented
+control applications; (ii) three timestamp-aligned data sources merged into 55{,}902 labeled windows with
+explicit leakage controls; (iii) a symmetric benchmark of four baselines across three evaluation
+protocols, including a layer-wise ablation; and (iv) an audited finding that network/process fusion
+provides no consistent benefit, in which we identify the collection defect responsible rather than
+reporting the fused score at face value. We keep the multi-application claim narrow: by collection design
+both applications contribute windows to every day of the schedule, though the current release has no
+application-id field to audit this per window (Section~\ref{sec:limitations}), and we do not report a
+leave-one-application-out evaluation; this establishes only that the dataset is not tied to a single
+process, not that a detector transfers across control programs. We position this as a dataset and
+benchmark contribution, not a state-of-the-art detector.
+
+\section{Related Work}
+
+\textbf{S7comm protocol modeling.} Kleinmann and Wool model the periodic nature of S7 traffic as a
+per-channel Deterministic Finite Automaton, flagging out-of-sequence messages and unexpected memory
+references \cite{b2}. This establishes structural regularity exploitable for anomaly detection, but does
+not couple network observations to process-state change, nor release a labeled, scenario-organized
+dataset.
+
+\textbf{Physical S7comm testbeds.} Rodofile et al.\ release QUT\_S7comm from a physical mining/refinery
+testbed, with roughly nine hours of traffic and process logs across 13 attack types \cite{b3}---the
+closest prior work in spirit, but targeting a single process without session-disjoint evaluation.
+Al-Duwairi et al.\ release SCADA captures from an S7-1500-based medical waste incinerator with synthetic
+attacks injected post hoc rather than executed live \cite{b4}. Kellerer et al.\ release a physical-testbed
+S7comm dataset spanning two process contexts---a battery storage plant on an S7-1512 and a PV plant on an
+S7-1516---with live protocol-level write attacks \cite{b10,b11}.
+
+\textbf{Multi-protocol and multimodal ICS datasets.} G\'omez et al.\ build the Electra dataset from an
+electric traction substation using Modbus TCP and S7comm \cite{b5}. Dehlaghi-Ghadim et al.\ present an
+anomaly-detection dataset on a heterogeneous-protocol physical testbed \cite{b6}. Shafir et al.\ present
+ICS-MMOC3, a multimodal S7comm dataset from a power-generation ICS pairing operational faults with
+cyber-attacks \cite{b12}. Zhou et al.\ present ICS-NAD, spanning three ICS vendor platforms and two
+industrial processes with 20 attack types and released PCAP plus extracted features \cite{b13}; vendor
+diversity there is a separate axis from process/application diversity, which we keep distinct in
+Table~\ref{tab:compare}. SWaT \cite{b7} and WADI \cite{b8} remain the most widely used physical ICS
+benchmarks outside the S7/Modbus family. The 2010 Stuxnet incident remains the standard motivating
+reference for treating ICS network security as distinct from IT security \cite{b9}.
+
+We did not identify an equivalent audited account of collection-induced leakage
+(Section~\ref{sec:audit}) in the compared publications; our contribution is the equivalent physical-S7comm
+role with process-state coupling, a symmetric multi-model evaluation-protocol comparison, and that audit.
+
+\begin{table}[t]
+\caption{Dataset comparison}
+\label{tab:compare}
+\centering
+\small
+\begin{tabular}{lccccc}
+\toprule
+Dataset & Phys. & S7 & PCAP & Proc.\ vars. & Sess.-disj. \\
+\midrule
+QUT\_S7comm \cite{b3}     & Y & Y   & Y & Y & N \\
+Incinerator \cite{b4}     & Y & Y   & Y & N & N \\
+Electra \cite{b5}         & Y & Y+M & Y & N & N \\
+Dehlaghi et al.\ \cite{b6}& Y & N   & Y & Y & N.r. \\
+Kellerer et al.\ \cite{b10}& Y& Y   & Y & Y & N.r. \\
+ICS-MMOC3 \cite{b12}      & Y & Y   & Y & Y & N.r. \\
+ICS-NAD \cite{b13}        & Y, 3 vend. & Part. & Y & N & N.r. \\
+\textbf{This work}        & Y & Y   & Y & Y & Y (D6, expl.) \\
+\bottomrule
+\end{tabular}
+
+\vspace{2pt}
+\raggedright
+\footnotesize N.r.\ = not reported in the source publication; M = Modbus TCP; Sess.-disj.\ =
+session-disjoint evaluation split; expl.\ = exploratory rather than confirmatory
+(Section~\ref{sec:audit}).
+\end{table}
+
+\section{Testbed and Data Collection}
+
+\subsection{Architecture}
+
+The testbed deploys a physical Siemens S7-1500 PLC (.211) executing real control logic, connected to a
+genuine engineering/HMI station (TIA Portal / WinCC Runtime V18, .31) over an isolated, segmented network.
+An attacker host (.32) runs Python, Scapy, and python-snap7. All hosts connect through an Aruba switch
+(.254) configured for ERSPAN GRE mirroring to a dedicated capture/logging host, which independently
+records network capture (PCAP), the PLC tag/process log, and the attack-event timeline used as audit
+ground truth; the three streams are merged by timestamp (Fig.~\ref{fig:testbed}). A physical PLC, rather
+than PLCSIM, improves the realism of cyclic scan timing and protocol-level responses under normal and
+adversarial conditions. Two control applications are instrumented and released---an urban traffic-light
+controller and a conveyor-belt sequential-logic process. The current release does not support an
+auditable per-application window breakdown because application identifiers were not preserved at window
+level (Section~\ref{sec:limitations}). A third (irrigation/water-pump) is implemented on the same PLC but
+not yet captured, and is not part of this benchmark.
+
+\textbf{Threat model.} We assume an attacker with existing network access to the Field OT segment reaching
+the PLC's S7 service on TCP/102; we do not simulate initial compromise. Out of scope: physical sabotage,
+bypassing a Safety PLC, firmware persistence, functional-safety evaluation. All experiments run on
+authorized equipment with dedicated test memory areas and a restore step after each write episode.
+
+\textbf{Observability and host identity.} The WinCC-to-PLC channel can use S7CommPlus, which may not be
+decodable from the mirrored capture; for protected sessions only transport metadata is available. All
+attack traffic originates from a single attacker host (.32), distinct from the HMI host (.31); although
+host addresses are excluded from the feature matrix, directional and connection-pattern statistics could
+still let a model partly learn attacker-role rather than attack behavior in general. We did not run a
+cross-attacker-host evaluation to bound this (Section~\ref{sec:limitations}).
+
+\textbf{Clock synchronization.} Streams are merged by nearest recorded timestamp; inter-host clock
+synchronization (NTP/PTP) has not been confirmed, and the process-logger polling interval and the exact
+merge tolerance have not been measured. Alignment error at the sub-window scale therefore cannot be
+bounded from the current release. See Section~\ref{sec:limitations} for the full caveat.
+
+\begin{figure}[t]
+\centering
+\fbox{\parbox{0.9\linewidth}{\centering\small
+\textbf{Testbed architecture (Fig. 1 placeholder)}\\[4pt]
+S7-1500 PLC (.211) $\rightarrow$ Aruba switch (.254), ERSPAN GRE mirror $\rightarrow$
+Capture/logging host (TShark, Npcap)\\
+Engineering/HMI station (.31, TIA Portal/WinCC) $\rightarrow$ switch\\
+Attacker host (.32, Scapy, python-snap7) $\rightarrow$ switch; also emits attack-event
+timeline (ground truth)\\
+PLC $\rightarrow$ PLC tag/process log (register poll) $\rightarrow$ capture host\\[4pt]
+All three streams merge by timestamp into 2-second windows.\\[2pt]
+\textit{Replace this box with the original vector figure; enlarge label font relative to the
+v3/v28 draft, which reviewers flagged as too small to read at print size.}
+}}
+\caption{Testbed architecture. PLC, HMI, and attacker traffic are ERSPAN-mirrored to a capture
+host that independently records three streams, merged by timestamp into 2-second windows.}
+\label{fig:testbed}
+\end{figure}
+
+\subsection{Definitions}
+
+A window is a fixed 2-second interval, stride 2\,s, no overlap, labeled ATTACK if any attack interval
+overlaps it. An episode is one warm-up$\rightarrow$attack$\rightarrow$cooldown$\rightarrow$restore
+sequence, the grouping unit for cross-validation. A session is all data from one collection day. The
+effective grouping key is \texttt{session\_id|episode\_id}; the codebase's group configuration also lists
+\texttt{host\_id}, retained in the released metadata, but it does not affect grouping in this release,
+since the testbed has a single fixed attacker host and a single HMI host (Section~III-A). For attack
+windows, \texttt{episode\_id} identifies one of the 36 attack episodes. Benign windows are not one group
+per day: they are chunked into 10-minute \texttt{episode\_id} segments
+(\texttt{session\_id:BENIGN:<chunk>}), giving 192 benign groups and 228 groups in total for the network
+and fusion views (49 for process-only, which contains only logger-covered rows). We call this
+episode-grouped cross-validation rather than session-grouped: repeated episodes of a scenario
+(Section~III-C) share script and parameters, so grouping by episode prevents seeing the exact same episode
+in both folds, but not a different episode of the same scenario, script, and day. Table~\ref{tab:main}
+(episode-grouped) and the Day-6 result (which additionally shifts day, order, and rate) should not be
+conflated.
+
+\subsection{Collection Schedule}
+
+Table~\ref{tab:byday} reports the measured window count by day and attack class, queried directly from
+the released feature files. Day 1 is a benign baseline; Days 2--5 each exercise a subset of scenarios
+(reconnaissance-to-impact progression: enumeration/scan, then writes, then setpoint/spoof/stealthy logic
+attacks, then volume attacks); Day 6 is the session-disjoint evaluation set, containing all nine scenarios
+at reduced rate. FLOOD aggregates two scenario IDs, S7\_FLOOD (623 windows, S7comm connection exhaustion)
+and SYN\_FLOOD (588 windows, TCP SYN flood), sharing one label.
+
+Each of the nine attack scenarios runs three episodes across Days 2--5 (randomized duration and
+inter-episode gap) plus one additional episode on Day 6 at 20--50\% lower rate, for four episodes per
+scenario and 36 attack episodes in total. Benign traffic is organized into 192 benign segments (grouping
+units used the same way as episodes for cross-validation, but without an attack execution phase), for 228
+grouping units overall. The six sessions span approximately 49.8 wall-clock hours from the first to the
+last recorded event; the released non-overlapping 2-second windows represent 31.1 of those hours (55{,}902
+windows $\times$ 2\,s). Windows were generated only while both packet capture and the labeled session
+timeline were active; overnight periods and intervals with capture stopped account for the remaining 18.7
+hours, and no interval was excluded based on its attack/benign label or feature values. Rows within a
+configurable transition margin around attack boundaries
+(\texttt{-{}-drop-transition-seconds}, default 10\,s) are additionally dropped to avoid ambiguous
+mixed-state windows, applied symmetrically regardless of label. Benign traffic covers startup,
+steady-state, shutdown, mode changes, sensor transitions, HMI polling, and legitimate engineering writes,
+retained deliberately as hard negatives.
+
+\begin{table}[t]
+\caption{Measured windows by day and class (queried from the release-candidate feature files)}
+\label{tab:byday}
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lrrrrrrrrr}
+\toprule
+Day & BEN. & ENUM & FLD & FUZZ & RWR & SCAN & SETP & SPF & STL \\
+\midrule
+1 (base)  & 7{,}348  & 0   & 0   & 0   & 0   & 0   & 0   & 0   & 0 \\
+2 (recon) & 8{,}761  & 935 & 0   & 0   & 0   & 438 & 0   & 0   & 0 \\
+3 (write) & 11{,}753 & 0   & 0   & 0   & 866 & 0   & 0   & 0   & 0 \\
+4 (logic) & 5{,}208  & 0   & 0   & 0   & 0   & 0   & 829 & 943 & 442 \\
+5 (volume)& 9{,}787  & 0   & 894 & 410 & 0   & 0   & 0   & 0   & 0 \\
+6 (eval.) & 4{,}603  & 470 & 317 & 122 & 365 & 462 & 253 & 299 & 397 \\
+\midrule
+\textbf{Total} & \textbf{47{,}460} & \textbf{1{,}405} & \textbf{1{,}211} & \textbf{532} &
+\textbf{1{,}231} & \textbf{900} & \textbf{1{,}082} & \textbf{1{,}242} & \textbf{839} \\
+\bottomrule
+\end{tabular}
+
+\vspace{2pt}
+\raggedright\footnotesize Grand total: 55{,}902 windows (47{,}460 benign, 8{,}442 attack).
+\end{table}
+
+\subsection{Feature Layers and Leakage Controls}
+
+Features are organized into four cumulative layers: \textbf{L0}---network volume/protocol statistics (100
+features: packet/byte rates, TCP flags, length and payload statistics, port statistics);
+\textbf{L1}---ICS protocol presence (+22: S7comm packet counts, COTP/TPKT/DCP indicators, directional PLC
+traffic shares); \textbf{L2}---S7 operation semantics (+15: read/write counts, CPU-control ops, merker
+writes, unique DB counts, write-ratio features; addresses mapped to process-meaningful tags, e.g.\
+M5.0$\rightarrow$START); \textbf{L3}---process state (+66: \texttt{proc\_\_*} register-polling features).
+The process-only view is restricted to the 10{,}771 rows with a real, logger-covered process observation
+(\texttt{proc\_data\_valid}=1); the fusion view instead retains every network window and fills
+\texttt{proc\_\_*} values for windows without a real observation via the per-day backward-fill in
+Section~\ref{sec:audit}, so the backward-fill risk described there applies to fusion, not to process-only.
+
+Session/day identifiers, filenames, host identity, timestamps, and rule-derived flags are excluded from
+the feature matrix. \texttt{scenario\_id}/\texttt{episode\_id} are used only for grouped-CV splitting and
+ground-truth labeling, never as model inputs; the attack-event log is used only for ground truth and
+audit. Our merge pipeline also emits \texttt{proc\_data\_valid}, marking whether the process logger was
+running for a window. Because the logger was started manually, this mask correlates with attack class as
+a collection-timing artifact rather than a security signal; we exclude it explicitly as an
+indirect-leakage risk.
+
+\section{Experimental Setup}
+
+Binary detection (benign vs.\ attack) is the primary task; multiclass attribution is secondary.
+Process-state features are contemporaneous within each window, so the process and fusion views address
+detection of an ongoing or already-realized attack, not prediction before physical impact. We evaluate
+Random Forest, Logistic Regression, XGBoost, and CatBoost on three feature views (network-only,
+process-only, fusion) under three protocols: (1) episode-grouped cross-validation
+(\texttt{StratifiedGroupKFold}, 5 folds, grouping as defined in Section~III-B) on Days 1--5; (2) the Day-5
+temporal holdout, training on Days 1--4 and testing on Day 5; (3) the Day-6 evaluation session
+(randomized order, reduced rate), never used for threshold tuning or feature selection. Results are means
+over five seeds (42--46). We report Macro-F1 as the primary comparison metric throughout
+(Table~\ref{tab:main}), with MCC reported alongside it for the Day-5 holdout (Table~\ref{tab:day5}), the
+layer-wise ablation (Table~\ref{tab:ablation}), and the process-only diagnosis
+(Section~\ref{sec:audit}).
+
+\textbf{Preprocessing.} NaN and infinite values are replaced with zero prior to fitting. Constant features
+and features with pairwise Pearson $|r|>0.98$ are removed per training fold only, so no test-fold
+information influences feature selection. Logistic Regression is preceded by a \texttt{StandardScaler};
+tree-based models receive raw features.
+
+\begin{table}[t]
+\caption{Model hyperparameters}
+\label{tab:hparams}
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lcccc}
+\toprule
+Param. & RF & XGBoost & CatBoost & LogReg \\
+\midrule
+n\_estim./iter.   & 300 & 300 & 300 & --- \\
+max\_depth        & None & 6 & 6 & --- \\
+learn.\ rate      & --- & 0.1 & 0.1 & --- \\
+subsample         & --- & 0.8 & --- & --- \\
+colsample         & --- & 0.8 & --- & --- \\
+class weight      & balanced\_subsample & --- & auto (Balanced) & balanced \\
+min\_samples\_leaf& 2   & --- & --- & --- \\
+solver/penalty    & --- & --- & --- & lbfgs / l2 (default) \\
+C                 & --- & --- & --- & 1.0 (default) \\
+max\_iter         & --- & --- & --- & 2000 \\
+eval\_metric      & --- & logloss/mlogloss & --- & --- \\
+\bottomrule
+\end{tabular}
+
+\vspace{2pt}
+\raggedright\footnotesize All models: 5 seeds (42--46), \texttt{n\_jobs}/\texttt{thread\_count}=$-1$.
+LR solver/penalty/C are scikit-learn defaults (not explicitly overridden). XGBoost's objective is set
+automatically by the fitted classifier (\texttt{binary:logistic} for binary, \texttt{multi:softprob} for
+multiclass), with no \texttt{scale\_pos\_weight}, so it is not class-balanced in the same way as the other
+three models. A sensitivity check with \texttt{scale\_pos\_weight} set to the negative/positive ratio on
+each training fold is planned; results will be added as two additional rows in Table~\ref{tab:main} or
+as a footnote once available. CatBoost infers its loss from the post-encoding class count and applies
+\texttt{auto\_class\_weights=Balanced} in both tasks.
+\end{table}
+
+The binary decision threshold reported in Tables~\ref{tab:main}--\ref{tab:perclass} is selected using
+grouped out-of-fold predictions (\fbetaoof): for each outer split, an inner grouped CV within the
+outer-training partition refits constant/correlation feature pruning independently on each
+inner-training fold and predicts the corresponding inner-validation fold to produce out-of-fold scores;
+$F_\beta$ ($\beta=2$, favoring recall) is maximized over those scores, the model is refit on the full
+outer-training partition, and the resulting threshold is applied once to the held-out partition. An
+earlier in-sample variant, which selected the threshold from each model's own training-fold scores, gave
+visibly different numbers (network CatBoost Day-6 Macro-F1 0.643, vs.\ 0.659$\pm$0.006 under
+\fbetaoof) and a different model ranking, so we report the \fbetaoof\ results throughout unless noted
+otherwise. Alarm burden is \texttt{fpr\_per\_hour} = false\_positive\_windows / benign\_hours, at window
+level: 30 consecutive false-positive windows count as 30 alarms, not one episode; an episode-collapsed
+variant is left to future work. Grouped-CV metrics are averaged across the five folds within each seed,
+then summarized across the five seeds.
+
+\textbf{Status of Day 6.} An early pipeline version produced an anomalous, worse-than-chance score on Day
+6 (Section~\ref{sec:audit}); that anomaly triggered the data-quality audit and subsequent fixes described
+there. Day-6 labels were never used to tune features or thresholds, but its results did inform a pipeline
+revision, so we report Day 6 as a session-disjoint evaluation set that also served as an exploratory
+diagnostic, not a confirmatory holdout. The episode-grouped result on Days 1--5 is the closest
+confirmatory in-distribution result this paper offers.
+
+Dataset composition (55{,}902 windows: 47{,}460 benign, 8{,}442 attack; per-day and per-class breakdown in
+Table~\ref{tab:byday}) was cross-checked against the data card and both network-only and fusion exports;
+all agree exactly.
+
+\section{Results}
+
+\subsection{Data Quality Audit}
+\label{sec:audit}
+
+We report this first because it governs the interpretation of everything after it, and because it is why
+Day 6 is not described as an untouched holdout. An early pipeline version produced MCC $=-0.154$ (Random
+Forest, process-only, Day 6)---a worse-than-chance, consistently-signed result that motivated an audit of
+labels and preprocessing rather than being accepted at face value. The audit found: (1) the
+\texttt{proc\_data\_valid} availability mask was computed after ffill/bfill had already overwritten
+missing values, so it no longer reflected real observation coverage; (2) forward/backward fill ran across
+the whole dataset in timestamp order, so Day-1 process values propagated into Day-2 attack windows
+collected before the logger started; (3) the mask itself was inadvertently left in the feature set,
+letting models learn \texttt{proc\_data\_valid}=0 $\rightarrow$ attack---a collection-timing artifact, not
+process behavior.
+
+The root cause is operational: the logger was started manually, 13 minutes after the last Day-2 scan
+window, 36 minutes after the Day-3 write window, and only 10 seconds before the Day-5 attack period
+ended---so RWRITE, FLOOD, and SETPOINT\_ATTACK have zero windows with a real process observation
+(\texttt{proc\_data\_valid}=1) anywhere in their collection day. After switching
+\texttt{proc\_data\_valid} assignment to precede imputation and restricting ffill/bfill to within each
+day, process-only MCC moved from $-0.154$ to $+0.374$ (RF), 0.000 to $+0.376$ (LR), and $-0.007$ to
+$+0.374$ (CatBoost); all subsequent results use this revised pipeline. This closes the cross-day
+propagation and the mask-as-feature leak, but per-day backward-fill still assigns
+RWRITE/FLOOD/SETPOINT\_ATTACK windows a process value copied from the nearest later same-day observation
+(e.g.\ after logger start on Day 3), since those windows have no real observation to fall back to. We
+therefore do not attempt a matched comparison restricted to \texttt{proc\_data\_valid}=1 windows as a way
+to validate fusion: three attack classes have no such windows at all, and among the classes that do (SCAN
+27.7\%, ENUMERATION 30.4\%, FUZZ 24.1\%, SPOOF 4.4\%), the Q0 register value is 41---identical to
+BENIGN---so a proc=1-only evaluation would reduce to STEALTHY-only detection rather than a genuine
+multiclass comparison (Section~\ref{sec:limitations}). Closing this requires re-collecting with the
+logger running for the full duration of every session, not a different evaluation protocol on the current
+data.
+
+Under \fbetaoof, grouped-CV FPR/hour rises sharply relative to the earlier in-sample threshold (e.g.\
+network CatBoost 105 vs.\ 37), while Day-6 FPR/hour stays below 3 for every network and fusion model
+(1.02--2.97 for network-only, 0.08--0.39 for fusion): a less-overfit threshold fires more often on
+grouped-CV benign traffic it has not memorized, but still rarely fires on Day 6, where recall is already
+low (Table~\ref{tab:main}). Since the threshold optimizes $F_\beta$ rather than Macro-F1, a low Day-6
+FPR/hour should not be read as good calibration; it is consistent with under-detection on the harder
+split (Section~\ref{sec:limitations}). Process-only carries by far the heaviest grouped-CV burden
+($\sim$720/hour for all four models), consistent with the single-register decision rule below.
+
+\subsection{In-Distribution vs.\ Day-6 (RQ3)}
+
+Under \fbetaoof, network-only in-distribution performance is fairly uniform (0.833--0.909 F1), and the
+Day-6 gap is again model-dependent, but the ranking differs from the in-sample-threshold results: XGBoost
+now shows the largest drop ($-0.255$) rather than Random Forest, with CatBoost and Random Forest close
+behind ($-0.250$, $-0.239$). This reordering shows that which model looks most robust to this shift
+depends on threshold calibration as well as on the model itself, so a single-model, single-threshold
+report of ``domain-shift robustness'' is not reliable evidence about the shift. We therefore report the
+full model$\times$protocol matrix rather than each split's best model.
+
+All four process-only models return essentially the same Day-6 score (0.547--0.548) regardless of view or
+threshold-calibration method. Feature importances show \texttt{proc\_q0\_raw\_hex\_mean} dominates every
+model; the decision rule reduces to a threshold on the Q0 output register, and computing binary Macro-F1
+under (Q0=40$\rightarrow$attack) by hand reproduces this value almost exactly---the process-only view
+detects one register transition, not process behavior in general. Under \fbetaoof, process-only
+grouped-CV Macro-F1 is markedly lower (0.389--0.402) than under the in-sample threshold (0.584--0.696): a
+threshold calibrated out-of-sample on this small (10{,}771-row), heavily class-imbalanced view generalizes
+far worse within grouped CV than one tuned in-sample, which is itself informative about how fragile the
+process-only signal is outside the single Q0 rule that survives on Day 6.
+
+Day 5 (11{,}091 windows, 88.2\% benign, only FLOOD and FUZZ) yields near-ceiling network and fusion scores
+(RF, XGBoost $\geq$0.998 Macro-F1), exceeding every Day-6 result. A score this close to perfect warrants
+scrutiny: an independent check confirmed no metadata columns remain in the feature matrix, zero
+train/test group overlap, and no exact-duplicate rows between Days 1--4 and Day 5; the near-ceiling scores
+instead trace to strong volume separation (e.g.\ \texttt{tcp\_syn\_count} tops out at 12 for benign
+Day-5 windows vs.\ 18+ for attack windows), consistent with FLOOD/SYN-flood signatures being trivially
+separable by volume. This is not stronger temporal generalization: Day 6 mixes all nine scenarios
+including low-footprint attacks, and attack composition, not the schedule shift, is what makes Day 6
+hard. Process-only collapses to chance (Macro-F1$\approx$0.499) on Day 5, since FLOOD/FUZZ windows have
+\texttt{proc\_data\_valid}=0 (Section~\ref{sec:audit})---no signal to exploit at all, unlike the partial
+STEALTHY-driven signal on Day 6.
+
+\subsection{Layer-Wise Ablation (RQ2)}
+
+For CatBoost on Day 6 under \fbetaoof, ICS-presence (L1) gives a small gain over volume-only
+(0.648$\rightarrow$0.654 Macro-F1); S7-operation semantics (L2) does not extend this (0.647). Adding
+process state (L3) gives the highest score here (0.663 Macro-F1, 0.483 MCC) alongside the lowest FPR/hour
+(0.08). We do not read this as a general fusion endorsement: the ablation trains on Days 1--4 rather than
+Table~\ref{tab:main}'s Days 1--5, and the process contribution concentrates in the STEALTHY-specific Q0
+signal (Section~\ref{sec:audit}) rather than a broad improvement, consistent with the model-dependent
+fusion effect below.
+
+\subsection{Fusion and Multiclass Attribution}
+
+Fusion appears to beat network-only at multiclass (0.235 vs.\ 0.206). A perfect F1=1.000 on any class in
+a Day-6 split warrants suspicion, so we investigated. Of 8{,}442 attack windows, 1{,}698 (20.1\%) have
+\texttt{proc\_data\_valid}=1: STEALTHY 839 (100\%), ENUMERATION 427 (30.4\%), SCAN 249 (27.7\%), FUZZ 128
+(24.1\%), SPOOF 55 (4.4\%), and none for RWRITE, FLOOD, SETPOINT\_ATTACK---so availability alone does not
+explain STEALTHY's perfect score.
+
+Checked specifically on Day 6, \texttt{proc\_q0\_raw\_hex\_mean} takes the single value 40.0 across all
+397 STEALTHY windows, while ENUMERATION, SCAN, and FUZZ windows with \texttt{proc\_data\_valid}=1 all
+read 41.0---indistinguishable from BENIGN; only STEALTHY's STOP-bit write changes Q0. So of the 20.1\% of
+attack windows with a real process observation, only the 9.9\% that are STEALTHY carry a signal that
+discriminates anything at all. Removing STEALTHY reverses the ordering: fusion Macro-F1 0.139 vs.\
+network-only 0.147.
+
+Naive concatenation of network and process views does not yield a consistent binary gain on Day 6 under
+\fbetaoof\ (Table~\ref{tab:main}): lower than network-only for CatBoost (0.626 vs.\ 0.659) and Random
+Forest (0.634 vs.\ 0.662), higher for XGBoost (0.673 vs.\ 0.649), close for Logistic Regression. This
+model-dependence, not a uniform ``fusion does not help,'' is what the corrected calibration supports.
+With 79.9\% of attack windows lacking real process observations and the multiclass advantage traced
+entirely to the STEALTHY artifact, this experiment cannot answer RQ2 conclusively either way; any fused
+score should be audited per model and per class before being believed.
+
+\begin{table*}[t]
+\caption{Binary detection under grouped out-of-fold threshold calibration (\texttt{fbeta\_oof}), mean
+$\pm$ std over five seeds\textsuperscript{a}}
+\label{tab:main}
+\centering
+\small
+\begin{tabular}{llcccccccc}
+\toprule
+View & Model & Grp.\ CV Macro-F1 & Day-6 Macro-F1 & $\Delta$F1 & Grp.\ CV MCC & Day-6 MCC &
+\multicolumn{2}{c}{Day-6 attack\textsuperscript{b}} \\
+\cmidrule(lr){8-9}
+ & & & & & & & P & R \\
+\midrule
+network & CatBoost      & 0.909$\pm$0.002 & 0.659$\pm$0.006 & $-$0.250 & 0.831$\pm$0.003 & 0.477$\pm$0.007 & 0.996 & 0.309 \\
+network & Log.\ Reg.    & 0.833$\pm$0.011 & 0.595$\pm$0.000 & $-$0.239 & 0.702$\pm$0.013 & 0.396$\pm$0.000 & 0.997 & 0.229 \\
+network & XGBoost       & 0.903$\pm$0.001 & 0.649$\pm$0.006 & $-$0.255 & 0.821$\pm$0.002 & 0.463$\pm$0.007 & 0.994 & 0.304 \\
+network & Rand.\ Forest & 0.900$\pm$0.003 & 0.662$\pm$0.005 & $-$0.239 & 0.817$\pm$0.005 & 0.479$\pm$0.005 & 0.996 & 0.313 \\
+fusion\textsuperscript{c} & CatBoost      & 0.922$\pm$0.003 & 0.626$\pm$0.005 & $-$0.297 & 0.854$\pm$0.005 & 0.436$\pm$0.007 & 1.000 & 0.271$\pm$0.007 \\
+fusion\textsuperscript{c} & Log.\ Reg.    & 0.910$\pm$0.002 & 0.621$\pm$0.018 & $-$0.289 & 0.830$\pm$0.003 & 0.430$\pm$0.022 & 0.999 & 0.265$\pm$0.022 \\
+fusion\textsuperscript{c} & XGBoost       & 0.919$\pm$0.003 & 0.673$\pm$0.010 & $-$0.246 & 0.847$\pm$0.006 & 0.495$\pm$0.012 & 0.999 & 0.341$\pm$0.013 \\
+fusion\textsuperscript{c} & Rand.\ Forest & 0.918$\pm$0.003 & 0.634$\pm$0.022 & $-$0.284 & 0.847$\pm$0.005 & 0.446$\pm$0.028 & 0.999 & 0.283$\pm$0.028 \\
+process\textsuperscript{c} & CatBoost      & 0.389$\pm$0.027 & 0.547$\pm$0.000 & $+$0.158 & 0.116$\pm$0.043 & 0.370$\pm$0.003 & --- & --- \\
+process\textsuperscript{c} & Log.\ Reg.    & 0.402$\pm$0.000 & 0.548$\pm$0.000 & $+$0.146 & 0.141$\pm$0.001 & 0.376$\pm$0.000 & --- & --- \\
+process\textsuperscript{c} & Rand.\ Forest & 0.393$\pm$0.018 & 0.547$\pm$0.000 & $+$0.155 & 0.121$\pm$0.025 & 0.372$\pm$0.001 & --- & --- \\
+process\textsuperscript{c} & XGBoost       & 0.401$\pm$0.001 & 0.548$\pm$0.000 & $+$0.146 & 0.135$\pm$0.004 & 0.374$\pm$0.000 & --- & --- \\
+\bottomrule
+\end{tabular}
+
+\vspace{2pt}
+\raggedright\footnotesize
+\textsuperscript{a}Threshold selected via grouped out-of-fold predictions within each outer-training
+partition (Section IV). \textsuperscript{b}Attack-class precision/recall at the \texttt{fbeta\_oof} threshold on Day~6,
+computed from per-seed binary confusion matrices. Network P/R values are from a single-seed run
+(seed~42); fusion P/R values are means over five seeds (std shown when $>$0.001). Process-only
+P/R pending re-run of the full pipeline (threshold exists; confusion matrix with fbeta\_oof not
+yet saved for this view). \textsuperscript{c}Fusion and process-only views are exploratory: process-logger
+coverage is incomplete, and same-day backward-filling in the fusion view (Sections III-D
+and~\ref{sec:audit}) fabricates process values for windows with no real observation; process-only excludes
+those windows entirely but is correspondingly small and class-imbalanced. Process-only Grouped-CV Macro-F1
+is markedly lower here than under the earlier in-sample threshold, reflecting a stricter calibration on
+that small training signal.
+\end{table*}
+
+\begin{table}[t]
+\caption{FPR/hour under \texttt{fbeta\_oof} (window-level, mean $\pm$ std over five seeds)}
+\label{tab:fpr}
+\centering
+\scriptsize
+\begin{tabular}{llcc}
+\toprule
+View & Model & Grouped CV & Day 6 \\
+\midrule
+network & CatBoost      & 105.4$\pm$3.0  & 1.64$\pm$0.70 \\
+network & Log.\ Reg.    & 169.5$\pm$20.8 & 1.02$\pm$0.21 \\
+network & XGBoost       & 114.8$\pm$2.5  & 1.88$\pm$0.75 \\
+network & Rand.\ Forest & 120.1$\pm$4.6  & 2.97$\pm$1.72 \\
+fusion  & CatBoost      & 86.2$\pm$4.2   & 0.08$\pm$0.18 \\
+fusion  & Log.\ Reg.    & 98.1$\pm$2.7   & 0.31$\pm$0.18 \\
+fusion  & XGBoost       & 91.3$\pm$4.0   & 0.39$\pm$0.00 \\
+fusion  & Rand.\ Forest & 94.3$\pm$4.5   & 0.39$\pm$0.00 \\
+process & CatBoost      & 720.8$\pm$1.1  & 9.11$\pm$6.07 \\
+process & Log.\ Reg.    & 719.7$\pm$0.1  & 0.00$\pm$0.00 \\
+process & Rand.\ Forest & 721.5$\pm$0.9  & 5.46$\pm$1.36 \\
+process & XGBoost       & 721.2$\pm$1.4  & 3.04$\pm$0.00 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[t]
+\caption{Day-5 temporal holdout under \texttt{fbeta\_oof} (train D1--4, test D5)\textsuperscript{a}}
+\label{tab:day5}
+\centering
+\scriptsize
+\begin{tabular}{llccc}
+\toprule
+View & Model & Macro-F1 & MCC & FPR/hour \\
+\midrule
+network & CatBoost      & 0.993$\pm$0.011 & 0.986$\pm$0.022 & 0.44$\pm$0.21 \\
+network & Log.\ Reg.    & 0.882$\pm$0.000 & 0.786$\pm$0.001 & 1.14$\pm$0.20 \\
+network & Rand.\ Forest & 0.999$\pm$0.001 & 0.998$\pm$0.001 & 0.99$\pm$0.50 \\
+network & XGBoost       & 0.998$\pm$0.001 & 0.996$\pm$0.001 & 1.55$\pm$0.44 \\
+fusion  & CatBoost      & 0.930$\pm$0.064 & 0.874$\pm$0.115 & 0.11$\pm$0.10 \\
+fusion  & Log.\ Reg.    & 0.884$\pm$0.000 & 0.790$\pm$0.000 & 0.00$\pm$0.00 \\
+fusion  & Rand.\ Forest & 1.000$\pm$0.000 & 1.000$\pm$0.000 & 0.18$\pm$0.00 \\
+fusion  & XGBoost       & 1.000$\pm$0.000 & 1.000$\pm$0.000 & 0.18$\pm$0.00 \\
+process & CatBoost      & 0.499$\pm$0.001 & $-$0.001$\pm$0.002 & 2.41$\pm$5.39 \\
+process & Log.\ Reg.    & 0.499$\pm$0.000 & 0.000$\pm$0.000 & 0.00$\pm$0.00 \\
+process & Rand.\ Forest & 0.499$\pm$0.000 & 0.000$\pm$0.000 & 0.00$\pm$0.00 \\
+process & XGBoost       & 0.499$\pm$0.000 & 0.000$\pm$0.000 & 0.00$\pm$0.00 \\
+\bottomrule
+\end{tabular}
+
+\vspace{2pt}
+\raggedright\footnotesize\textsuperscript{a}Train Days 1--4, test Day 5, threshold calibrated with the
+same grouped out-of-fold procedure as Table~\ref{tab:main}; not a slice of that table, since the
+train/test partition differs (Section III-C).
+\end{table}
+
+\begin{table}[t]
+\caption{Cumulative feature layers, CatBoost, Day 6, \texttt{fbeta\_oof}; mean $\pm$ std over five
+seeds\textsuperscript{a}}
+\label{tab:ablation}
+\centering
+\small
+\begin{tabular}{clccc}
+\toprule
+Cfg & Layers & Macro-F1 & MCC & FPR/hour \\
+\midrule
+A & L0             & 0.648$\pm$0.008 & 0.462$\pm$0.010 & 1.17$\pm$0.48 \\
+B & L0+L1          & 0.654$\pm$0.010 & 0.470$\pm$0.013 & 1.25$\pm$0.64 \\
+C & L0+L1+L2       & 0.647$\pm$0.011 & 0.461$\pm$0.012 & 1.17$\pm$1.11 \\
+D & L0+L1+L2+L3    & 0.663$\pm$0.020 & 0.483$\pm$0.024 & 0.08$\pm$0.18 \\
+\bottomrule
+\end{tabular}
+
+\vspace{2pt}
+\raggedright\footnotesize\textsuperscript{a}Trained on Days 1--4; a feature-layer diagnostic, not a
+slice of Table~\ref{tab:main} (Days 1--5). Uses the same leakage-exclusion list as the main pipeline,
+including explicit removal of \texttt{proc\_data\_valid}.
+\end{table}
+
+\begin{table}[t]
+\caption{Per-class P/R/F1, Day 6, CatBoost}
+\label{tab:perclass}
+\centering
+\scriptsize
+\setlength{\tabcolsep}{2.5pt}
+\begin{tabular}{lcccccccc}
+\toprule
+Class & Net P & Net R & Net F1 & Fus.\textsuperscript{a} P & Fus.\textsuperscript{a} R &
+Fus.\textsuperscript{a} F1 & Supp. \\
+\midrule
+BENIGN    & 0.701 & 0.998 & 0.824 & 0.687 & 1.000 & 0.814 & 4{,}603 \\
+STEALTHY  & 0.641 & 0.736 & 0.683 & 1.000 & 1.000 & 1.000 & 397 \\
+SPOOF     & 0.290 & 0.064 & 0.104 & 0.357 & 0.064 & 0.107 & 299 \\
+SETPOINT  & 1.000 & 0.051 & 0.096 & 1.000 & 0.050 & 0.095 & 253 \\
+SCAN      & 0.141 & 0.052 & 0.076 & 0.160 & 0.009 & 0.016 & 462 \\
+FLOOD     & 1.000 & 0.038 & 0.072 & 1.000 & 0.037 & 0.066 & 317 \\
+RWRITE    & 0.000 & 0.000 & 0.000 & 0.189 & 0.009 & 0.018 & 365 \\
+ENUM.     & 0.000 & 0.000 & 0.000 & 0.000 & 0.000 & 0.000 & 470 \\
+FUZZ      & 0.000 & 0.000 & 0.000 & 0.000 & 0.000 & 0.000 & 122 \\
+\midrule
+Macro     & 0.419 & 0.215 & 0.206 & 0.488 & 0.241 & 0.235 & 7{,}288 \\
+\bottomrule
+\end{tabular}
+
+\vspace{2pt}
+\raggedright\footnotesize\textsuperscript{a}Fusion is exploratory (Section~\ref{sec:audit}); STEALTHY's
+F1=1.000 reflects a collection artifact, not detection improvement. Multiclass predictions use standard
+argmax over predicted class probabilities, not a binary decision threshold, so the \texttt{fbeta\_oof}
+calibration in Section IV does not apply to this table.
+\end{table}
+
+\section{Limitations}
+\label{sec:limitations}
+
+Day 6 is not a confirmatory holdout---its anomalous process-only score is what triggered the audit in
+Section~\ref{sec:audit}, so it has already informed a pipeline revision. A future, genuinely frozen
+evaluation session (e.g.\ a sealed Day 7) would allow a confirmatory report. ``Shift'' here means
+within-testbed schedule shift: Days 1--6 share PLC, attacker host, topology, and tooling; Day 6 varies
+order, rate, and gaps, not infrastructure---none of our splits are cross-testbed.
+
+Streams are merged by nearest recorded timestamp rather than a hardware-synchronized clock; we have not
+confirmed inter-host clock synchronization (NTP/PTP) or measured the clock offset between the attacker,
+PLC, and capture hosts, nor documented the process-logger polling interval or the exact merge tolerance
+used to assign a polled observation to a 2-second window. Alignment error at the sub-window scale
+therefore cannot be bounded from the current release. This caveat applies to every claim that treats a
+process observation as contemporaneous with a given 2-second window, including the Q0-register findings
+in Sections~\ref{sec:audit}--D. If the polling interval and offset can be recovered from existing logs,
+they should be reported as concrete bounds in a future release.
+
+Process-logger activation and coverage were not synchronized with network capture: streams are
+timestamp-aligned once recorded, but the logger's start/stop times were set manually and did not match
+the capture window, so 79.9\% of attack windows have no real process observations, concentrated exactly
+in the classes (RWRITE, FLOOD, SETPOINT\_ATTACK) where process impact would be most informative. A
+\texttt{proc\_data\_valid}=1-only matched comparison, which would be the natural way to isolate fusion's
+effect, is not merely undone but structurally uninformative on this release: those three classes have
+zero such windows, and the remaining classes with real observations (SCAN, ENUMERATION, FUZZ, SPOOF) show
+process feature values indistinguishable from BENIGN, so the comparison would reduce to STEALTHY-only
+detection. RQ2 therefore requires re-collection with synchronized logging, not a different evaluation
+protocol on the current data (Section~\ref{sec:audit}).
+
+Attacker-host identity is confounded with the attack label: all attacks originate from one host, which
+network features could partly exploit as a stand-in for attack behavior; we have not run a
+cross-attacker-host evaluation. Multi-application coverage is not tested as a generalization axis, and
+RQ1's application-level split is not yet quantified: both applications contribute windows across all six
+days by collection design, and Table~\ref{tab:byday} quantifies distribution by day and attack class, but
+we do not report a per-application (traffic-light vs.\ conveyor-belt) window/episode breakdown, because
+the released window-level tables do not include an \texttt{application\_id} field that unambiguously
+assigns every window or episode to a physical application; we also do not report a
+leave-one-application-out evaluation. Future releases should add application-level metadata to support
+this analysis.
+
+Multiclass attribution is weak under schedule shift (Macro-F1 0.206--0.235, three classes at 0.000).
+Episode-grouped CV is within-testbed and within-script: repeated episodes of a scenario share script and
+parameters, so grouped-CV figures measure within-schedule generalization specifically; Day 6 and the
+Day-5 holdout only partially address order and temporal shift. Two of three applications are instrumented;
+the water-pump application is implemented but not yet captured. The threshold optimizes $F_\beta$
+($\beta=2$), not Macro-F1: a recall-favoring threshold can understate what a Macro-F1-optimized or
+fixed-0.5 threshold would show; Table~\ref{tab:perclass} gives per-class recall for Day 6 and
+Table~\ref{tab:main} will also report binary attack precision/recall at the same threshold
+(column pending script run; threshold already exists). The Day-5 holdout (Table~\ref{tab:day5}) and layer-wise ablation
+(Table~\ref{tab:ablation}) use the same \fbetaoof\ calibration as Table~\ref{tab:main} but a different
+train split (Days 1--4 rather than 1--5), so we report them as protocol-specific results rather than
+direct slices of the main table. The multiclass per-class breakdown (Table~\ref{tab:perclass}) uses
+argmax decisions, to which this binary threshold does not apply.
+
+\section{Conclusion}
+
+We presented a physical S7comm intrusion detection dataset---55{,}902 labeled windows aligning network
+capture, process state, and attack timelines by timestamp across six days, organized through a
+four-layer feature taxonomy---and a symmetric four-baseline benchmark under episode-grouped
+cross-validation, a Day-5 temporal holdout, and a session-disjoint Day-6 evaluation.
+
+\textbf{RQ1 (Coverage).} Table~\ref{tab:byday} shows all nine attack scenarios (eight released classes)
+represented across the six-day schedule, with per-class attack-window counts ranging from 532 (FUZZ) to
+1{,}405 (ENUMERATION) and every class present on Day 6; benign traffic spans startup, steady-state,
+shutdown, mode-change, and legitimate-engineering-write conditions rather than idle traffic alone. The
+release does not yet support a per-application breakdown of this coverage
+(Section~\ref{sec:limitations}).
+
+\textbf{RQ2 and RQ3.} The scientific content is in the gaps, not the peaks. Network-only in-distribution
+Macro-F1 (0.83--0.91) is uniform enough across models that it predicts neither the Day-6 result nor its
+ranking: the same in-distribution split separates models by less than 0.08 F1, while the Day-6 shift
+penalty ranges from 0.239 to 0.255 depending on the learner and, more importantly, depending on how the
+decision threshold is calibrated---an in-sample-threshold variant we discarded gave a visibly different
+ranking (Section IV). Fusion shows no single direction of effect: worse than network-only for CatBoost
+and Random Forest, better for XGBoost. A single-model, single-threshold report of either domain-shift
+robustness or fusion benefit would therefore have been misleading in either direction; only the full
+model$\times$threshold$\times$view matrix supports a defensible claim.
+
+We traced that finding to its cause rather than reporting it as a general property of fusion. The process
+logger was started manually and covered only part of each attack period; the resulting availability
+pattern first corrupted our own pipeline through a mask correlated with attack class, then, after that
+leak was closed, produced a perfect but meaningless F1 on the one class whose process signature survived.
+Both are data-collection artifacts, and Day 6---the split whose anomalous score first surfaced
+them---is reported as an exploratory, diagnostic-informed evaluation rather than a clean holdout.
+
+\textbf{Future work.} A \texttt{proc\_data\_valid}=1-only matched comparison, our initial plan for
+validating fusion, is shown in Section~\ref{sec:audit} to be uninformative here, since three classes have
+no real-observation windows and the rest are indistinguishable from BENIGN outside STEALTHY. The priority
+is re-collecting with the logger running for the full session and with measured inter-host clock offsets,
+paired with a frozen, previously unseen evaluation session. Beyond that: leave-one-application-out and
+cross-attacker-host evaluations; the water-pump application; OPC-UA/Web-SCADA channels; an episode-level
+alarm-burden metric; sequence-model baselines.
+
+\textbf{Availability.} Extracted feature views (network, process, fusion), split definitions
+(\texttt{episode\_id}/\texttt{session\_id} assignments), the preprocessing code
+(\texttt{merge\_dataset.py}, \texttt{train\_ml.py}), and a data card documenting window size, stride,
+label precedence, and clock-offset policy are available to reviewers at submission via a linked, directly
+accessible repository (no manual approval step), identified by a fixed code commit. Full PCAP/PCAPNG
+release follows acceptance due to \textbf{[FILE SIZE / INSTITUTIONAL POLICY / PII --- fill in reason]};
+a sanitized full-session PCAP (not only a sample) is included in the reviewer package.
+
+\begin{thebibliography}{13}
+\bibitem{b1} A. Termanini, H. Bourdoucen, D. Al-Abri, and A. Al Maashri, ``Intrusion Detection Datasets
+for IIoT and ICS: A Taxonomic Review with a Decision-Aid Scoring Rubric,'' \emph{Sensors}, vol. 26, no.
+13, Art. no. 4099, 2026.
+\bibitem{b2} A. Kleinmann and A. Wool, ``Accurate Modeling of the Siemens S7 SCADA Protocol for Intrusion
+Detection and Digital Forensics,'' \emph{J. Digital Forensics, Security and Law}, vol. 9, no. 2, pp.
+37--50, 2014.
+\bibitem{b3} N. R. Rodofile, T. Schmidt, S. T. Sherry, C. Djamaludin, K. Radke, and E. Foo, ``Process
+Control Cyber-Attacks and Labelled Datasets on S7Comm Critical Infrastructure,'' in \emph{Information
+Security and Privacy (ACISP 2017)}, LNCS vol. 10343, Springer, 2017, pp. 452--459.
+\bibitem{b4} B. Al-Duwairi, A. Shatnawi, A. Al-Hammouri, and M. Ababneh, ``Dataset of SCADA traffic
+captures from a medical waste incinerator with injected cyberattacks,'' \emph{Data in Brief}, vol. 63,
+Art. no. 112294, 2025.
+\bibitem{b5} A. L. Perales G\'omez, L. Fern\'andez Maim\'o, A. Huertas Celdr\'an, F. J. Garc\'{i}a
+Clemente, C. Cadenas Sarmiento, C. J. Del Canto Masa, and R. M\'endez Nistal, ``On the Generation of
+Anomaly Detection Datasets in Industrial Control Systems,'' \emph{IEEE Access}, vol. 7, pp.
+177460--177473, 2019.
+\bibitem{b6} A. Dehlaghi-Ghadim, M. Helali Moghadam, A. Balador, and H. Hansson, ``Anomaly Detection
+Dataset for Industrial Control Systems,'' \emph{IEEE Access}, vol. 11, pp. 107982--107996, 2023.
+\bibitem{b7} A. P. Mathur and N. O. Tippenhauer, ``SWaT: A Water Treatment Testbed for Research and
+Training on ICS Security,'' in \emph{CySWater}, 2016, pp. 31--36.
+\bibitem{b8} C. M. Ahmed, V. R. Palleti, and A. P. Mathur, ``WADI: A Water Distribution Testbed for
+Research in the Design of Secure Cyber Physical Systems,'' in \emph{CySWATER'17}, ACM, 2017, pp. 25--28.
+\bibitem{b9} T. M. Chen, ``Stuxnet, the real start of cyber warfare? [Editor's Note],'' \emph{IEEE
+Network}, vol. 24, no. 2, pp. 2--3, 2010.
+\bibitem{b10} N. Kellerer, G. Sanchez Collado, H. Alberto, V. Hagenmeyer, and G. Elbez, ``S7 Data
+Modification Attacks using an Industrial Control System Testbed,'' Zenodo, May 2025. doi:
+10.5281/zenodo.15373938.
+\bibitem{b11} N. Kellerer, G. Sanchez, H. Alberto, V. Hagenmeyer, and G. Elbez, ``Attacks on the Siemens
+S7 Protocol Using an Industrial Control System Testbed,'' in \emph{Proc. 16th ACM Int. Conf. Future and
+Sustainable Energy Systems (e-Energy '25)}, 2025, pp. 770--779. doi: 10.1145/3679240.3734645.
+\bibitem{b12} L. Shafir, A. Elyashar, J. Cohen, M. Zeitoun, M. Holipsky, B. Yaakov, E. Aliev, R. Puzis, Y.
+Harel, and A. Wool, ``ICS-MMOC3: Exploring Operational Faults and Cyber Attacks with a Realistic
+Multi-Modal Power Generation ICS Dataset,'' in \emph{Proc. 12th ACM Cyber-Physical System Security
+Workshop (CPSS 2026)}, 2026, pp. 63--76. doi: 10.1145/3775042.3807883.
+\bibitem{b13} X. Zhou, Z. Cheng, C. Wang, S. Wang, C. Tao, Z. Zhou, et al., ``A dataset collected in
+real-world industrial control systems for network attack detection,'' \emph{Scientific Data}, vol. 13,
+Art. no. 399, 2026. doi: 10.1038/s41597-026-06738-x.
+\end{thebibliography}
+
+\end{document}
