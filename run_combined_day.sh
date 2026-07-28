@@ -40,6 +40,14 @@ SESSION_ID="${SESSION_ID:-bt_s1}"
 HOST_ID="${HOST_ID:-combined_host}"
 PROFILE="${PROFILE:-standard}"   # standard | extended_300k
 
+# IP nguồn riêng cho các script tấn công (tuỳ chọn). Để trống = attacker dùng
+# chung IP với HMI/tag-logger (traffic PLC thấy 1 nguồn duy nhất).
+# Đặt giá trị (vd 192.168.210.32) sau khi đã gán IP phụ cho NIC bằng lệnh:
+#   netsh interface ip add address "<Tên NIC>" 192.168.210.32 255.255.255.0
+# thì mọi kết nối tấn công sẽ bind IP này làm nguồn -> PLC/switch thấy 2 IP
+# khác nhau giống hệt kịch bản chạy 2 máy (run_day_bangtruyen.sh).
+ATTACKER_SRC_IP="${ATTACKER_SRC_IP:-}"
+
 CAPTURE_DIR="${CAPTURE_DIR:-captures}"
 LOG_DIR="${LOG_DIR:-logs}"
 LABEL_DIR="${LABEL_DIR:-labels}"
@@ -68,6 +76,23 @@ COOLDOWN_S="${COOLDOWN_S:-300}"         # 5 phút cooldown cuối ngày
 S7_FLOOD_THREADS="${S7_FLOOD_THREADS:-3}"   # tối đa 3 để dành slot cho logger
 SYN_FLOOD_THREADS="${SYN_FLOOD_THREADS:-10}"
 
+# Số lần lặp episode mỗi ngày (standard: 3 lần slow/normal/fast xoay vòng)
+REPS_DAY2="${REPS_DAY2:-3}"
+REPS_DAY3="${REPS_DAY3:-3}"
+REPS_DAY4="${REPS_DAY4:-3}"
+REPS_DAY5="${REPS_DAY5:-3}"
+
+# Day 6 OOD holdout — số chu kỳ lặp qua toàn bộ 9 kịch bản + range thời lượng theo nhóm
+DAY6_CYCLES="${DAY6_CYCLES:-1}"
+DAY6_GAP_MIN="${DAY6_GAP_MIN:-120}"
+DAY6_GAP_MAX="${DAY6_GAP_MAX:-900}"
+DAY6_SCANENUM_MIN="${DAY6_SCANENUM_MIN:-180}"
+DAY6_SCANENUM_MAX="${DAY6_SCANENUM_MAX:-360}"
+DAY6_INTEGRITY_MIN="${DAY6_INTEGRITY_MIN:-180}"
+DAY6_INTEGRITY_MAX="${DAY6_INTEGRITY_MAX:-360}"
+DAY6_AVAIL_MIN="${DAY6_AVAIL_MIN:-180}"
+DAY6_AVAIL_MAX="${DAY6_AVAIL_MAX:-360}"
+
 # File tạm để pause/resume HMI poll
 HMI_PAUSE_FILE="/tmp/hmi_pause_$$"
 TAG_LOGGER_PID=""
@@ -89,6 +114,7 @@ Options:
   --iface NIC       TShark interface (run tshark -D to list, e.g. 3 or eth0)
   --session ID      Session ID (default: bt_s1)
   --profile P       standard | extended_300k
+  --attacker-src-ip IP  IP phụ để attacker bind làm nguồn (PLC thấy 2 IP như 2 máy)
   --no-capture      Skip TShark
   --no-preflight    Skip preflight check
 EOF
@@ -105,6 +131,7 @@ while [[ $# -gt 0 ]]; do
         --iface)      CAPTURE_IFACE="$2"; shift 2 ;;
         --session)    SESSION_ID="$2";    shift 2 ;;
         --profile)    PROFILE="$2";       shift 2 ;;
+        --attacker-src-ip) ATTACKER_SRC_IP="$2"; shift 2 ;;
         --no-capture) NO_CAPTURE=1;       shift ;;
         --no-preflight) NO_PREFLIGHT=1;   shift ;;
         -h|--help)    usage; exit 0 ;;
@@ -119,12 +146,22 @@ done
 [[ "$DAY" =~ ^[1-6]$ ]] || { echo "[ERROR] --day must be 1..6" >&2; exit 1; }
 
 # Extended profile overrides
+# Cùng khối lượng thời gian với bản 2 máy run_day_bangtruyen.sh (tổng ~177h/6 ngày,
+# nhắm ~300k window 2s), chỉ chạy trên 1 máy + switch/SPAN port để bắt được cả 2 chiều.
 if [[ "$PROFILE" == "extended_300k" ]]; then
-    D1_DUR="72000"; D2_DUR="28800"; D3_DUR="28800"
-    D4_DUR="28800"; D5_DUR="21600"; D6_DUR="36000"
-    DUR_SLOW="600"; DUR_NORMAL="480"; DUR_FAST="360"
-    DUR_STEALTHY_NORMAL="900"
-    EPISODE_GAP="600"; WARMUP_S="300"; COOLDOWN_S="600"
+    D1_DUR="72000"; D2_DUR="100800"; D3_DUR="103200"
+    D4_DUR="158400"; D5_DUR="115200"; D6_DUR="90000"
+    DUR_SLOW="1800"; DUR_NORMAL="3600"; DUR_FAST="360"
+    DUR_STEALTHY_NORMAL="6600"
+    EPISODE_GAP="1200"; WARMUP_S="3600"; COOLDOWN_S="3600"
+
+    REPS_DAY2="12"; REPS_DAY3="10"; REPS_DAY4="12"; REPS_DAY5="10"
+
+    DAY6_CYCLES="3"
+    DAY6_GAP_MIN="600"; DAY6_GAP_MAX="1800"
+    DAY6_SCANENUM_MIN="1200"; DAY6_SCANENUM_MAX="2400"
+    DAY6_INTEGRITY_MIN="900"; DAY6_INTEGRITY_MAX="1800"
+    DAY6_AVAIL_MIN="600"; DAY6_AVAIL_MAX="1200"
 fi
 
 mkdir -p "$CAPTURE_DIR" "$LOG_DIR" "$LABEL_DIR"
@@ -424,6 +461,24 @@ resume_hmi() { rm -f "$HMI_PAUSE_FILE";  log "[hmi] RESUMED"; }
 #  ATTACK SCRIPTS — inline Python processes
 # =============================================================================
 
+# Chèn vào đầu mỗi script tấn công: nếu ATTACKER_SRC_IP được set, mọi socket
+# (raw TCP lẫn snap7 — python-snap7 dùng socket.socket() thuần Python bên trong)
+# sẽ bind IP này làm nguồn trước khi connect, để PLC/switch thấy 2 IP khác nhau
+# cho benign (HMI) và attack, giống hệt khi chạy 2 máy riêng.
+read -r -d '' SRC_BIND_PREAMBLE <<'PYSRC' || true
+import os as _os, socket as _socket
+_SRC_IP = _os.environ.get("ATTACKER_SRC_IP", "")
+if _SRC_IP:
+    _orig_connect = _socket.socket.connect
+    def _bound_connect(self, address, _orig=_orig_connect, _src=_SRC_IP):
+        try:
+            self.bind((_src, 0))
+        except OSError:
+            pass
+        return _orig(self, address)
+    _socket.socket.connect = _bound_connect
+PYSRC
+
 start_attack() {
     local scenario="$1"
     local rate="$2"       # slow | normal | fast
@@ -435,13 +490,14 @@ start_attack() {
         fast)   ATTACK_PROFILE="extended_300k"  ;;
         *)      ATTACK_PROFILE="standard"       ;;
     esac
-    export ATTACK_PROFILE ATTACK_EVENT_FILE ATTACK_EPISODE_ID="$episode_id"
+    export ATTACK_PROFILE ATTACK_EVENT_FILE ATTACK_EPISODE_ID="$episode_id" ATTACKER_SRC_IP
 
     case "$scenario" in
 
         SCAN_PORT)
 "$PY_CMD" -u - <<PYEOF &
 import os, random, socket, time
+$SRC_BIND_PREAMBLE
 TARGET = "$TARGET_IP"
 RATE = "$rate"
 SLEEP = {"slow": (2.0, 6.0), "normal": (0.4, 1.5), "fast": (0.05, 0.3)}[RATE]
@@ -464,6 +520,7 @@ try:
     from snap7.type import Areas
 except ImportError:
     from snap7.types import Areas
+$SRC_BIND_PREAMBLE
 TARGET="$TARGET_IP"; RACK=int("$RACK"); SLOT=int("$SLOT"); RATE="$rate"
 SLEEP = {"slow": (3.0, 8.0), "normal": (0.15, 0.5), "fast": (0.03, 0.15)}[RATE]
 c = snap7.client.Client(); n = 0
@@ -496,6 +553,7 @@ except ImportError:
     from snap7.types import Areas
 from snap7.util import get_bool, set_bool
 from attack_event_logger import log_attack_event
+$SRC_BIND_PREAMBLE
 
 TARGET="$TARGET_IP"; RACK=int("$RACK"); SLOT=int("$SLOT"); RATE="$rate"
 SLEEP = {"slow": (2.0, 6.0), "normal": (0.15, 0.45), "fast": (0.03, 0.12)}[RATE]
@@ -535,6 +593,7 @@ except ImportError:
     from snap7.types import Areas
 from snap7.util import get_dint, set_dint
 from attack_event_logger import log_attack_event
+$SRC_BIND_PREAMBLE
 
 TARGET="$TARGET_IP"; RACK=int("$RACK"); SLOT=int("$SLOT"); RATE="$rate"
 SLEEP = {"slow": (15.0, 40.0), "normal": (1.5, 5.0), "fast": (0.3, 1.0)}[RATE]
@@ -583,6 +642,7 @@ except ImportError:
     from snap7.types import Areas
 from snap7.util import get_bool, set_bool
 from attack_event_logger import log_attack_event
+$SRC_BIND_PREAMBLE
 
 TARGET="$TARGET_IP"; RACK=int("$RACK"); SLOT=int("$SLOT"); RATE="$rate"
 SLEEP = {"slow": (8.0, 20.0), "normal": (0.4, 1.5), "fast": (0.1, 0.4)}[RATE]
@@ -629,6 +689,7 @@ except ImportError:
     from snap7.types import Areas
 from snap7.util import get_bool, set_bool
 from attack_event_logger import log_attack_event
+$SRC_BIND_PREAMBLE
 
 TARGET="$TARGET_IP"; RACK=int("$RACK"); SLOT=int("$SLOT"); RATE="$rate"
 SLEEP = {"slow": (60.0, 120.0), "normal": (15.0, 45.0), "fast": (3.0, 10.0)}[RATE]
@@ -660,6 +721,7 @@ PYEOF
 "$PY_CMD" -u - <<PYEOF &
 import os, random, threading, time
 import snap7
+$SRC_BIND_PREAMBLE
 
 TARGET="$TARGET_IP"; RACK=int("$RACK"); SLOT=int("$SLOT"); RATE="$rate"
 # Tối đa 3 threads để dành slot cho tag_logger + HMI
@@ -692,6 +754,7 @@ PYEOF
         SYN_FLOOD)
 "$PY_CMD" -u - <<PYEOF &
 import os, random, socket, threading, time
+$SRC_BIND_PREAMBLE
 
 TARGET="$TARGET_IP"; RATE="$rate"
 N_THR = {"slow": 2, "normal": 8, "fast": 15}[RATE]
@@ -716,6 +779,7 @@ PYEOF
         PROTOCOL_FUZZ)
 "$PY_CMD" -u - <<PYEOF &
 import os, random, socket, time
+$SRC_BIND_PREAMBLE
 
 TARGET="$TARGET_IP"; RATE="$rate"
 SLEEP = {"slow": (2.0, 8.0), "normal": (0.1, 0.5), "fast": (0.02, 0.15)}[RATE]
@@ -800,6 +864,12 @@ episode_gap() {
     label "BENIGN_NORMAL" "END"   "${SESSION_ID}:day${DAY}:BENIGN:gap" ""
 }
 
+# Xoay vòng slow/normal/fast qua N lần lặp (N > 3 với extended_300k)
+rate_for_rep() {
+    local rates=(slow normal fast)
+    echo "${rates[$(( ($1 - 1) % 3 ))]}"
+}
+
 # =============================================================================
 #  LỊCH 6 NGÀY
 # =============================================================================
@@ -812,80 +882,98 @@ run_day1() {
 }
 
 run_day2() {
-    log "=== DAY 2: RECONNAISSANCE === (${D2_DUR}s)"
+    log "=== DAY 2: RECONNAISSANCE === (${D2_DUR}s, ${REPS_DAY2} reps)"
     wait_s "$WARMUP_S" "warmup"
-    local rep=1
-    for rate in slow normal fast; do
+    local rep rate
+    for ((rep = 1; rep <= REPS_DAY2; rep++)); do
+        rate="$(rate_for_rep "$rep")"
         run_episode "SCAN_PORT"  "$rate" "$rep" "$DUR_SLOW"  # SCAN không cần dài
         episode_gap
         run_episode "ENUM_TAGS"  "$rate" "$rep" "$DUR_NORMAL"
         episode_gap
-        rep=$((rep + 1))
     done
     wait_s "$COOLDOWN_S" "cooldown"
 }
 
 run_day3() {
-    log "=== DAY 3: INTEGRITY PART 1 (RWRITE + SETPOINT) === (${D3_DUR}s)"
+    log "=== DAY 3: INTEGRITY PART 1 (RWRITE + SETPOINT) === (${D3_DUR}s, ${REPS_DAY3} reps)"
     wait_s "$WARMUP_S" "warmup"
-    local rep=1
-    for rate in slow normal fast; do
+    local rep rate
+    for ((rep = 1; rep <= REPS_DAY3; rep++)); do
+        rate="$(rate_for_rep "$rep")"
         run_episode "RWRITE_BURST"     "$rate" "$rep" "$DUR_NORMAL"
         episode_gap
         run_episode "SETPOINT_ATTACK"  "$rate" "$rep" "$DUR_NORMAL"
         episode_gap
-        rep=$((rep + 1))
     done
     wait_s "$COOLDOWN_S" "cooldown"
 }
 
 run_day4() {
-    log "=== DAY 4: INTEGRITY PART 2 (SPOOF + STEALTHY) === (${D4_DUR}s)"
+    log "=== DAY 4: INTEGRITY PART 2 (SPOOF + STEALTHY) === (${D4_DUR}s, ${REPS_DAY4} reps)"
     wait_s "$WARMUP_S" "warmup"
-    local rep=1
-    for rate in slow normal fast; do
+    local rep rate
+    for ((rep = 1; rep <= REPS_DAY4; rep++)); do
+        rate="$(rate_for_rep "$rep")"
         run_episode "SENSOR_SPOOF"   "$rate" "$rep" "$DUR_NORMAL"
         episode_gap
         run_episode "STEALTHY_WRITE" "$rate" "$rep" "$DUR_STEALTHY_NORMAL"
         episode_gap
-        rep=$((rep + 1))
     done
     wait_s "$COOLDOWN_S" "cooldown"
 }
 
 run_day5() {
-    log "=== DAY 5: AVAILABILITY (S7_FLOOD + SYN_FLOOD + FUZZ) === (${D5_DUR}s)"
+    log "=== DAY 5: AVAILABILITY (S7_FLOOD + SYN_FLOOD + FUZZ) === (${D5_DUR}s, ${REPS_DAY5} reps)"
     wait_s "$WARMUP_S" "warmup"
-    local rep=1
-    for rate in slow normal fast; do
+    local rep rate
+    for ((rep = 1; rep <= REPS_DAY5; rep++)); do
+        rate="$(rate_for_rep "$rep")"
         run_episode "S7_FLOOD"      "$rate" "$rep" "$DUR_SLOW"
         episode_gap
         run_episode "SYN_FLOOD"     "$rate" "$rep" "$DUR_SLOW"
         episode_gap
         run_episode "PROTOCOL_FUZZ" "$rate" "$rep" "$DUR_NORMAL"
         episode_gap
-        rep=$((rep + 1))
     done
     wait_s "$COOLDOWN_S" "cooldown"
 }
 
+# Thời lượng episode Day 6 theo nhóm kịch bản (recon nhanh hơn scan/enum,
+# availability nên ngắn hơn để không đè PLC lâu, integrity ở giữa)
+day6_duration_for() {
+    case "$1" in
+        SCAN_PORT|ENUM_TAGS)
+            rand_range "$DAY6_SCANENUM_MIN" "$DAY6_SCANENUM_MAX" ;;
+        RWRITE_BURST|SETPOINT_ATTACK|SENSOR_SPOOF|STEALTHY_WRITE)
+            rand_range "$DAY6_INTEGRITY_MIN" "$DAY6_INTEGRITY_MAX" ;;
+        S7_FLOOD|SYN_FLOOD|PROTOCOL_FUZZ)
+            rand_range "$DAY6_AVAIL_MIN" "$DAY6_AVAIL_MAX" ;;
+        *)
+            rand_range "$DAY6_SCANENUM_MIN" "$DAY6_SCANENUM_MAX" ;;
+    esac
+}
+
+day6_gap() { rand_range "$DAY6_GAP_MIN" "$DAY6_GAP_MAX"; }
+
 run_day6() {
-    log "=== DAY 6: OOD ROBUSTNESS HOLDOUT === (${D6_DUR}s)"
-    # Shuffle thứ tự kịch bản, rate thấp hơn, gap ngẫu nhiên rộng hơn
+    log "=== DAY 6: OOD ROBUSTNESS HOLDOUT === (${D6_DUR}s target, ${DAY6_CYCLES} cycles)"
+    # Mỗi cycle: shuffle lại thứ tự 9 kịch bản, rate thấp hơn, gap ngẫu nhiên rộng hơn
     local all_scenarios="SCAN_PORT ENUM_TAGS RWRITE_BURST SETPOINT_ATTACK SENSOR_SPOOF STEALTHY_WRITE S7_FLOOD SYN_FLOOD PROTOCOL_FUZZ"
-    local shuffled
-    shuffled=$("$PY_CMD" -c "import random,sys; s=sys.argv[1].split(); random.shuffle(s); print(' '.join(s))" "$all_scenarios")
     wait_s "$WARMUP_S" "warmup"
-    local idx=1
-    for scenario in $shuffled; do
-        run_episode "$scenario" "slow" "$idx" "$(rand_range 180 360)"
-        # Gap ngẫu nhiên 2-15 phút (OOD robustness)
-        local gap
-        gap="$(rand_range 120 900)"
-        label "BENIGN_NORMAL" "START" "${SESSION_ID}:day6:BENIGN:gap${idx}" "ood_gap=${gap}s"
-        wait_s "$gap" "ood gap $idx"
-        label "BENIGN_NORMAL" "END"   "${SESSION_ID}:day6:BENIGN:gap${idx}" ""
-        idx=$((idx + 1))
+    local idx=1 cycle shuffled scenario dur gap
+    for ((cycle = 1; cycle <= DAY6_CYCLES; cycle++)); do
+        shuffled=$("$PY_CMD" -c "import random,sys; s=sys.argv[1].split(); random.shuffle(s); print(' '.join(s))" "$all_scenarios")
+        log "[day6] cycle ${cycle}/${DAY6_CYCLES}: $shuffled"
+        for scenario in $shuffled; do
+            dur="$(day6_duration_for "$scenario")"
+            run_episode "$scenario" "slow" "$idx" "$dur"
+            gap="$(day6_gap)"
+            label "BENIGN_NORMAL" "START" "${SESSION_ID}:day6:BENIGN:gap${idx}" "ood_gap=${gap}s"
+            wait_s "$gap" "ood gap $idx"
+            label "BENIGN_NORMAL" "END"   "${SESSION_ID}:day6:BENIGN:gap${idx}" ""
+            idx=$((idx + 1))
+        done
     done
     wait_s "$COOLDOWN_S" "cooldown"
 }
