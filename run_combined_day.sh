@@ -6,10 +6,10 @@
 #   1. Tag logger khởi động TRƯỚC tất cả (5s warm-up) và chạy LIÊN TỤC
 #      trong suốt ngày — đảm bảo process data trong MỌI attack window.
 #   2. Benign HMI 5 profile tự động xoay vòng (normal/sparse/burst/maintenance/idle).
-#   3. S7_FLOOD dùng tối đa 3 threads → PLC còn đủ slot cho tag logger.
-#   4. HMI poll tạm dừng khi S7_FLOOD nhờ file pause (tag logger vẫn chạy).
-#   5. Nhãn ghi thời gian thực, không post-hoc.
-#   6. Restore PLC sau mỗi episode integrity attack.
+#   3. S7_FLOOD dùng tối đa 3 threads → PLC còn đủ slot cho tag logger + HMI,
+#      HMI vẫn poll xuyên suốt kể cả khi flood đang chạy (giống PLC/2-máy thật).
+#   4. Nhãn ghi thời gian thực, không post-hoc.
+#   5. Restore PLC sau mỗi episode integrity attack.
 #
 # Usage:
 #   bash run_combined_day.sh --day 1 --iface 3
@@ -93,8 +93,6 @@ DAY6_INTEGRITY_MAX="${DAY6_INTEGRITY_MAX:-360}"
 DAY6_AVAIL_MIN="${DAY6_AVAIL_MIN:-180}"
 DAY6_AVAIL_MAX="${DAY6_AVAIL_MAX:-360}"
 
-# File tạm để pause/resume HMI poll
-HMI_PAUSE_FILE="/tmp/hmi_pause_$$"
 TAG_LOGGER_PID=""
 HMI_PID=""
 TSHARK_PID=""
@@ -175,7 +173,6 @@ export DAY ATTACK_PROFILE="standard"
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 cleanup() {
     echo "[cleanup] Stopping all processes..."
-    rm -f "$HMI_PAUSE_FILE"
     for pid in "${ALL_PIDS[@]:-}"; do
         kill "$pid" 2>/dev/null || true
     done
@@ -346,11 +343,13 @@ start_tag_logger() {
 }
 
 # =============================================================================
-#  HMI BENIGN — 5 profiles tự động xoay vòng, pause khi S7_FLOOD
+#  HMI BENIGN — 5 profiles tự động xoay vòng, chạy xuyên suốt kể cả khi S7_FLOOD
+#  đang chạy (PLC thật không chủ động ngắt session HMI đã kết nối chỉ vì có
+#  connection request mới bị từ chối — chỉ từ chối cái mới, không đá cái cũ).
+#  S7_FLOOD_THREADS đã giới hạn (3) để chừa slot cho tag_logger + HMI.
 # =============================================================================
 start_hmi_diverse() {
     log "[hmi] Starting diverse HMI poll (5 profiles, auto-rotate)"
-    local pause_file="$HMI_PAUSE_FILE"
     "$PY_CMD" -u - <<PYEOF &
 import os, random, time, sys
 import snap7
@@ -363,7 +362,6 @@ from snap7.util import set_bool
 TARGET  = "$TARGET_IP"
 RACK    = int("$RACK")
 SLOT    = int("$SLOT")
-PAUSE_F = "$pause_file"
 
 # 5 profiles: (name, min_interval, max_interval, weight)
 PROFILES = [
@@ -392,11 +390,6 @@ print(f"[HMI] profile={profile}", flush=True)
 n = 0
 
 while True:
-    # Pause khi S7_FLOOD đang chạy
-    if os.path.exists(PAUSE_F):
-        time.sleep(1.0)
-        continue
-
     # Đổi profile định kỳ
     if time.time() >= switch_at:
         profile = pick_profile()
@@ -453,9 +446,6 @@ PYEOF
     ALL_PIDS+=("$HMI_PID")
     log "[hmi] Started PID=$HMI_PID"
 }
-
-pause_hmi()  { touch "$HMI_PAUSE_FILE";  log "[hmi] PAUSED"; }
-resume_hmi() { rm -f "$HMI_PAUSE_FILE";  log "[hmi] RESUMED"; }
 
 # =============================================================================
 #  ATTACK SCRIPTS — inline Python processes
@@ -820,14 +810,6 @@ needs_restore() {
     esac
 }
 
-# Kịch bản cần tạm dừng HMI (S7_FLOOD chiếm slots)
-needs_hmi_pause() {
-    case "$1" in
-        S7_FLOOD) return 0 ;;
-        *) return 1 ;;
-    esac
-}
-
 run_episode() {
     local scenario="$1"
     local rate="$2"
@@ -835,10 +817,6 @@ run_episode() {
     local duration_s="$4"
     local ep
     ep="$(ep_id "$scenario" "$rate" "$rep")"
-
-    if needs_hmi_pause "$scenario"; then
-        pause_hmi
-    fi
 
     label "$scenario" "START" "$ep" "rate=$rate rep=$rep dur=${duration_s}s"
     start_attack "$scenario" "$rate" "$ep"
@@ -849,9 +827,6 @@ run_episode() {
 
     if needs_restore "$scenario"; then
         restore_plc
-    fi
-    if needs_hmi_pause "$scenario"; then
-        resume_hmi
     fi
 
     label "$scenario" "END" "$ep" "rate=$rate rep=$rep"
