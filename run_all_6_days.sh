@@ -24,6 +24,7 @@ SESSION_ID="${SESSION_ID:-bt_s1}"
 PROFILE="standard"
 DAYS="1 2 3 4 5 6"
 INTER_DAY_GAP="${INTER_DAY_GAP:-60}"   # giây nghỉ giữa các ngày
+ATTACKER_SRC_IP="${ATTACKER_SRC_IP:-}"
 
 [[ -f testbed.conf ]] && source ./testbed.conf
 
@@ -44,6 +45,7 @@ Options:
   --days "1 2 3..."  Danh sách ngày muốn chạy (default: 1 2 3 4 5 6)
   --profile P        standard | extended_300k
   --gap N            Giây nghỉ giữa các ngày (default: 60)
+  --attacker-src-ip IP  IP phụ để attacker bind làm nguồn (PLC thấy 2 IP như 2 máy)
   --no-capture       Skip TShark (capture từ thiết bị ngoài)
   --no-preflight     Skip preflight check
 
@@ -70,6 +72,7 @@ while [[ $# -gt 0 ]]; do
         --profile)    PROFILE="$2";      shift 2 ;;
         --days)       DAYS="$2";         shift 2 ;;
         --gap)        INTER_DAY_GAP="$2"; shift 2 ;;
+        --attacker-src-ip) ATTACKER_SRC_IP="$2"; shift 2 ;;
         --no-capture) EXTRA_ARGS="$EXTRA_ARGS --no-capture"; shift ;;
         --no-preflight) EXTRA_ARGS="$EXTRA_ARGS --no-preflight"; shift ;;
         -h|--help)    usage; exit 0 ;;
@@ -94,6 +97,7 @@ printf "║  Session : %-49s ║\n" "$SESSION_ID"
 printf "║  Days    : %-49s ║\n" "$DAYS"
 printf "║  Profile : %-49s ║\n" "$PROFILE"
 printf "║  Iface   : %-49s ║\n" "${IFACE:-none (--no-capture)}"
+printf "║  Atk IP  : %-49s ║\n" "${ATTACKER_SRC_IP:-none (chung IP với HMI)}"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo ""
 
@@ -137,6 +141,7 @@ for DAY in $DAYS; do
         --profile "$PROFILE"
     )
     [[ -n "$IFACE" ]]                   && CMD+=(--iface "$IFACE")
+    [[ -n "$ATTACKER_SRC_IP" ]]         && CMD+=(--attacker-src-ip "$ATTACKER_SRC_IP")
     [[ "$EXTRA_ARGS" == *no-capture* ]] && CMD+=(--no-capture)
     [[ "$EXTRA_ARGS" == *no-preflight* ]] && CMD+=(--no-preflight)
     # Preflight chỉ cần ngày đầu tiên
