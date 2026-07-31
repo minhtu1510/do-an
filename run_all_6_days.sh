@@ -9,7 +9,8 @@
 #   bash run_all_6_days.sh --iface 3 --days 2 3 4     # chỉ chạy ngày chọn
 #   bash run_all_6_days.sh --iface 3 --profile extended_300k
 #
-# Nên chạy vào ban đêm (toàn bộ mất ~16-20 giờ profile standard).
+# Nên chạy qua đêm + sáng hôm sau (toàn bộ mất ~23-24 giờ profile standard,
+# sau khi tăng D2-D6_DUR lên 4h/ngày để đủ mẫu mỗi lớp tấn công).
 # Log toàn bộ ra file để xem lại:
 #   bash run_all_6_days.sh --iface 3 2>&1 | tee collection_run.log
 # =============================================================================
