@@ -1,6 +1,15 @@
 version: 1
 day: 8
-title: Multi-surface industrial communication scenarios
+title: OPC UA attack surface scenarios
+description: >
+  Day 8 is scoped to OPC UA only -- the controller OPC UA server and
+  Web-SCADA gateway. The S7comm scenarios that used to be re-listed here
+  for continuity now live solely in the Day 1-6 dataset (see
+  run_day_bangtruyen.sh); Web/API, logic-aware, and cross-layer scenarios
+  were removed because they either had no controlled executor in this
+  testbed or conceptually duplicated attacks_ext/logic_aware.py and
+  attacks_ext/kill_chain.py (Day 7). Keeping this catalog OPC-UA-only
+  avoids double-counting the same attack idea across Day 7/Day 8.
 defaults:
   target_ip_env: TARGET_IP
   opc_url_env: OPC_URL
@@ -10,94 +19,9 @@ defaults:
 # MITRE ATT&CK for ICS matrix (attack.mitre.org/matrices/ics/), not guessed.
 # Benign scenarios intentionally carry no mitre_technique — they are not attacks.
 groups:
-  s7_traditional:
-    title: Nhom A - S7 truyen thong
-    description: Existing S7comm attack labels retained for continuity with prior dataset days.
-    scenarios:
-      - id: SCAN_PORT
-        label: SCAN_PORT
-        objective: Discover exposed PLC/HMI industrial services.
-        protocol: S7comm/TCP
-        mitre_technique: T0846
-        mitre_technique_name: Remote System Discovery
-        safe_to_execute: false
-        requires_manual_gate: true
-        preconditions: [Lab network isolation, Capture enabled, Target reachable on TCP/102]
-        evidence: [TCP SYN/ACK profile, Open port list, Timeline label]
-      - id: ENUM_TAGS
-        label: ENUM_TAGS
-        objective: Enumerate memory/tag ranges over S7comm.
-        protocol: S7comm
-        mitre_technique: T0861
-        mitre_technique_name: Point & Tag Identification
-        safe_to_execute: false
-        requires_manual_gate: true
-        preconditions: [S7 client access, Known rack/slot, Capture enabled]
-        evidence: [ReadVar sequence, Address range, Response codes]
-      - id: RWRITE_BURST
-        label: RWRITE_BURST
-        objective: Burst write to process variables.
-        protocol: S7comm
-        mitre_technique: T0836
-        mitre_technique_name: Modify Parameter
-        safe_to_execute: false
-        requires_manual_gate: true
-        preconditions: [Writable marker/DB test area, Rollback value known, Operator approval]
-        evidence: [WriteVar burst, PLC state diff, Recovery log]
-      - id: SETPOINT_ATTACK
-        label: SETPOINT_ATTACK
-        objective: Modify setpoint or timer value.
-        protocol: S7comm
-        mitre_technique: T0836
-        mitre_technique_name: Modify Parameter
-        safe_to_execute: false
-        requires_manual_gate: true
-        preconditions: [Known safe setpoint bounds, Process stopped or guarded, Rollback value known]
-        evidence: [WriteVar to setpoint, Process response, Recovery log]
-      - id: SENSOR_SPOOF
-        label: SENSOR_SPOOF
-        objective: Spoof process-state bits or sensor-like values.
-        protocol: S7comm
-        mitre_technique: T1692.002
-        mitre_technique_name: "Unauthorized Message: Reporting Message"
-        safe_to_execute: false
-        requires_manual_gate: true
-        preconditions: [Known internal bits, Safe window, Operator approval]
-        evidence: [Bit/value write, State inconsistency, Timeline label]
-      - id: STEALTHY_WRITE
-        label: STEALTHY_WRITE
-        objective: Low-amplitude write changes within normal-looking ranges.
-        protocol: S7comm
-        mitre_technique: T0836
-        mitre_technique_name: Modify Parameter
-        safe_to_execute: false
-        requires_manual_gate: true
-        preconditions: [Safe writable marker, Baseline captured, Long capture window]
-        evidence: [Sparse WriteVar, Slow drift, Baseline deviation]
-      - id: S7_FLOOD
-        label: S7_FLOOD
-        objective: Stress S7 connection/session handling.
-        protocol: S7comm/TCP
-        mitre_technique: T0814
-        mitre_technique_name: Denial of Service
-        safe_to_execute: false
-        requires_manual_gate: true
-        preconditions: [Dedicated lab window, Recovery plan, Operator present]
-        evidence: [Connection burst, Response latency, Reconnect events]
-      - id: PROTOCOL_FUZZ
-        label: PROTOCOL_FUZZ
-        objective: Send malformed S7 protocol traffic.
-        protocol: S7comm
-        mitre_technique: T0814
-        mitre_technique_name: Denial of Service
-        safe_to_execute: false
-        requires_manual_gate: true
-        preconditions: [Non-production lab only, Fuzz count bounded, Recovery plan]
-        evidence: [Malformed PDU trace, Error responses, Device health log]
-
   opcua:
     title: Nhom B - OPC UA
-    description: New OPC UA attack surface using the controller OPC UA server and Web-SCADA gateway.
+    description: OPC UA attack surface using the controller OPC UA server and Web-SCADA gateway.
     scenarios:
       - id: OPCUA_BENIGN_SUBSCRIPTION
         label: OPCUA_BENIGN_SUBSCRIPTION
@@ -189,54 +113,14 @@ groups:
         evidence: [MonitoredItemCreate burst, Server diagnostics, Publish latency/backlog]
       - id: OPCUA_MALICIOUS_WRITE
         label: OPCUA_MALICIOUS_WRITE
-        objective: Successful write caused by an unsafe human configuration where an Anonymous/No-Security OPC UA endpoint exposes a real writable production node; write is bounded and rolled back.
+        objective: Successfully write a plausible-but-wrong value to a real writable node to produce a process anomaly (not just a protocol rejection), then roll back.
         protocol: OPC UA
         mitre_technique: T0836
         mitre_technique_name: Modify Parameter
         safe_to_execute: false
         requires_manual_gate: true
-        preconditions: [Writable node intentionally confirmed in TIA Portal, Human misconfiguration documented, Baseline value captured, Mandatory rollback verified, Operator approval]
+        preconditions: [Dedicated writable test node confirmed, Baseline value captured, Mandatory rollback verified, Operator approval]
         evidence: [Write request, Confirmed value change, Rollback confirmation]
-      - id: OPCUA_CONFIG_MANIPULATION
-        label: OPCUA_CONFIG_MANIPULATION
-        objective: Modify a writable configuration/threshold node rather than a live state value, then roll back; only valid when such a real config node exists.
-        protocol: OPC UA
-        mitre_technique: T0836
-        mitre_technique_name: Modify Parameter
-        safe_to_execute: false
-        requires_manual_gate: true
-        preconditions: [Real writable configuration node exists, Safe bounds documented, Rollback verified, Operator approval]
-        evidence: [Config node write, Confirmed threshold/config change, Rollback confirmation]
-      - id: OPCUA_ALARM_FLOOD
-        label: OPCUA_ALARM_FLOOD
-        objective: Generate bounded OPC UA Alarms & Conditions event load to evaluate operator visibility and alarm-channel saturation.
-        protocol: OPC UA A&C
-        mitre_technique: T0832
-        mitre_technique_name: Manipulation of View
-        safe_to_execute: false
-        requires_manual_gate: true
-        preconditions: [OPC UA Alarms & Conditions enabled, Real alarm source exists, Bounded trigger count, Operator approval]
-        evidence: [EventNotification burst, Alarm/event count, HMI/Web visibility effect]
-      - id: OPCUA_REPLAY_ATTEMPT
-        label: OPCUA_REPLAY_ATTEMPT
-        objective: Attempt replay-style behavior or repeated legitimate client operation under a different timing context; packet-level replay is expected to be constrained by OPC UA session/channel state.
-        protocol: OPC UA
-        mitre_technique: T0856
-        mitre_technique_name: Spoof Reporting Message
-        safe_to_execute: false
-        requires_manual_gate: true
-        preconditions: [Captured legitimate sequence, Session/channel constraints documented, Replay tool bounded, Lab window]
-        evidence: [Replay attempt trace, Server rejection or accepted repeated operation, Timing anomaly]
-      - id: READ_TIMING_COVERT
-        label: READ_TIMING_COVERT
-        objective: Encode a low-bandwidth covert signal using benign-looking OPC UA read timing without modifying PLC state.
-        protocol: OPC UA
-        mitre_technique: T0856
-        mitre_technique_name: Spoof Reporting Message
-        safe_to_execute: true
-        requires_manual_gate: false
-        preconditions: [OPC UA read access available, Timing pattern documented, Capture enabled]
-        evidence: [Read timing sequence, Encoded bit pattern, No PLC state change]
       - id: OPCUA_CERTIFICATE_REJECTED
         label: OPCUA_CERTIFICATE_REJECTED
         objective: Attempt connection with untrusted client certificate.
@@ -247,198 +131,3 @@ groups:
         requires_manual_gate: false
         preconditions: [Server security policy enabled, Client cert not trusted]
         evidence: [OpenSecureChannel failure, Certificate rejected status]
-
-  web_api:
-    title: Nhom C - Web/API
-    description: Representative Web/API misuse scenarios against the SCADA application surface.
-    scenarios:
-      - id: WEB_LOGIN_FAILURE
-        label: WEB_LOGIN_FAILURE
-        objective: Failed login attempts against the web auth surface.
-        protocol: HTTP
-        mitre_technique: T0859
-        mitre_technique_name: Valid Accounts
-        safe_to_execute: true
-        requires_manual_gate: false
-        preconditions: [Auth endpoint exists, Test account policy known]
-        evidence: [HTTP 401/403, Login failure log]
-      - id: WEB_ROLE_VIOLATION
-        label: WEB_ROLE_VIOLATION
-        objective: User attempts action outside assigned role.
-        protocol: HTTP
-        mitre_technique: T0859
-        mitre_technique_name: Valid Accounts
-        safe_to_execute: true
-        requires_manual_gate: false
-        preconditions: [Role model exists, Low-privilege test account]
-        evidence: [HTTP 403, Audit event]
-      - id: WEB_UNAUTHORIZED_COMMAND
-        label: WEB_UNAUTHORIZED_COMMAND
-        objective: Command sent without valid authorization.
-        protocol: HTTP/WebSocket
-        mitre_technique: T1692.001
-        mitre_technique_name: "Unauthorized Message: Command Message"
-        safe_to_execute: true
-        requires_manual_gate: false
-        preconditions: [Command endpoint exists or returns 404/405, No PLC write side effect]
-        evidence: [HTTP 401/403/404/405, Rejected operation count]
-      - id: API_INVALID_PARAMETER
-        label: API_INVALID_PARAMETER
-        objective: Submit invalid API parameter and verify validation.
-        protocol: HTTP
-        mitre_technique: T1692.001
-        mitre_technique_name: "Unauthorized Message: Command Message"
-        safe_to_execute: true
-        requires_manual_gate: false
-        preconditions: [API reachable]
-        evidence: [HTTP 400/404/422, Error body]
-      - id: API_COMMAND_REJECTED
-        label: API_COMMAND_REJECTED
-        objective: Verify command rejection path for unsupported write operation.
-        protocol: HTTP
-        mitre_technique: T1692.001
-        mitre_technique_name: "Unauthorized Message: Command Message"
-        safe_to_execute: true
-        requires_manual_gate: false
-        preconditions: [Read-only backend policy active]
-        evidence: [HTTP 404/405/501, No PLC state change]
-      - id: API_EXCESSIVE_REQUEST
-        label: API_EXCESSIVE_REQUEST
-        objective: Bounded high-rate read requests to characterize API behavior.
-        protocol: HTTP
-        mitre_technique: T0814
-        mitre_technique_name: Denial of Service
-        safe_to_execute: false
-        requires_manual_gate: true
-        preconditions: [Bounded request count, Backend resource monitoring, Lab window]
-        evidence: [HTTP rate pattern, Latency, Error/retry behavior]
-
-  logic_aware:
-    title: Nhom D - Logic-aware
-    description: Process semantics and timing context, not merely protocol anomalies.
-    scenarios:
-      - id: VALID_VALUE_WRONG_CONTEXT
-        label: VALID_VALUE_WRONG_CONTEXT
-        objective: Send a valid value when the process context makes it unsafe.
-        protocol: S7comm/OPC UA/Web
-        mitre_technique: T0836
-        mitre_technique_name: Modify Parameter
-        safe_to_execute: false
-        requires_manual_gate: true
-        preconditions: [State model defined, Safe window detection, Rollback plan]
-        evidence: [Value within range, Context violation, Process response]
-      - id: VALID_VALUE_WRONG_TIME
-        label: VALID_VALUE_WRONG_TIME
-        objective: Send valid command/value at wrong process phase.
-        protocol: S7comm/OPC UA/Web
-        mitre_technique: T0836
-        mitre_technique_name: Modify Parameter
-        safe_to_execute: false
-        requires_manual_gate: true
-        preconditions: [Stage/timer tags readable, Phase boundary known]
-        evidence: [Timestamped command, Stage/timer state, Violation label]
-      - id: COMMAND_SEQUENCE_VIOLATION
-        label: COMMAND_SEQUENCE_VIOLATION
-        objective: Issue commands out of allowed sequence.
-        protocol: Web/S7comm/OPC UA
-        mitre_technique: T1692.001
-        mitre_technique_name: "Unauthorized Message: Command Message"
-        safe_to_execute: false
-        requires_manual_gate: true
-        preconditions: [Allowed sequence documented, Simulator/test mode preferred]
-        evidence: [Command order trace, Rejection or abnormal state]
-      - id: SETPOINT_CHANGE_DURING_FAULT
-        label: SETPOINT_CHANGE_DURING_FAULT
-        objective: Attempt setpoint change while fault state is active.
-        protocol: Web/S7comm/OPC UA
-        mitre_technique: T0836
-        mitre_technique_name: Modify Parameter
-        safe_to_execute: false
-        requires_manual_gate: true
-        preconditions: [Fault state available or simulated safely, Command should be rejected]
-        evidence: [Fault state, Setpoint request, Reject/accept outcome]
-      - id: START_DURING_MAINTENANCE
-        label: START_DURING_MAINTENANCE
-        objective: Attempt start while maintenance mode is active.
-        protocol: Web/S7comm/OPC UA
-        mitre_technique: T1692.001
-        mitre_technique_name: "Unauthorized Message: Command Message"
-        safe_to_execute: false
-        requires_manual_gate: true
-        preconditions: [Maintenance flag exists, Start command path exists, Operator approval]
-        evidence: [Maintenance state, Start command, Rejection or unsafe transition]
-      - id: LOW_RATE_PARAMETER_CHANGE
-        label: LOW_RATE_PARAMETER_CHANGE
-        objective: Low-rate parameter drift that stays within single-step thresholds.
-        protocol: S7comm/OPC UA/Web
-        mitre_technique: T0836
-        mitre_technique_name: Modify Parameter
-        safe_to_execute: false
-        requires_manual_gate: true
-        preconditions: [Safe parameter, Bounds known, Long capture window]
-        evidence: [Sparse updates, Cumulative drift, Process trend]
-
-  cross_layer:
-    title: Nhom E - Cross-layer
-    description: Correlated Web/API, OPC UA and PLC-state scenarios for novel dataset labels.
-    scenarios:
-      - id: WEB_TO_OPCUA_UNAUTHORIZED_WRITE
-        label: WEB_TO_OPCUA_UNAUTHORIZED_WRITE
-        objective: Web-originated request attempts unauthorized OPC UA write path.
-        protocol: HTTP -> OPC UA
-        mitre_technique: T1692.001
-        mitre_technique_name: "Unauthorized Message: Command Message"
-        safe_to_execute: true
-        requires_manual_gate: false
-        preconditions: [Command path implemented or returns 404/405/501, Independent OPC UA read available]
-        evidence: [HTTP request, OPC UA read before/after, Unchanged-value correlation]
-      - id: COMPROMISED_OPERATOR_SESSION
-        label: COMPROMISED_OPERATOR_SESSION
-        objective: Valid session used from abnormal context or timing.
-        protocol: HTTP/WebSocket -> PLC
-        mitre_technique: T0859
-        mitre_technique_name: Valid Accounts
-        safe_to_execute: false
-        requires_manual_gate: true
-        preconditions: [Auth/session telemetry available, Test operator account, Command path]
-        evidence: [Valid session token, Abnormal command, PLC state effect/rejection]
-      - id: FALSE_DISPLAY_WITH_PROCESS_CHANGE
-        label: FALSE_DISPLAY_WITH_PROCESS_CHANGE
-        objective: Use a bounded S7 process change, then measure whether OPC UA/Web-SCADA visibility reflects the true PLC state without stale or divergence.
-        protocol: WebSocket/OPC UA/S7comm
-        mitre_technique: T0832
-        mitre_technique_name: Manipulation of View
-        safe_to_execute: false
-        requires_manual_gate: true
-        preconditions: [Independent PLC read path, Web display capture, S7 STOP pulse authorized, Rollback verified]
-        evidence: [S7 state before/after/rollback, Direct OPC UA sample, Web API sample, Divergence count]
-      - id: COMMAND_WITHOUT_VALID_WEB_SESSION
-        label: COMMAND_WITHOUT_VALID_WEB_SESSION
-        objective: PLC-affecting command observed without corresponding valid web session.
-        protocol: S7comm/OPC UA + HTTP audit
-        mitre_technique: T1692.001
-        mitre_technique_name: "Unauthorized Message: Command Message"
-        safe_to_execute: false
-        requires_manual_gate: true
-        preconditions: [Web audit log, Direct PLC command path, Safe command target]
-        evidence: [PLC write, Missing/invalid web session, Correlation gap]
-      - id: WEB_LOG_AND_PLC_STATE_DIVERGENCE
-        label: WEB_LOG_AND_PLC_STATE_DIVERGENCE
-        objective: Web log claims one state while PLC independently reports another.
-        protocol: HTTP/WebSocket + OPC UA/S7comm
-        mitre_technique: T0832
-        mitre_technique_name: Manipulation of View
-        safe_to_execute: true
-        requires_manual_gate: false
-        preconditions: [Web logs/events available, Independent OPC UA read]
-        evidence: [Event log value, PLC tag value, Divergence duration]
-      - id: MULTI_STAGE_WEB_OPCUA_PLC_ATTACK
-        label: MULTI_STAGE_WEB_OPCUA_PLC_ATTACK
-        objective: Correlate reconnaissance, web misuse, OPC UA/S7 access and process impact.
-        protocol: HTTP + OPC UA + S7comm
-        # Multi-stage: no single technique fits. Report as a chain, e.g.
-        # T0846/T0861 (recon) -> T1692.001 (unauthorized command) -> T0836 (parameter modification).
-        safe_to_execute: false
-        requires_manual_gate: true
-        preconditions: [All single-stage checks passed, Timeline labeling, Operator approval]
-        evidence: [Stage timeline, Cross-protocol flow sequence, PLC state diff]

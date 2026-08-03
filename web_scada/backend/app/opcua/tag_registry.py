@@ -70,6 +70,8 @@ class TagValue:
             "group": self.config.group if self.config else "default",
             "writable": self.config.writable if self.config else False,
             "semantic_type": self.config.semantic_type if self.config else "",
+            "minimum": self.config.minimum if self.config else None,
+            "maximum": self.config.maximum if self.config else None,
         }
 
 

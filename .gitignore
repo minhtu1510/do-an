@@ -61,3 +61,8 @@ htmlcov/
 # Node / frontend
 node_modules/
 npm-debug.log*
+
+# Secrets — JWT_SECRET / ADMIN_PASSWORD / DB creds live in these
+.env
+*.env
+web_scada/backend/data/

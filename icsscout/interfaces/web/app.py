@@ -36,6 +36,9 @@ except ImportError as e:
     RISK_ASSESSMENT_AVAILABLE = False
     print(f"[!] Risk Assessment module not available: {e}")
 
+# Import Offline IDS (pcap upload) routes
+from icsscout.interfaces.web.routes.ids_offline_routes import setup_ids_offline_routes
+
 # Import OT Protocol Scanner
 try:
     import sys
@@ -64,6 +67,9 @@ CORS(app)
 
 # Register S7 routes blueprint
 app.register_blueprint(s7_bp)
+
+# Register Offline IDS (pcap upload) routes
+setup_ids_offline_routes(app)
 
 # Initialize SocketIO for real-time communication
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')

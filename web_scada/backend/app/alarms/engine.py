@@ -39,6 +39,8 @@ class AlarmEngine:
                     old_value=old_value,
                     new_value=new_value,
                 ))
+                if old_value is True and new_value is False:
+                    events.extend(self._check_unexpected_halt())
             elif key == "hien_thi":
                 events.append(EventRecord(
                     event_type="PRODUCT_COUNT_CHANGED",
@@ -76,7 +78,56 @@ class AlarmEngine:
         if key in _SPOOF_WATCH_KEYS:
             events.extend(self._check_sensor_spoof())
 
+        if key in ("cd1", "cd2", "cd3"):
+            events.extend(self._check_stage_timer_range(key, new_value, data.get("minimum"), data.get("maximum")))
+
         return events
+
+    def _check_unexpected_halt(self) -> list[EventRecord]:
+        """bang_tai just went RUNNING -> STOPPED. If any stage bit is still
+        active, the line stopped mid-cycle instead of at a normal cycle
+        boundary — this cannot tell WHO issued the stop (Web-SCADA has no
+        visibility into WinCC button presses), only WHEN it happened.
+        """
+        active_stages = [k for k in _SPOOF_WATCH_KEYS if self._last_values.get(k) is True]
+        if not active_stages:
+            return []
+        return [EventRecord(
+            severity="ERROR",
+            event_type="UNEXPECTED_HALT",
+            message=f"Conveyor stopped mid-cycle while {', '.join(active_stages)} still active",
+            tag_key="bang_tai",
+            new_value=False,
+            status="ACTIVE",
+        )]
+
+    def _check_stage_timer_range(self, key: str, value: Any, minimum: Any, maximum: Any) -> list[EventRecord]:
+        alarm_key = f"timer_range:{key}"
+        was_active = alarm_key in self._active_alarms
+        out_of_range = (
+            isinstance(value, (int, float)) and minimum is not None and maximum is not None
+            and not (minimum <= value <= maximum)
+        )
+
+        if out_of_range and not was_active:
+            self._active_alarms.add(alarm_key)
+            return [EventRecord(
+                severity="ERROR",
+                event_type="STAGE_TIMER_OUT_OF_RANGE",
+                message=f"{key} = {value} outside safe range [{minimum}, {maximum}]",
+                tag_key=key,
+                new_value=value,
+                status="ACTIVE",
+            )]
+        if not out_of_range and was_active:
+            self._active_alarms.discard(alarm_key)
+            return [EventRecord(
+                event_type="STAGE_TIMER_RANGE_CLEARED",
+                message=f"{key} = {value} back within safe range [{minimum}, {maximum}]",
+                tag_key=key,
+                new_value=value,
+            )]
+        return []
 
     def _check_sensor_spoof(self) -> list[EventRecord]:
         events: list[EventRecord] = []

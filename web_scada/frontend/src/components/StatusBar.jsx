@@ -1,8 +1,10 @@
 import { useState, useEffect } from "react";
 import { fetchPlcStatus } from "../services/api";
 import { connectWebSocket } from "../services/websocket";
+import { useAuth } from "../stores/authStore";
 
 export default function StatusBar() {
+  const { username, role, logout } = useAuth();
   const [plcStatus, setPlcStatus] = useState(null);
   const [tags, setTags] = useState({});
   const [wsOpen, setWsOpen] = useState(false);
@@ -67,6 +69,14 @@ export default function StatusBar() {
           STALE TAGS
         </span>
       )}
+
+      <span className="flex items-center gap-2 border-l border-gray-800 pl-4 text-gray-400">
+        <span className="text-gray-300">{username}</span>
+        <span className="rounded bg-gray-800 px-1.5 py-0.5 text-[10px] uppercase text-gray-400">{role}</span>
+        <button onClick={logout} className="text-gray-500 hover:text-red-400">
+          Đăng xuất
+        </button>
+      </span>
     </div>
   );
 }

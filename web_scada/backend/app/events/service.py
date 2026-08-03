@@ -5,9 +5,12 @@ replace this service later without changing the current OPC UA gateway flow.
 """
 
 from collections import deque
+from datetime import datetime, timedelta, timezone
 from typing import Iterable
 
 from .models import EventRecord
+
+TZ = timezone(timedelta(hours=7))
 
 
 class EventService:
@@ -30,6 +33,14 @@ class EventService:
 
     def active_count(self) -> int:
         return sum(1 for event in self._events if event.status == "ACTIVE")
+
+    def ack(self, event_id: str, username: str) -> EventRecord | None:
+        for event in self._events:
+            if event.id == event_id:
+                event.acked_by = username
+                event.acked_at = datetime.now(TZ).isoformat()
+                return event
+        return None
 
 
 event_service = EventService()

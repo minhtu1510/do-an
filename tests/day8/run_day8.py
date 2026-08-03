@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
-"""Day 8 scenario runner.
+"""Day 8 scenario runner -- OPC UA attack surface only.
 
 The runner is intentionally safe by default. It lists and records scenarios,
 and only executes bounded read-only/denied checks marked safe in the catalog.
+S7comm, Web/API, logic-aware, and cross-layer scenarios were removed from
+this catalog: S7comm continuity scenarios live in the Day 1-6 dataset, and
+the rest either had no controlled executor here or conceptually duplicated
+attacks_ext/logic_aware.py and attacks_ext/kill_chain.py (Day 7).
 """
 
 from __future__ import annotations
@@ -21,7 +25,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from tests.common import OPC_URL, PLC_IP, RACK, SLOT, info, ok, warn, fail  # noqa: E402
+from tests.common import OPC_URL, info, ok, warn, fail  # noqa: E402
 
 
 CATALOG_PATH = Path(__file__).with_name("scenarios.yaml")
@@ -35,12 +39,6 @@ CONTROLLED_GATED_SCENARIOS = {
     "OPCUA_CONFIG_MANIPULATION",
     "OPCUA_ALARM_FLOOD",
     "OPCUA_REPLAY_ATTEMPT",
-    "VALID_VALUE_WRONG_CONTEXT",
-    "VALID_VALUE_WRONG_TIME",
-    "LOW_RATE_PARAMETER_CHANGE",
-    "FALSE_DISPLAY_WITH_PROCESS_CHANGE",
-    "COMMAND_WITHOUT_VALID_WEB_SESSION",
-    "MULTI_STAGE_WEB_OPCUA_PLC_ATTACK",
 }
 MAX_SESSION_BURST_COUNT = 10
 MIN_SESSION_BURST_DELAY_S = 0.2
@@ -53,9 +51,6 @@ DEFAULT_SUBSCRIPTION_HOLD_S = 10.0
 WRITABLE_TEST_NODE = os.getenv("DAY8_WRITABLE_TEST_NODE", 'ns=3;s="Nhap"')
 CONFIG_MANIPULATION_NODE = os.getenv("DAY8_CONFIG_NODE", "").strip()
 MALICIOUS_WRITE_DELTA = int(os.getenv("DAY8_MALICIOUS_WRITE_DELTA", "3"))
-LOW_RATE_STEP = int(os.getenv("DAY8_LOW_RATE_STEP", "1"))
-LOW_RATE_STEPS = max(1, min(int(os.getenv("DAY8_LOW_RATE_STEPS", "5")), 10))
-LOW_RATE_INTERVAL_S = max(1.0, float(os.getenv("DAY8_LOW_RATE_INTERVAL_S", "2.0")))
 
 # Tags this run's results with the OPC UA server security policy that was
 # actually active when the run happened (e.g. "Anonymous", "Basic256Sha256").
@@ -72,25 +67,13 @@ REQUIRE_IMPACT_OPT_IN_ENV = "DAY8_ALLOW_PROCESS_IMPACT"
 IMPACT_SCENARIOS = {
     "OPCUA_MALICIOUS_WRITE",
     "OPCUA_CONFIG_MANIPULATION",
-    "VALID_VALUE_WRONG_CONTEXT",
-    "VALID_VALUE_WRONG_TIME",
-    "LOW_RATE_PARAMETER_CHANGE",
-    "FALSE_DISPLAY_WITH_PROCESS_CHANGE",
-    "COMMAND_WITHOUT_VALID_WEB_SESSION",
-    "MULTI_STAGE_WEB_OPCUA_PLC_ATTACK",
 }
 
 NOT_CONFIGURED_SCENARIOS = {
-    "WEB_LOGIN_FAILURE": "Auth/login endpoint is not implemented in the current Web-SCADA backend.",
-    "WEB_ROLE_VIOLATION": "Role-based authorization is not implemented in the current Web-SCADA backend.",
     "OPCUA_UNAUTHORIZED_SESSION": "No OPC UA username/password policy is configured in the current testbed.",
     "OPCUA_CERTIFICATE_REJECTED": "No OPC UA certificate trust-list scenario is configured in the current testbed.",
     "OPCUA_ALARM_FLOOD": "OPC UA Alarms & Conditions is not configured in the current Web-SCADA/PLC pipeline.",
     "OPCUA_REPLAY_ATTEMPT": "Packet-level OPC UA replay requires a capture/replay harness and session/channel-state handling; not implemented in the current runner.",
-    "COMPROMISED_OPERATOR_SESSION": "No web session/auth telemetry exists in the current backend; add an auth module before enabling this scenario.",
-    "COMMAND_SEQUENCE_VIOLATION": "No writable stage-advance command path exists on this PLC/testbed; add a simulator or a dedicated sequence-control tag before enabling this scenario.",
-    "SETPOINT_CHANGE_DURING_FAULT": "No fault-state tag is registered in config/opcua_tags.yaml; add one before enabling this scenario.",
-    "START_DURING_MAINTENANCE": "No maintenance-mode tag is registered in config/opcua_tags.yaml; add one before enabling this scenario.",
 }
 
 
@@ -468,283 +451,6 @@ def http_request(method: str, path: str, body: bytes | None = None, timeout: flo
         return None, str(exc)
 
 
-def web_invalid_parameter() -> list[str]:
-    status, body = http_request("GET", "/tags/__invalid_tag_key__")
-    return [f"GET /tags/__invalid_tag_key__ -> {status}: {body}"]
-
-
-def web_command_rejected() -> list[str]:
-    status, body = http_request("POST", "/commands/start", b"{}")
-    return [f"POST /commands/start -> {status}: {body or 'empty'}"]
-
-
-# --- Group D: logic-aware ---------------------------------------------------
-# Only scenarios backed by real tags in config/opcua_tags.yaml are executed
-# here (bang_tai, vat_2, nhap). COMMAND_SEQUENCE_VIOLATION,
-# SETPOINT_CHANGE_DURING_FAULT and START_DURING_MAINTENANCE have no
-# corresponding tag (no sequence-control, fault or maintenance bit exists) and
-# are reported through NOT_CONFIGURED_SCENARIOS instead of being faked.
-
-async def logic_valid_value_wrong_context() -> list[str]:
-    """Write an in-range Nhap value while the conveyor (bang_tai) is running.
-
-    The value itself would be perfectly valid at rest; writing it while the
-    line is active is the logic violation.
-    """
-    from asyncua import Client
-
-    evidence = []
-    async with Client(url=OPC_URL, timeout=5) as client:
-        running = await client.get_node('ns=3;s="BangTai"').read_value()
-        evidence.append(f"context: bang_tai(running)={running!r}")
-        if not running:
-            evidence.append("Conveyor is not running at execution time; wrong-context condition not observed (not forced/faked).")
-            return evidence
-        await _attempt_write_and_rollback(client, WRITABLE_TEST_NODE, _bounded_delta, evidence)
-    return evidence
-
-
-async def logic_valid_value_wrong_time() -> list[str]:
-    """Write an in-range Nhap value while internal stage bit vat_2 shows a mid-cycle phase."""
-    from asyncua import Client
-
-    evidence = []
-    async with Client(url=OPC_URL, timeout=5) as client:
-        stage_2_active = await client.get_node('ns=3;s="Vat 2"').read_value()
-        evidence.append(f"context: vat_2(stage_2_active)={stage_2_active!r}")
-        if not stage_2_active:
-            evidence.append("Stage 2 is not active at execution time; wrong-time condition not observed (not forced/faked).")
-            return evidence
-        await _attempt_write_and_rollback(client, WRITABLE_TEST_NODE, _bounded_delta, evidence)
-    return evidence
-
-
-async def logic_low_rate_drift() -> list[str]:
-    """Apply several small single-step Nhap writes that individually look benign
-    but accumulate into a real drift, then roll back to the true baseline.
-    """
-    from asyncua import Client
-
-    evidence = [f"step={LOW_RATE_STEP}; steps={LOW_RATE_STEPS}; interval_s={LOW_RATE_INTERVAL_S}"]
-    async with Client(url=OPC_URL, timeout=5) as client:
-        node = client.get_node(WRITABLE_TEST_NODE)
-        true_baseline = await node.read_value()
-        evidence.append(f"true_baseline={true_baseline!r}")
-
-        if not isinstance(true_baseline, int):
-            evidence.append("Target node value is not numeric; low-rate drift is not applicable to this node.")
-            return evidence
-
-        current = true_baseline
-        for i in range(LOW_RATE_STEPS):
-            current += LOW_RATE_STEP
-            try:
-                await node.write_value(current)
-            except Exception as exc:
-                evidence.append(f"step_{i + 1}_rejected={type(exc).__name__}: {exc}")
-                current -= LOW_RATE_STEP
-                break
-            confirmed = await node.read_value()
-            evidence.append(f"step_{i + 1}: wrote={current!r} confirmed={confirmed!r} cumulative_drift={confirmed - true_baseline}")
-            await asyncio.sleep(LOW_RATE_INTERVAL_S)
-
-        try:
-            await node.write_value(true_baseline)
-            restored = await node.read_value()
-            if restored == true_baseline:
-                evidence.append(f"rollback_confirmed: restored_value={restored!r}")
-            else:
-                evidence.append(f"ROLLBACK_MISMATCH: expected={true_baseline!r} got={restored!r}; manual correction required")
-        except Exception as exc:
-            evidence.append(f"ROLLBACK_FAILED={type(exc).__name__}: {exc}; manual correction required on node {WRITABLE_TEST_NODE}")
-    return evidence
-
-
-# --- Group E: cross-layer ----------------------------------------------------
-# COMPROMISED_OPERATOR_SESSION is reported through NOT_CONFIGURED_SCENARIOS —
-# there is no auth/session telemetry in the current backend to compromise.
-
-async def cross_web_to_opcua_unauthorized_write() -> list[str]:
-    """Correlate a rejected web command with an independent OPC UA read confirming no PLC state change."""
-    from asyncua import Client
-
-    evidence = []
-    async with Client(url=OPC_URL, timeout=5) as client:
-        before = await client.get_node(WRITABLE_TEST_NODE).read_value()
-
-    status, body = http_request("POST", "/commands/start", b'{"tag": "nhap", "value": 9999}')
-    evidence.append(f"POST /commands/start -> {status}: {body or 'empty'}")
-
-    async with Client(url=OPC_URL, timeout=5) as client:
-        after = await client.get_node(WRITABLE_TEST_NODE).read_value()
-    evidence.append(f"opcua_value_before={before!r} opcua_value_after={after!r}; unchanged={before == after}")
-    return evidence
-
-
-def _s7_stop_pulse_and_restore(hold_s: float) -> list[str]:
-    """Apply a short S7 STOP pulse and restore the original M5 byte.
-
-    This is the real process-change part of the cross-layer scenario. It is
-    only reachable through the explicit process-impact opt-in gate.
-    """
-    import snap7
-    try:
-        from snap7.type import Areas
-    except ImportError:
-        from snap7.types import Areas
-    from snap7.util import get_bool, set_bool
-
-    evidence = []
-    c = snap7.client.Client()
-    try:
-        c.connect(PLC_IP, RACK, SLOT)
-        before = bytearray(c.read_area(Areas.MK, 0, 5, 1))
-        before_start = get_bool(before, 0, 0)
-        before_stop = get_bool(before, 0, 1)
-        evidence.append(f"s7_before: M5={before.hex()} START={before_start} STOP={before_stop}")
-
-        pulse = bytearray(before)
-        set_bool(pulse, 0, 0, False)
-        set_bool(pulse, 0, 1, True)
-        c.write_area(Areas.MK, 0, 5, pulse)
-        evidence.append(f"s7_pulse_written: M5={pulse.hex()} hold_s={hold_s}")
-        time.sleep(hold_s)
-
-        c.write_area(Areas.MK, 0, 5, before)
-        restored = bytearray(c.read_area(Areas.MK, 0, 5, 1))
-        evidence.append(f"s7_restored: M5={restored.hex()} rollback_match={restored == before}")
-    finally:
-        try:
-            c.disconnect()
-        except Exception:
-            pass
-    return evidence
-
-
-async def cross_false_display_divergence(samples: int = 5, interval_s: float = 1.0) -> list[str]:
-    """S7 process change + OPC UA/Web-SCADA visibility correlation."""
-    from asyncua import Client
-
-    hold_s = max(0.2, min(float(os.getenv("DAY8_CROSSLAYER_STOP_HOLD_S", "1.0")), 3.0))
-    evidence = [f"s7_stop_pulse_hold_s={hold_s}"]
-    divergences = 0
-
-    before_web_status, before_web_body = http_request("GET", "/tags/bang_tai")
-    evidence.append(f"web_before_bang_tai={before_web_status}: {before_web_body}")
-
-    async with Client(url=OPC_URL, timeout=5) as client:
-        node = client.get_node('ns=3;s="BangTai"')
-        direct_before = await node.read_value()
-        evidence.append(f"opcua_before_bang_tai={direct_before!r}")
-
-    evidence.extend(_s7_stop_pulse_and_restore(hold_s))
-
-    async with Client(url=OPC_URL, timeout=5) as client:
-        node = client.get_node('ns=3;s="BangTai"')
-        for i in range(samples):
-            direct_value = await node.read_value()
-            status, body = http_request("GET", "/tags/bang_tai")
-            web_value = None
-            web_stale = None
-            if status == 200:
-                try:
-                    parsed = json.loads(body)
-                    web_value = parsed.get("value")
-                    web_stale = parsed.get("stale")
-                except json.JSONDecodeError:
-                    web_value = None
-            evidence.append(f"sample_{i + 1}: direct_opcua_bang_tai={direct_value!r} web_api_status={status} web_api_value={web_value!r} web_stale={web_stale!r}")
-            if status == 200 and (web_value != direct_value or web_stale):
-                divergences += 1
-            await asyncio.sleep(interval_s)
-    evidence.append(f"summary: samples={samples} divergences_observed={divergences}")
-    return evidence
-
-
-async def cross_web_log_plc_divergence() -> list[str]:
-    """Compare the most recent web event log entry for hien_thi against its current live OPC UA value."""
-    from asyncua import Client
-
-    evidence = []
-    status, body = http_request("GET", "/events?limit=50")
-    evidence.append(f"GET /events -> {status}: {body[:200]}")
-
-    events = []
-    if status == 200:
-        try:
-            events = json.loads(body).get("events", [])
-        except json.JSONDecodeError:
-            events = []
-
-    tag_events = [e for e in events if e.get("tag_key") == "hien_thi"]
-    if not tag_events:
-        evidence.append("No hien_thi event found in recent log; nothing to correlate against.")
-        return evidence
-
-    latest_event = tag_events[0]
-    logged_value = latest_event.get("new_value")
-    async with Client(url=OPC_URL, timeout=5) as client:
-        live_value = await client.get_node('ns=3;s="HienThi"').read_value()
-    evidence.append(
-        f"latest_logged_value={logged_value!r} (at {latest_event.get('timestamp')}) "
-        f"live_value={live_value!r} match={logged_value == live_value}"
-    )
-    return evidence
-
-
-async def cross_command_without_web_session() -> list[str]:
-    """Perform a direct OPC UA write bypassing any web session, then check whether the
-    web event log can attribute it to one — it cannot, since no session/user field
-    exists on EventRecord yet. That gap is the evidence.
-    """
-    from asyncua import Client
-
-    evidence = []
-    async with Client(url=OPC_URL, timeout=5) as client:
-        changed = await _attempt_write_and_rollback(client, WRITABLE_TEST_NODE, _bounded_delta, evidence)
-
-    if not changed:
-        evidence.append("Write was rejected; no PLC-affecting command occurred to correlate.")
-        return evidence
-
-    await asyncio.sleep(1.0)
-    status, body = http_request("GET", "/events?limit=10")
-    evidence.append(f"GET /events -> {status}: {body[:200]}")
-    evidence.append(
-        "EventRecord has no web-session/user field; a direct OPC UA write cannot be "
-        "attributed to, or ruled out from, any web session with current telemetry."
-    )
-    return evidence
-
-
-async def cross_multi_stage_attack() -> list[str]:
-    """Chain reconnaissance, web misuse and (if authorized) a real write into one timeline.
-
-    Stages 1-3 reuse already-safe scenario functions; stage 4 only runs when
-    the process-impact opt-in is set, matching OPCUA_MALICIOUS_WRITE's gate.
-    """
-    evidence = []
-    t0 = time.time()
-
-    stage1 = await opcua_endpoint_discovery()
-    evidence.append(f"STAGE 1 (recon/endpoint_discovery) @ {time.time() - t0:.1f}s: {'; '.join(stage1)}")
-
-    stage2 = await opcua_node_browse(limit=10)
-    evidence.append(f"STAGE 2 (recon/node_browse) @ {time.time() - t0:.1f}s: {'; '.join(stage2)}")
-
-    stage3 = web_command_rejected()
-    evidence.append(f"STAGE 3 (web misuse/unauthorized_command) @ {time.time() - t0:.1f}s: {'; '.join(stage3)}")
-
-    if os.getenv(REQUIRE_IMPACT_OPT_IN_ENV) == "1":
-        stage4 = await opcua_malicious_write()
-        evidence.append(f"STAGE 4 (process impact/malicious_write) @ {time.time() - t0:.1f}s: {'; '.join(stage4)}")
-    else:
-        evidence.append(f"STAGE 4 (process impact) skipped: set {REQUIRE_IMPACT_OPT_IN_ENV}=1 to include the real-write stage in the timeline.")
-
-    evidence.append(f"timeline_total_duration_s={time.time() - t0:.1f}")
-    return evidence
-
-
 async def execute_safe(scenario_id: str) -> list[str] | None:
     if scenario_id == "OPCUA_BENIGN_RECONNECT":
         return await opcua_benign_reconnect()
@@ -756,14 +462,6 @@ async def execute_safe(scenario_id: str) -> list[str] | None:
         return await opcua_benign_subscription()
     if scenario_id == "READ_TIMING_COVERT":
         return await opcua_read_timing_covert()
-    if scenario_id == "API_INVALID_PARAMETER":
-        return web_invalid_parameter()
-    if scenario_id in {"API_COMMAND_REJECTED", "WEB_UNAUTHORIZED_COMMAND"}:
-        return web_command_rejected()
-    if scenario_id == "WEB_TO_OPCUA_UNAUTHORIZED_WRITE":
-        return await cross_web_to_opcua_unauthorized_write()
-    if scenario_id == "WEB_LOG_AND_PLC_STATE_DIVERGENCE":
-        return await cross_web_log_plc_divergence()
     return None
 
 
@@ -782,23 +480,6 @@ async def execute_controlled_gated(scenario_id: str) -> list[str] | None:
     if scenario_id == "OPCUA_CONFIG_MANIPULATION":
         require_impact_opt_in(scenario_id)
         return await opcua_config_manipulation()
-    if scenario_id == "VALID_VALUE_WRONG_CONTEXT":
-        require_impact_opt_in(scenario_id)
-        return await logic_valid_value_wrong_context()
-    if scenario_id == "VALID_VALUE_WRONG_TIME":
-        require_impact_opt_in(scenario_id)
-        return await logic_valid_value_wrong_time()
-    if scenario_id == "LOW_RATE_PARAMETER_CHANGE":
-        require_impact_opt_in(scenario_id)
-        return await logic_low_rate_drift()
-    if scenario_id == "FALSE_DISPLAY_WITH_PROCESS_CHANGE":
-        require_impact_opt_in(scenario_id)
-        return await cross_false_display_divergence()
-    if scenario_id == "COMMAND_WITHOUT_VALID_WEB_SESSION":
-        require_impact_opt_in(scenario_id)
-        return await cross_command_without_web_session()
-    if scenario_id == "MULTI_STAGE_WEB_OPCUA_PLC_ATTACK":
-        return await cross_multi_stage_attack()
     return None
 
 
@@ -919,7 +600,7 @@ async def run_items(items, execute: bool, allow_gated: bool) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Day 8 multi-surface scenario runner")
     parser.add_argument("--list", action="store_true", help="List scenarios and exit")
-    parser.add_argument("--group", choices=["s7_traditional", "opcua", "web_api", "logic_aware", "cross_layer"], help="Run/list one group")
+    parser.add_argument("--group", choices=["opcua"], help="Run/list one group (only opcua exists in this catalog)")
     parser.add_argument("--scenario", help="Run/list one scenario id")
     parser.add_argument("--execute", action="store_true", help="Execute safe scenarios; default is dry-run")
     parser.add_argument("--allow-gated", action="store_true", help="Allow controlled executors for selected gated scenarios only")

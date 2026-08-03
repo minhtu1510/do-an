@@ -6,7 +6,7 @@ import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
@@ -16,6 +16,8 @@ from .opcua.gateway import OPCUAGateway
 from .opcua.tag_registry import get_tag_registry
 from .api.router import api_router
 from .alarms import alarm_engine
+from .auth import auth_router, bootstrap_admin, get_ws_user
+from .database import init_db, insert_sample
 from .events import event_service
 from .history.router import history_router
 from .ml_results.router import ml_results_router
@@ -49,13 +51,18 @@ async def lifespan(app: FastAPI):
     logger.info("Web-SCADA backend starting...")
     backend_started_at = datetime.now(TZ)
 
+    bootstrap_admin()
+    init_db()
+
     tag_registry = get_tag_registry()
     logger.info(f"Loaded {len(tag_registry.tags)} tags from registry")
 
-    gateway = OPCUAGateway(OPCUA_ENDPOINT, tag_registry)
-
     def on_tag_update(key: str, data: dict):
         try:
+            cfg = tag_registry.get_by_key(key)
+            if cfg and cfg.history_enabled:
+                insert_sample(key, data.get("value"), data.get("quality", "Bad"), data.get("stale", True), data.get("received_timestamp"))
+
             loop = asyncio.get_event_loop()
             events = event_service.add_many(alarm_engine.process_tag_update(key, data))
             loop.create_task(ws_manager.broadcast_tag_update(key, data))
@@ -65,6 +72,8 @@ async def lifespan(app: FastAPI):
                 loop.create_task(ws_manager.broadcast_event(payload))
         except Exception:
             pass
+
+    gateway = OPCUAGateway(OPCUA_ENDPOINT, tag_registry)
 
     gateway.on_value_change(on_tag_update)
 
@@ -94,17 +103,18 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["*"],
 )
 
+app.include_router(auth_router, prefix="/api/auth")
 app.include_router(api_router, prefix="/api")
 app.include_router(history_router, prefix="/api/history")
 app.include_router(ml_results_router, prefix="/api/ml")
 
 
 @app.websocket("/ws/process")
-async def websocket_endpoint(ws: WebSocket):
+async def websocket_endpoint(ws: WebSocket, _user=Depends(get_ws_user)):
     await ws_manager.connect(ws)
     try:
         # Send full snapshot on connect

@@ -8,7 +8,7 @@ Goi tu bash:
   python -m attacks_ext.logic_aware \
       --target 192.168.210.211 --rack 0 --slot 1 --duration 120 \
       --session-id bt_s1 --host-id attacker_host \
-      --label-file labels/day8_timeline.csv
+      --label-file labels/day7_timeline.csv
 """
 
 import time

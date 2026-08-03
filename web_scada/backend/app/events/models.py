@@ -20,6 +20,8 @@ class EventRecord:
     status: str = "CLEARED"
     timestamp: str = field(default_factory=lambda: datetime.now(TZ).isoformat())
     id: str = field(default_factory=lambda: str(uuid4()))
+    acked_by: str | None = None
+    acked_at: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -32,4 +34,6 @@ class EventRecord:
             "old_value": self.old_value,
             "new_value": self.new_value,
             "status": self.status,
+            "acked_by": self.acked_by,
+            "acked_at": self.acked_at,
         }
