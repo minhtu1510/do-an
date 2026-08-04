@@ -43,6 +43,9 @@ export default function SecurityView() {
   }, []);
 
   const hasScenarioData = Boolean(status?.scenario_id && status.scenario_id !== "Not configured");
+  const activeAlarms = status?.active_alarm_count;
+  const alarmAccent = activeAlarms > 0 ? "#e66767" : "#0ca30c";
+  const connected = status?.plc_connection === "CONNECTED" && status?.opcua_connection === "CONNECTED";
 
   return (
     <div className="p-6 space-y-6">
@@ -52,17 +55,41 @@ export default function SecurityView() {
         right={<ExportCsvButton severity="ERROR" label="Export alerts CSV" />}
       />
 
+      {/* Z-pattern: the number that matters most (active alarms) sits top-left,
+          where the eye lands first, ahead of every secondary detail below. */}
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="overflow-hidden rounded border border-gray-700 bg-gray-800">
+          <div className="h-1" style={{ backgroundColor: alarmAccent }} />
+          <div className="p-4">
+            <div className="text-xs uppercase text-gray-500">Active alarm count</div>
+            <div className="mt-1 text-3xl font-bold" style={{ color: alarmAccent }}>{activeAlarms ?? "—"}</div>
+          </div>
+        </div>
+        <div className="overflow-hidden rounded border border-gray-700 bg-gray-800">
+          <div className="h-1" style={{ backgroundColor: connected ? "#0ca30c" : "#e66767" }} />
+          <div className="p-4">
+            <div className="text-xs uppercase text-gray-500">PLC / OPC UA connection</div>
+            <div className="mt-1 text-lg font-bold" style={{ color: connected ? "#0ca30c" : "#e66767" }}>
+              {status?.plc_connection || "Loading"}
+            </div>
+            <div className="text-xs text-gray-500">Reconnect count: {status?.reconnect_count ?? "N/A"}</div>
+          </div>
+        </div>
+        <div className="overflow-hidden rounded border border-gray-700 bg-gray-800">
+          <div className="h-1" style={{ backgroundColor: hasScenarioData ? "#3987e5" : "#c98500" }} />
+          <div className="p-4">
+            <div className="text-xs uppercase text-gray-500">Kịch bản gần nhất</div>
+            <div className="mt-1 truncate text-lg font-bold text-gray-100">{status?.scenario_id || "Not configured"}</div>
+            <div className="text-xs text-gray-500">{status?.current_label || "Not configured"}</div>
+          </div>
+        </div>
+      </div>
+
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        <SecurityItem label="PLC connection" value={status?.plc_connection || "Loading"} tone={status?.plc_connection === "CONNECTED" ? "good" : "bad"} />
-        <SecurityItem label="OPC UA connection" value={status?.opcua_connection || "Loading"} tone={status?.opcua_connection === "CONNECTED" ? "good" : "bad"} />
-        <SecurityItem label="Reconnect count" value={status?.reconnect_count ?? "N/A"} />
-        <SecurityItem label="Active alarm count" value={status?.active_alarm_count ?? "N/A"} />
         <SecurityItem label="Stale event count" value={status?.stale_event_count ?? "N/A"} />
         <SecurityItem label="Rejected operation count" value={status?.rejected_operation_count ?? "N/A"} />
         <SecurityItem label="Capture status" value={status?.capture_status || "Not configured"} tone="warn" />
         <SecurityItem label="Dataset session ID" value={status?.dataset_session_id || "No active collection"} tone="warn" />
-        <SecurityItem label="Scenario ID" value={status?.scenario_id || "Not configured"} tone={hasScenarioData ? "neutral" : "warn"} />
-        <SecurityItem label="Current label" value={status?.current_label || "Not configured"} tone={hasScenarioData ? "neutral" : "warn"} />
         <SecurityItem label="IDS module" value={status?.ids_module || "IDS module unavailable"} tone="warn" />
       </div>
 

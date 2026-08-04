@@ -1,9 +1,11 @@
 """Derive process events from real gateway status and tag updates."""
 
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ..events.models import EventRecord
 
+TZ = timezone(timedelta(hours=7))
 
 _MISSING = object()
 
@@ -11,6 +13,16 @@ _MISSING = object()
 # conveyor — if they are, the tag source is reporting an impossible physical
 # state (spoofed/replayed values rather than a real sensor read).
 _SPOOF_WATCH_KEYS = ("vat_1", "vat_2", "vat_3")
+
+# CD1/CD2/CD3 are live stage timers, not fixed setpoints — they legitimately
+# reset to 0 at the start of every cycle and can briefly overshoot the
+# configured maximum by a few percent right at a stage boundary due to ~1s
+# poll granularity. Neither is an attack. A real SETPOINT_ATTACK holds a
+# grossly out-of-band value (tens of thousands of ms) for as long as the
+# attacker keeps rewriting it, so requiring the condition to persist for a
+# few seconds — and never treating an exact 0 as "below minimum" — filters
+# normal cyclic behavior without missing a real one.
+TIMER_DEBOUNCE_S = 3.0
 
 
 class AlarmEngine:
@@ -20,6 +32,7 @@ class AlarmEngine:
         self._last_connected: bool | None = None
         self._last_reconnect_count = 0
         self._active_alarms: set[str] = set()
+        self._timer_candidate_since: dict[str, datetime] = {}
         self.stale_event_count = 0
         self.rejected_operation_count = 0
 
@@ -104,22 +117,31 @@ class AlarmEngine:
     def _check_stage_timer_range(self, key: str, value: Any, minimum: Any, maximum: Any) -> list[EventRecord]:
         alarm_key = f"timer_range:{key}"
         was_active = alarm_key in self._active_alarms
-        out_of_range = (
-            isinstance(value, (int, float)) and minimum is not None and maximum is not None
+
+        # value == 0 is a normal per-cycle reset, never treated as "below minimum".
+        candidate = (
+            isinstance(value, (int, float)) and value != 0
+            and minimum is not None and maximum is not None
             and not (minimum <= value <= maximum)
         )
 
-        if out_of_range and not was_active:
-            self._active_alarms.add(alarm_key)
-            return [EventRecord(
-                severity="ERROR",
-                event_type="STAGE_TIMER_OUT_OF_RANGE",
-                message=f"{key} = {value} outside safe range [{minimum}, {maximum}]",
-                tag_key=key,
-                new_value=value,
-                status="ACTIVE",
-            )]
-        if not out_of_range and was_active:
+        if candidate:
+            since = self._timer_candidate_since.setdefault(key, datetime.now(TZ))
+            persisted_s = (datetime.now(TZ) - since).total_seconds()
+            if persisted_s >= TIMER_DEBOUNCE_S and not was_active:
+                self._active_alarms.add(alarm_key)
+                return [EventRecord(
+                    severity="ERROR",
+                    event_type="STAGE_TIMER_OUT_OF_RANGE",
+                    message=f"{key} = {value} outside safe range [{minimum}, {maximum}] for over {TIMER_DEBOUNCE_S:.0f}s",
+                    tag_key=key,
+                    new_value=value,
+                    status="ACTIVE",
+                )]
+            return []
+
+        self._timer_candidate_since.pop(key, None)
+        if was_active:
             self._active_alarms.discard(alarm_key)
             return [EventRecord(
                 event_type="STAGE_TIMER_RANGE_CLEARED",

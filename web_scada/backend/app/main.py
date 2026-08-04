@@ -20,6 +20,7 @@ from .auth import auth_router, bootstrap_admin, get_ws_user
 from .database import init_db, insert_sample
 from .events import event_service
 from .history.router import history_router
+from .ids_upload.router import ids_upload_router
 from .ml_results.router import ml_results_router
 from .websocket.manager import ws_manager
 
@@ -111,6 +112,7 @@ app.include_router(auth_router, prefix="/api/auth")
 app.include_router(api_router, prefix="/api")
 app.include_router(history_router, prefix="/api/history")
 app.include_router(ml_results_router, prefix="/api/ml")
+app.include_router(ids_upload_router, prefix="/api/ids")
 
 
 @app.websocket("/ws/process")

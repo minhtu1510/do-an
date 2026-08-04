@@ -13,3 +13,10 @@ websockets>=12.0
 python-dotenv>=1.0.0
 bcrypt>=4.1.0
 pyjwt>=2.8.0
+
+# For loading/running the 3-layer IDS model from ../../train_eval.py (predict only,
+# training/SHAP still done via the CLI script directly, not through the web backend)
+scikit-learn>=1.3
+xgboost>=2.0
+imbalanced-learn>=0.12
+joblib>=1.3

@@ -127,3 +127,19 @@ export async function deleteUser(userId) {
     throw new Error((await res.json().catch(() => ({}))).detail || "Failed to delete user");
   }
 }
+
+export async function fetchIdsStatus() {
+  const res = await apiFetch("/ids/status");
+  return res.json();
+}
+
+export async function analyzeIdsPcap(file, plcIp, window) {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("plc_ip", plcIp);
+  formData.append("window", String(window));
+  const res = await apiFetch("/ids/analyze", { method: "POST", body: formData });
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.message || body.detail || "Phân tích thất bại");
+  return body;
+}

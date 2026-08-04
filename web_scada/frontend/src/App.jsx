@@ -7,6 +7,7 @@ import Trends from "./pages/Trends";
 import SecurityView from "./pages/SecurityView";
 import SystemStatus from "./pages/SystemStatus";
 import DatasetStats from "./pages/DatasetStats";
+import IdsUpload from "./pages/IdsUpload";
 import Login from "./pages/Login";
 import AdminUsers from "./pages/AdminUsers";
 import { AuthProvider, useAuth } from "./stores/authStore";
@@ -18,6 +19,7 @@ const NAV = [
   { to: "/trends", label: "Trends & History", end: false, minRole: "viewer" },
   { to: "/security", label: "Security / IDS", end: false, minRole: "operator" },
   { to: "/dataset", label: "Dataset & Model Stats", end: false, minRole: "operator" },
+  { to: "/ids-upload", label: "IDS Upload", end: false, minRole: "operator" },
   { to: "/system", label: "System Status", end: false, minRole: "viewer" },
   { to: "/admin/users", label: "Users", end: false, minRole: "admin" },
 ];
@@ -72,6 +74,7 @@ function Shell() {
           <Route path="/trends" element={<RequireRole minRole="viewer"><Trends /></RequireRole>} />
           <Route path="/security" element={<RequireRole minRole="operator"><SecurityView /></RequireRole>} />
           <Route path="/dataset" element={<RequireRole minRole="operator"><DatasetStats /></RequireRole>} />
+          <Route path="/ids-upload" element={<RequireRole minRole="operator"><IdsUpload /></RequireRole>} />
           <Route path="/system" element={<RequireRole minRole="viewer"><SystemStatus /></RequireRole>} />
           <Route path="/admin/users" element={<RequireRole minRole="admin"><AdminUsers /></RequireRole>} />
           <Route path="*" element={<Navigate to="/" replace />} />

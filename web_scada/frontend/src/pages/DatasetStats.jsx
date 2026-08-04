@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   fetchMlStatus,
   fetchMlSummary,
@@ -7,10 +7,25 @@ import {
   fetchMlFeatureImportance,
 } from "../services/api";
 import PageHeader from "../components/PageHeader";
+import Gauge from "../components/Gauge";
 
-// Single-hue sequential ramp (blue, light->dark) used for magnitude — same
-// hue family the rest of the app already uses for "good/neutral" state.
-const HEAT_STEPS = ["bg-blue-950", "bg-blue-900", "bg-blue-800", "bg-blue-700", "bg-blue-600", "bg-blue-500"];
+const BLUE = "#3987e5";
+const AQUA = "#199e70";
+const VIOLET = "#9085e9";
+const GOOD_GREEN = "#0ca30c";
+const WARN_AMBER = "#c98500";
+
+// Single-hue sequential ramp for magnitude (confusion-matrix cell intensity):
+// dark surface -> vivid sky blue, interpolated smoothly instead of a few
+// discrete steps so the heatmap actually pops.
+function heatColor(ratio) {
+  const from = [26, 32, 44];
+  const to = [56, 189, 248];
+  const r = Math.round(from[0] + (to[0] - from[0]) * ratio);
+  const g = Math.round(from[1] + (to[1] - from[1]) * ratio);
+  const b = Math.round(from[2] + (to[2] - from[2]) * ratio);
+  return `rgb(${r},${g},${b})`;
+}
 
 export default function DatasetStats() {
   const [status, setStatus] = useState(null);
@@ -53,6 +68,12 @@ export default function DatasetStats() {
 
   const configured = Boolean(status?.configured);
 
+  const bestAccuracyPct = useMemo(() => {
+    if (!summary || summary.length === 0) return null;
+    const values = summary.map((row) => row.metrics?.balanced_accuracy?.mean).filter((v) => typeof v === "number");
+    return values.length ? Math.max(...values) * 100 : null;
+  }, [summary]);
+
   return (
     <div className="p-6 space-y-6">
       <PageHeader
@@ -73,6 +94,31 @@ export default function DatasetStats() {
         </div>
       ) : (
         <>
+          {/* Z-pattern hero row — best result at a glance before the detail tables */}
+          <div className="grid gap-4 lg:grid-cols-[auto_1fr_1fr]">
+            <div className="flex items-center justify-center rounded border border-gray-700 bg-gray-800 p-4">
+              {bestAccuracyPct !== null ? (
+                <Gauge value={bestAccuracyPct} color={bestAccuracyPct >= 80 ? GOOD_GREEN : bestAccuracyPct >= 60 ? WARN_AMBER : "#e66767"} label="Best balanced acc." />
+              ) : (
+                <div className="text-center text-xs text-gray-500">Chưa có metric</div>
+              )}
+            </div>
+            <div className="overflow-hidden rounded border border-gray-700 bg-gray-800">
+              <div className="h-1" style={{ backgroundColor: BLUE }} />
+              <div className="p-4">
+                <div className="text-xs uppercase text-gray-500">Số experiment</div>
+                <div className="mt-1 text-2xl font-bold" style={{ color: BLUE }}>{status.experiments?.length ?? 0}</div>
+              </div>
+            </div>
+            <div className="overflow-hidden rounded border border-gray-700 bg-gray-800">
+              <div className="h-1" style={{ backgroundColor: AQUA }} />
+              <div className="p-4">
+                <div className="text-xs uppercase text-gray-500">Run trong experiment đang chọn</div>
+                <div className="mt-1 text-2xl font-bold" style={{ color: AQUA }}>{runs.length}</div>
+              </div>
+            </div>
+          </div>
+
           <div className="bg-gray-800 rounded border border-gray-700 overflow-hidden">
             <div className="border-b border-gray-700 px-4 py-3 text-sm font-semibold text-gray-200">
               Model performance summary (mean ± std across folds/seeds)
@@ -190,15 +236,19 @@ function ConfusionMatrix({ data }) {
           {data.matrix.map((row, i) => (
             <tr key={i}>
               <th className="px-2 py-1 text-right text-gray-500 font-normal">{data.labels[i]}</th>
-              {row.map((value, j) => (
-                <td
-                  key={j}
-                  title={`true=${data.labels[i]} pred=${data.labels[j]}: ${value}`}
-                  className={`px-2 py-1 text-center font-mono text-gray-100 ${heatClass(value, max)}`}
-                >
-                  {value}
-                </td>
-              ))}
+              {row.map((value, j) => {
+                const ratio = value > 0 ? value / max : 0;
+                return (
+                  <td
+                    key={j}
+                    title={`true=${data.labels[i]} pred=${data.labels[j]}: ${value}`}
+                    className="px-2 py-1 text-center font-mono font-semibold rounded"
+                    style={{ backgroundColor: heatColor(ratio), color: ratio > 0.55 ? "#0b0b0b" : "#e5e7eb" }}
+                  >
+                    {value}
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>
@@ -207,31 +257,29 @@ function ConfusionMatrix({ data }) {
   );
 }
 
-function heatClass(value, max) {
-  if (value <= 0) return "bg-gray-900";
-  const ratio = value / max;
-  const idx = Math.min(HEAT_STEPS.length - 1, Math.floor(ratio * HEAT_STEPS.length));
-  return HEAT_STEPS[idx];
-}
+const IMPORTANCE_COLORS = [BLUE, AQUA, VIOLET, "#d95926", "#d55181", "#c98500"];
 
 function FeatureImportanceBars({ features }) {
   const max = Math.max(1e-9, ...features.map((f) => f.importance ?? 0));
   return (
     <div className="space-y-2">
-      {features.map((f) => (
-        <div key={f.feature} title={`${f.feature}: ${f.importance}`}>
-          <div className="flex justify-between text-xs text-gray-400">
-            <span className="truncate pr-2">{f.feature}</span>
-            <span className="font-mono text-blue-300">{f.importance?.toFixed(3)}</span>
+      {features.map((f, i) => {
+        const color = IMPORTANCE_COLORS[i % IMPORTANCE_COLORS.length];
+        return (
+          <div key={f.feature} title={`${f.feature}: ${f.importance}`}>
+            <div className="flex justify-between text-xs text-gray-400">
+              <span className="truncate pr-2">{f.feature}</span>
+              <span className="font-mono font-semibold" style={{ color }}>{f.importance?.toFixed(3)}</span>
+            </div>
+            <div className="mt-1 h-2 rounded-full bg-gray-900">
+              <div
+                className="h-2 rounded-full transition-all"
+                style={{ width: `${Math.max(2, ((f.importance ?? 0) / max) * 100)}%`, backgroundColor: color }}
+              />
+            </div>
           </div>
-          <div className="mt-1 h-2 rounded-full bg-gray-900">
-            <div
-              className="h-2 rounded-full bg-blue-500"
-              style={{ width: `${Math.max(2, ((f.importance ?? 0) / max) * 100)}%` }}
-            />
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
