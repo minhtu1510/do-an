@@ -131,3 +131,33 @@ groups:
         requires_manual_gate: false
         preconditions: [Server security policy enabled, Client cert not trusted]
         evidence: [OpenSecureChannel failure, Certificate rejected status]
+      - id: OPCUA_READ_SCRAPING
+        label: OPCUA_READ_SCRAPING
+        objective: Rapid repeated Read requests against real process tags on a single session to characterize data-exfiltration-style scraping, distinct from Browse (structure) and Subscription Flood (server-push volume).
+        protocol: OPC UA
+        mitre_technique: T0802
+        mitre_technique_name: Automated Collection
+        safe_to_execute: true
+        requires_manual_gate: false
+        preconditions: [Known process tags, Bounded read count and rate]
+        evidence: [Read request burst, Read rate, Sampled values]
+      - id: OPCUA_METHOD_CALL_ABUSE
+        label: OPCUA_METHOD_CALL_ABUSE
+        objective: Discover and attempt to invoke any exposed Method node without prior authorization context.
+        protocol: OPC UA
+        mitre_technique: T0871
+        mitre_technique_name: Execution through API
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Server exposes at least one Method node under Objects, Operator approval, Recovery plan]
+        evidence: [Call request, Method result or rejection, Server state before/after]
+      - id: OPCUA_PROTOCOL_FUZZ
+        label: OPCUA_PROTOCOL_FUZZ
+        objective: Send a small bounded set of malformed OPC UA binary (UA-TCP) frames and record server response, distinct from PROTOCOL_FUZZ's S7comm target.
+        protocol: OPC UA
+        mitre_technique: T0814
+        mitre_technique_name: Denial of Service
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Dedicated lab window, Fuzz frame count bounded, Recovery plan]
+        evidence: [Malformed UA-TCP frame trace, Server response or timeout, Device health log]

