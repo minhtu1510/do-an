@@ -588,7 +588,7 @@ async def opcua_malicious_write() -> list[str]:
         f"target_node={WRITABLE_TEST_NODE}; delta={MALICIOUS_WRITE_DELTA}",
     ]
     try:
-        async with Client(url=OPC_URL, timeout=5) as client:
+        async with Client(url=OPC_URL, timeout=15) as client:
             await _attempt_write_and_rollback(client, WRITABLE_TEST_NODE, _bounded_delta, evidence)
     except Exception as exc:
         evidence.append(f"aborted_after_error={type(exc).__name__}: {exc or '(empty message)'}; if a write already succeeded above, verify {WRITABLE_TEST_NODE} was restored manually")
@@ -609,7 +609,7 @@ async def opcua_config_manipulation() -> list[str]:
 
     evidence = [f"target_config_node={CONFIG_MANIPULATION_NODE}; delta={MALICIOUS_WRITE_DELTA}"]
     try:
-        async with Client(url=OPC_URL, timeout=5) as client:
+        async with Client(url=OPC_URL, timeout=15) as client:
             await _attempt_write_and_rollback(client, CONFIG_MANIPULATION_NODE, _bounded_delta, evidence)
     except Exception as exc:
         evidence.append(f"aborted_after_error={type(exc).__name__}: {exc or '(empty message)'}; if a write already succeeded above, verify {CONFIG_MANIPULATION_NODE} was restored manually")
