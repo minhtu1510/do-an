@@ -127,9 +127,12 @@ async def opcua_benign_reconnect(repeat: int = 3) -> list[str]:
 
     evidence = []
     for i in range(repeat):
-        async with Client(url=OPC_URL, timeout=5) as client:
-            namespace_array = await client.get_namespace_array()
-            evidence.append(f"reconnect_{i + 1}: namespaces={len(namespace_array)}")
+        try:
+            async with Client(url=OPC_URL, timeout=5) as client:
+                namespace_array = await client.get_namespace_array()
+                evidence.append(f"reconnect_{i + 1}: namespaces={len(namespace_array)}")
+        except Exception as exc:
+            evidence.append(f"reconnect_{i + 1}: failed={type(exc).__name__}: {exc or '(empty message)'}")
         await asyncio.sleep(0.5)
     return evidence
 
@@ -138,25 +141,33 @@ async def opcua_node_browse(limit: int = 30) -> list[str]:
     from asyncua import Client
 
     evidence = []
-    async with Client(url=OPC_URL, timeout=5) as client:
-        children = await client.nodes.objects.get_children()
-        for child in children[:limit]:
-            name = (await child.read_browse_name()).Name
-            evidence.append(f"object: {name} {child.nodeid}")
-            for sub in (await child.get_children())[:5]:
-                sub_name = (await sub.read_browse_name()).Name
-                evidence.append(f"node: {sub_name} {sub.nodeid}")
-                if len(evidence) >= limit:
-                    return evidence
+    try:
+        async with Client(url=OPC_URL, timeout=5) as client:
+            children = await client.nodes.objects.get_children()
+            for child in children[:limit]:
+                name = (await child.read_browse_name()).Name
+                evidence.append(f"object: {name} {child.nodeid}")
+                for sub in (await child.get_children())[:5]:
+                    sub_name = (await sub.read_browse_name()).Name
+                    evidence.append(f"node: {sub_name} {sub.nodeid}")
+                    if len(evidence) >= limit:
+                        return evidence
+    except Exception as exc:
+        evidence.append(f"aborted_after_error={type(exc).__name__}: {exc or '(empty message)'}")
     return evidence
 
 
 async def opcua_endpoint_discovery() -> list[str]:
     from asyncua import Client
 
-    async with Client(url=OPC_URL, timeout=5) as client:
-        endpoints = await client.connect_and_get_server_endpoints()
-        return [f"endpoint: {ep.EndpointUrl} policy={ep.SecurityPolicyUri}" for ep in endpoints]
+    evidence = []
+    try:
+        async with Client(url=OPC_URL, timeout=5) as client:
+            endpoints = await client.connect_and_get_server_endpoints()
+            evidence.extend(f"endpoint: {ep.EndpointUrl} policy={ep.SecurityPolicyUri}" for ep in endpoints)
+    except Exception as exc:
+        evidence.append(f"aborted_after_error={type(exc).__name__}: {exc or '(empty message)'}")
+    return evidence
 
 
 async def opcua_benign_subscription(duration: float = 5.0) -> list[str]:
@@ -176,19 +187,22 @@ async def opcua_benign_subscription(duration: float = 5.0) -> list[str]:
         def datachange_notification(self, node, val, data):
             evidence.append(f"datachange: {node.nodeid}={val!r}")
 
-    async with Client(url=OPC_URL, timeout=5) as client:
-        sub = await client.create_subscription(500, Handler())
-        handles = []
-        for node_id in nodes:
-            node = client.get_node(node_id)
-            try:
-                value = await node.read_value()
-                evidence.append(f"initial: {node_id}={value!r}")
-                handles.append(await sub.subscribe_data_change(node))
-            except Exception as exc:
-                evidence.append(f"read_failed: {node_id}: {exc}")
-        await asyncio.sleep(duration)
-        await sub.delete()
+    try:
+        async with Client(url=OPC_URL, timeout=5) as client:
+            sub = await client.create_subscription(500, Handler())
+            handles = []
+            for node_id in nodes:
+                node = client.get_node(node_id)
+                try:
+                    value = await node.read_value()
+                    evidence.append(f"initial: {node_id}={value!r}")
+                    handles.append(await sub.subscribe_data_change(node))
+                except Exception as exc:
+                    evidence.append(f"read_failed: {node_id}: {exc}")
+            await asyncio.sleep(duration)
+            await sub.delete()
+    except Exception as exc:
+        evidence.append(f"aborted_after_error={type(exc).__name__}: {exc or '(empty message)'}")
     return evidence
 
 
@@ -206,17 +220,21 @@ async def opcua_write_denied() -> list[str]:
         'ns=3;s="BangTai"',
     ]
     evidence = []
-    async with Client(url=OPC_URL, timeout=5) as client:
-        for node_id in nodes:
-            node = client.get_node(node_id)
-            try:
-                before = await node.read_value()
-                await node.write_value(before)
-                after = await node.read_value()
-                evidence.append(f"{node_id}: UNEXPECTED_WRITE_SUCCESS same_value={before!r} after={after!r}")
-            except Exception as exc:
-                evidence.append(f"{node_id}: write_rejected={type(exc).__name__}: {exc}")
-                return evidence
+    try:
+        async with Client(url=OPC_URL, timeout=5) as client:
+            for node_id in nodes:
+                node = client.get_node(node_id)
+                try:
+                    before = await node.read_value()
+                    await node.write_value(before)
+                    after = await node.read_value()
+                    evidence.append(f"{node_id}: UNEXPECTED_WRITE_SUCCESS same_value={before!r} after={after!r}")
+                except Exception as exc:
+                    evidence.append(f"{node_id}: write_rejected={type(exc).__name__}: {exc}")
+                    return evidence
+    except Exception as exc:
+        evidence.append(f"aborted_after_error={type(exc).__name__}: {exc or '(empty message)'}")
+        return evidence
     evidence.append("No node rejected same-value write; review PLC OPC UA write permissions before using this as WRITE_DENIED evidence.")
     return evidence
 
@@ -231,18 +249,22 @@ async def opcua_invalid_write() -> list[str]:
         ('ns=3;s="HienThi"', ua.Variant(True, ua.VariantType.Boolean)),
     ]
     evidence = []
-    async with Client(url=OPC_URL, timeout=5) as client:
-        for node_id, variant in attempts:
-            node = client.get_node(node_id)
-            before = None
-            try:
-                before = await node.read_value()
-                await node.write_value(ua.DataValue(variant))
-                after = await node.read_value()
-                evidence.append(f"{node_id}: UNEXPECTED_INVALID_WRITE_SUCCESS before={before!r} after={after!r} variant={variant.Value!r}/{variant.VariantType.name}")
-            except Exception as exc:
-                evidence.append(f"{node_id}: invalid_write_rejected={type(exc).__name__}: {exc}; before={before!r}")
-                return evidence
+    try:
+        async with Client(url=OPC_URL, timeout=5) as client:
+            for node_id, variant in attempts:
+                node = client.get_node(node_id)
+                before = None
+                try:
+                    before = await node.read_value()
+                    await node.write_value(ua.DataValue(variant))
+                    after = await node.read_value()
+                    evidence.append(f"{node_id}: UNEXPECTED_INVALID_WRITE_SUCCESS before={before!r} after={after!r} variant={variant.Value!r}/{variant.VariantType.name}")
+                except Exception as exc:
+                    evidence.append(f"{node_id}: invalid_write_rejected={type(exc).__name__}: {exc}; before={before!r}")
+                    return evidence
+    except Exception as exc:
+        evidence.append(f"aborted_after_error={type(exc).__name__}: {exc or '(empty message)'}")
+        return evidence
     evidence.append("All invalid-write attempts unexpectedly succeeded; stop and review OPC UA permissions/types.")
     return evidence
 
@@ -324,16 +346,20 @@ async def opcua_subscription_flood() -> list[str]:
             pass
 
     node_id = 'ns=3;s="HienThi"'
-    async with Client(url=OPC_URL, timeout=5) as client:
-        node = client.get_node(node_id)
-        sub = await client.create_subscription(interval_ms, _QuietHandler())
-        try:
-            handles = await sub.subscribe_data_change([node for _ in range(item_count)])
-            evidence.append(f"subscribed monitored_items={len(handles)} on node={node_id}")
-            await asyncio.sleep(hold_s)
-        finally:
-            await sub.delete()
-            evidence.append("subscription deleted")
+    try:
+        async with Client(url=OPC_URL, timeout=5) as client:
+            node = client.get_node(node_id)
+            sub = await client.create_subscription(interval_ms, _QuietHandler())
+            try:
+                handles = await sub.subscribe_data_change([node for _ in range(item_count)])
+                evidence.append(f"subscribed monitored_items={len(handles)} on node={node_id}")
+                await asyncio.sleep(hold_s)
+            finally:
+                await sub.delete()
+                evidence.append("subscription deleted")
+    except Exception as exc:
+        evidence.append(f"aborted_after_error={type(exc).__name__}: {exc or '(empty message)'}")
+        return evidence
 
     after_status, after_body = http_request("GET", "/plc/status")
     evidence.append(f"web_scada_after_status={after_status}: {after_body}")
@@ -364,23 +390,48 @@ async def opcua_read_scraping() -> list[str]:
         f"targets={nodes}",
     ]
 
+    # The read loop is expected to run for roughly read_count * interval_s
+    # (plus per-read latency), which can comfortably exceed a small fixed
+    # client timeout -- the asyncua Client also uses `timeout` for internal
+    # keepalive/session requests, not just the initial connect. Size it to
+    # the scenario's own expected runtime instead of a flat 5s, and stay
+    # under the ~30s session ceiling this testbed's server was observed to
+    # grant regardless of what is requested.
+    estimated_runtime_s = read_count * interval_s
+    client_timeout_s = min(25, max(10, int(estimated_runtime_s) + 5))
+    completed_reads = 0
+
     t0 = time.time()
-    async with Client(url=OPC_URL, timeout=5) as client:
-        node_objs = [client.get_node(n) for n in nodes]
-        sample_every = max(1, read_count // 10)
-        for i in range(read_count):
-            values = []
-            for node in node_objs:
-                try:
-                    values.append(await node.read_value())
-                except Exception as exc:
-                    values.append(f"ERR:{type(exc).__name__}")
-            if i % sample_every == 0:
-                evidence.append(f"read_{i + 1}: {dict(zip(nodes, values))}")
-            await asyncio.sleep(interval_s)
+    try:
+        async with Client(url=OPC_URL, timeout=client_timeout_s) as client:
+            node_objs = [client.get_node(n) for n in nodes]
+            sample_every = max(1, read_count // 10)
+            for i in range(read_count):
+                values = []
+                for node in node_objs:
+                    try:
+                        values.append(await node.read_value())
+                    except Exception as exc:
+                        values.append(f"ERR:{type(exc).__name__}")
+                completed_reads = i + 1
+                if i % sample_every == 0:
+                    evidence.append(f"read_{i + 1}: {dict(zip(nodes, values))}")
+                await asyncio.sleep(interval_s)
+    except Exception as exc:
+        # Keep whatever evidence was already collected instead of losing it
+        # to an exception that unwinds past `async with` -- an empty-message
+        # asyncio.TimeoutError here is expected if completed_reads is high
+        # (session/keepalive limit hit near the end), not a read failure.
+        elapsed = max(time.time() - t0, 0.001)
+        evidence.append(
+            f"aborted_after_error={type(exc).__name__}: {exc or '(empty message)'}; "
+            f"completed_reads={completed_reads}/{read_count} elapsed_s={elapsed:.1f} client_timeout_s={client_timeout_s}"
+        )
+        return evidence
+
     elapsed = max(time.time() - t0, 0.001)
     total_reads = read_count * len(nodes)
-    evidence.append(f"summary: total_reads={total_reads} elapsed_s={elapsed:.1f} reads_per_s={total_reads / elapsed:.1f}")
+    evidence.append(f"summary: total_reads={total_reads} elapsed_s={elapsed:.1f} reads_per_s={total_reads / elapsed:.1f} client_timeout_s={client_timeout_s}")
     return evidence
 
 
@@ -392,28 +443,31 @@ async def opcua_method_call_abuse() -> list[str]:
     from asyncua import Client, ua
 
     evidence = []
-    async with Client(url=OPC_URL, timeout=5) as client:
-        objects = client.nodes.objects
-        method_nodes = []
-        for child in await objects.get_children():
-            try:
-                if await child.read_node_class() == ua.NodeClass.Method:
-                    name = (await child.read_browse_name()).Name
-                    method_nodes.append((name, child))
-            except Exception:
-                continue
+    try:
+        async with Client(url=OPC_URL, timeout=5) as client:
+            objects = client.nodes.objects
+            method_nodes = []
+            for child in await objects.get_children():
+                try:
+                    if await child.read_node_class() == ua.NodeClass.Method:
+                        name = (await child.read_browse_name()).Name
+                        method_nodes.append((name, child))
+                except Exception:
+                    continue
 
-        evidence.append(f"method_nodes_found={len(method_nodes)}")
-        if not method_nodes:
-            evidence.append("No exposed Method node under Objects on this server; Call-service abuse is not applicable to this configuration (not forced/faked).")
-            return evidence
+            evidence.append(f"method_nodes_found={len(method_nodes)}")
+            if not method_nodes:
+                evidence.append("No exposed Method node under Objects on this server; Call-service abuse is not applicable to this configuration (not forced/faked).")
+                return evidence
 
-        for name, node in method_nodes[:3]:
-            try:
-                result = await objects.call_method(node)
-                evidence.append(f"UNEXPECTED_CALL_SUCCESS: {name} -> {result!r}")
-            except Exception as exc:
-                evidence.append(f"{name}: call_rejected={type(exc).__name__}: {exc}")
+            for name, node in method_nodes[:3]:
+                try:
+                    result = await objects.call_method(node)
+                    evidence.append(f"UNEXPECTED_CALL_SUCCESS: {name} -> {result!r}")
+                except Exception as exc:
+                    evidence.append(f"{name}: call_rejected={type(exc).__name__}: {exc}")
+    except Exception as exc:
+        evidence.append(f"aborted_after_error={type(exc).__name__}: {exc or '(empty message)'}")
     return evidence
 
 
@@ -524,8 +578,11 @@ async def opcua_malicious_write() -> list[str]:
         "human_misconfiguration_model=Anonymous/No-Security endpoint exposes a writable node",
         f"target_node={WRITABLE_TEST_NODE}; delta={MALICIOUS_WRITE_DELTA}",
     ]
-    async with Client(url=OPC_URL, timeout=5) as client:
-        await _attempt_write_and_rollback(client, WRITABLE_TEST_NODE, _bounded_delta, evidence)
+    try:
+        async with Client(url=OPC_URL, timeout=5) as client:
+            await _attempt_write_and_rollback(client, WRITABLE_TEST_NODE, _bounded_delta, evidence)
+    except Exception as exc:
+        evidence.append(f"aborted_after_error={type(exc).__name__}: {exc or '(empty message)'}; if a write already succeeded above, verify {WRITABLE_TEST_NODE} was restored manually")
     return evidence
 
 
@@ -542,8 +599,11 @@ async def opcua_config_manipulation() -> list[str]:
         ]
 
     evidence = [f"target_config_node={CONFIG_MANIPULATION_NODE}; delta={MALICIOUS_WRITE_DELTA}"]
-    async with Client(url=OPC_URL, timeout=5) as client:
-        await _attempt_write_and_rollback(client, CONFIG_MANIPULATION_NODE, _bounded_delta, evidence)
+    try:
+        async with Client(url=OPC_URL, timeout=5) as client:
+            await _attempt_write_and_rollback(client, CONFIG_MANIPULATION_NODE, _bounded_delta, evidence)
+    except Exception as exc:
+        evidence.append(f"aborted_after_error={type(exc).__name__}: {exc or '(empty message)'}; if a write already succeeded above, verify {CONFIG_MANIPULATION_NODE} was restored manually")
     return evidence
 
 
@@ -557,14 +617,18 @@ async def opcua_read_timing_covert() -> list[str]:
     node_id = os.getenv("DAY8_COVERT_NODE", 'ns=3;s="HienThi"')
     evidence = [f"node={node_id}; bits={pattern}; short_s={short_s}; long_s={long_s}"]
 
-    async with Client(url=OPC_URL, timeout=5) as client:
-        node = client.get_node(node_id)
-        for i, bit in enumerate(pattern, 1):
-            t0 = time.time()
-            value = await node.read_value()
-            delay = long_s if bit == "1" else short_s
-            evidence.append(f"symbol_{i}: bit={bit} value={value!r} read_ts={t0:.3f} next_delay_s={delay}")
-            await asyncio.sleep(delay)
+    try:
+        async with Client(url=OPC_URL, timeout=5) as client:
+            node = client.get_node(node_id)
+            for i, bit in enumerate(pattern, 1):
+                t0 = time.time()
+                value = await node.read_value()
+                delay = long_s if bit == "1" else short_s
+                evidence.append(f"symbol_{i}: bit={bit} value={value!r} read_ts={t0:.3f} next_delay_s={delay}")
+                await asyncio.sleep(delay)
+    except Exception as exc:
+        evidence.append(f"aborted_after_error={type(exc).__name__}: {exc or '(empty message)'}")
+        return evidence
     evidence.append("no PLC value was written; covert signal exists only in read timing")
     return evidence
 
