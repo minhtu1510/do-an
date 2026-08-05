@@ -187,8 +187,12 @@ async def opcua_benign_subscription(duration: float = 5.0) -> list[str]:
         def datachange_notification(self, node, val, data):
             evidence.append(f"datachange: {node.nodeid}={val!r}")
 
+    # Needs to outlast connect + create_subscription + 6 reads + the sleep(duration)
+    # itself + delete -- a flat 5s timeout is tighter than duration=5.0 alone
+    # already requires, so it was tripping on almost every run.
+    client_timeout_s = min(25, int(duration) + 10)
     try:
-        async with Client(url=OPC_URL, timeout=5) as client:
+        async with Client(url=OPC_URL, timeout=client_timeout_s) as client:
             sub = await client.create_subscription(500, Handler())
             handles = []
             for node_id in nodes:
@@ -202,7 +206,7 @@ async def opcua_benign_subscription(duration: float = 5.0) -> list[str]:
             await asyncio.sleep(duration)
             await sub.delete()
     except Exception as exc:
-        evidence.append(f"aborted_after_error={type(exc).__name__}: {exc or '(empty message)'}")
+        evidence.append(f"aborted_after_error={type(exc).__name__}: {exc or '(empty message)'}; client_timeout_s={client_timeout_s}")
     return evidence
 
 
@@ -345,9 +349,14 @@ async def opcua_subscription_flood() -> list[str]:
         def datachange_notification(self, node, val, data):
             pass
 
+    # Same class of bug as opcua_benign_subscription: the client has to stay
+    # connected through connect + subscribe + sleep(hold_s) + delete, so the
+    # timeout must exceed hold_s with margin, not a flat 5s.
+    client_timeout_s = min(35, int(hold_s) + 10)
+
     node_id = 'ns=3;s="HienThi"'
     try:
-        async with Client(url=OPC_URL, timeout=5) as client:
+        async with Client(url=OPC_URL, timeout=client_timeout_s) as client:
             node = client.get_node(node_id)
             sub = await client.create_subscription(interval_ms, _QuietHandler())
             try:
