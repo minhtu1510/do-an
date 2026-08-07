@@ -220,6 +220,7 @@ function RunPicker({ experiments, selectedExperiment, onExperiment, runs, select
 function ConfusionMatrix({ data }) {
   const flat = data.matrix.flat();
   const max = Math.max(1, ...flat);
+  const rowTotals = data.matrix.map((row) => row.reduce((a, b) => a + b, 0));
 
   return (
     <div className="overflow-x-auto">
@@ -238,14 +239,26 @@ function ConfusionMatrix({ data }) {
               <th className="px-2 py-1 text-right text-gray-500 font-normal">{data.labels[i]}</th>
               {row.map((value, j) => {
                 const ratio = value > 0 ? value / max : 0;
+                const rowTotal = rowTotals[i];
+                const rate = rowTotal > 0 ? (value / rowTotal) * 100 : 0;
+                const isDiagonal = i === j;
                 return (
-                  <td
-                    key={j}
-                    title={`true=${data.labels[i]} pred=${data.labels[j]}: ${value}`}
-                    className="px-2 py-1 text-center font-mono font-semibold rounded"
-                    style={{ backgroundColor: heatColor(ratio), color: ratio > 0.55 ? "#0b0b0b" : "#e5e7eb" }}
-                  >
-                    {value}
+                  <td key={j} className="group relative px-2 py-1 text-center">
+                    <div
+                      className="rounded px-2 py-1 font-mono font-semibold"
+                      style={{ backgroundColor: heatColor(ratio), color: ratio > 0.55 ? "#0b0b0b" : "#e5e7eb" }}
+                    >
+                      {value}
+                    </div>
+                    {value > 0 && (
+                      <div className="pointer-events-none absolute left-1/2 top-full z-10 mt-1 hidden w-max -translate-x-1/2 rounded border border-gray-700 bg-gray-900 px-2 py-1.5 text-left text-[11px] normal-case text-gray-300 shadow-lg group-hover:block">
+                        <div className="font-semibold text-gray-100">true={data.labels[i]} → pred={data.labels[j]}</div>
+                        <div className="text-gray-400">{value} / {rowTotal} flow trong hàng này</div>
+                        <div className={isDiagonal ? "text-green-400" : "text-red-400"}>
+                          {isDiagonal ? "Đúng" : "Sai"}: {rate.toFixed(1)}%
+                        </div>
+                      </div>
+                    )}
                   </td>
                 );
               })}

