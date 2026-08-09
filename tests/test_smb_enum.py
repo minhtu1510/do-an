@@ -75,11 +75,11 @@ def smb_negotiate_only(ip, port=445, timeout=3.0):
     KHÔNG thực hiện Session Setup → KHÔNG có NTLMSSP.
     Tạo traffic: TCP SYN → SMB2 NEGOTIATE REQUEST → close
     """
-    # SMB2 Negotiate Protocol Request (minimal)
-    smb2_negotiate = bytes([
-        # NetBIOS Session Service header (4 bytes)
-        0x00, 0x00, 0x00, 0x2e,
-        # SMB2 Header
+    # SMB2 Negotiate Protocol Request (minimal). NBSS length is computed from
+    # the actual message below instead of hardcoded -- a fixed value here
+    # previously desynced from the real payload size and made the server
+    # silently drop every probe (message boundary was wrong on the wire).
+    smb2_header = bytes([
         0xfe, 0x53, 0x4d, 0x42,  # ProtocolId: \xfeSMB
         0x40, 0x00,              # StructureSize: 64
         0x00, 0x00,              # CreditCharge: 0
@@ -93,19 +93,22 @@ def smb_negotiate_only(ip, port=445, timeout=3.0):
         0x00, 0x00, 0x00, 0x00,  # Reserved
         0x00, 0x00, 0x00, 0x00,  # TreeId: 0
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  # SessionId: 0
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  # Signature
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  # Signature (16 bytes)
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        # Negotiate body
+    ])
+    negotiate_body = bytes([
         0x24, 0x00,              # StructureSize: 36
         0x01, 0x00,              # DialectCount: 1
         0x00, 0x00,              # SecurityMode: 0
         0x00, 0x00,              # Reserved
         0x00, 0x00, 0x00, 0x00,  # Capabilities: 0
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  # ClientGuid
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  # ClientGuid (16 bytes)
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00,  # ClientStartTime: 0
-        0x02, 0x02,              # Dialect: SMB 2.0.2
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  # ClientStartTime: 8 bytes
+        0x02, 0x02,              # Dialects[0]: SMB 2.0.2
     ])
+    smb2_msg = smb2_header + negotiate_body
+    smb2_negotiate = bytes([0x00]) + len(smb2_msg).to_bytes(3, "big") + smb2_msg
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.settimeout(timeout)
