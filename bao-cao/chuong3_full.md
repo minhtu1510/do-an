@@ -74,6 +74,49 @@ PLC, Engineering Station và Attacker Machine được nối qua switch TL-SG108
 
 Các kịch bản Ngày 1 đến Ngày 6 không sử dụng Nmap hoặc Metasploit. Toàn bộ hành vi tấn công vào PLC được tạo bằng chương trình Python của nhóm. Cách làm này cho phép điều chỉnh chính xác tần suất gửi, địa chỉ vùng nhớ và thời lượng của từng lần chạy, đồng thời ghi nhật ký thời gian sự kiện ngay trong quá trình chạy.
 
+### 3.2.3. Chương trình điều khiển trên PLC
+
+> Ghi chú đánh số: mục này chèn thêm 4 hình mới (Hình 3.17-3.20), khiến các hình từ 3.3 trở đi trong bản gốc bị lệch số nếu đặt mục này ở đây. Khi ghép bản Word cuối cùng, cần đánh số lại toàn bộ hình từ vị trí này trở về sau, hoặc chuyển mục này xuống cuối chương (trước Tiểu kết) để giữ nguyên số hình 3.1-3.16 đã dùng ở các mục sau.
+
+Ba chương trình điều khiển được nạp trên PLC không chỉ đóng vai trò tạo lưu lượng vận hành bình thường, mà còn là đối tượng bị nhắm tới trực tiếp bởi các kịch bản thao túng logic trình bày ở Chương 4 — mỗi biến xuất hiện trong các module SETPOINT_ATTACK, SENSOR_SPOOF hay STEALTHY_WRITE đều là một biến thật trong ba chương trình dưới đây, không phải địa chỉ chọn ngẫu nhiên. Vì vậy, việc hiểu logic điều khiển hợp lệ là điều kiện cần để hiểu vì sao một thao tác ghi đè lại có thể gây hậu quả vận hành thực sự.
+
+**a) Chương trình điều khiển đèn giao thông**
+
+Chương trình mô phỏng chu trình hoạt động của một cột đèn giao thông theo trình tự Xanh — Vàng — Đỏ, dùng các bộ đếm thời gian (Timer) để chuyển trạng thái giữa các đèn. Khi người vận hành nhấn nút START, hệ thống bật đèn Xanh (Q0.6) và reset đèn Vàng/Đỏ; ngay khi đèn Xanh sáng, Timer T1 được kích hoạt và bắt đầu đếm ngược. Khi T1 kết thúc, chương trình tắt đèn Xanh, bật đèn Vàng (Q0.4) và khởi động Timer T2; tương tự, khi T2 kết thúc, tắt đèn Vàng, bật đèn Đỏ (Q0.2) rồi tự động lặp lại chu trình từ đầu. Nút STOP có thể được nhấn bất kỳ lúc nào để ngắt toàn bộ chu trình và tắt tất cả các đèn.
+
+**Hình 3.17. Chương trình điều khiển đèn giao thông trên TIA Portal**
+
+**Hình 3.18. Giao diện HMI mô phỏng đèn giao thông qua WinCC Runtime**
+
+**b) Chương trình điều khiển bơm nước tự động**
+
+Chương trình mô phỏng hoạt động của một trạm bơm nước tự động, dựa trên ba biến chính: `Water_level` (mực nước hiện tại, đo qua cảm biến), `Low_threshold` (ngưỡng thấp, cần bơm lại để tránh cạn bể) và `High_threshold` (ngưỡng đầy, cần tắt bơm để tránh tràn bể). Logic điều khiển đơn giản: nếu `Water_level` xuống dưới `Low_threshold` và bơm đang tắt thì mở bơm; nếu `Water_level` vượt `High_threshold` và bơm đang chạy thì tắt bơm. Chương trình dùng ngôn ngữ LAD trong TIA Portal, với các hằng số ngưỡng lưu trong một Data Block và biến `Water_level` lưu ở vùng Marker.
+
+**Hình 3.19. Chương trình điều khiển bơm nước tự động trên TIA Portal**
+
+**c) Chương trình điều khiển băng truyền**
+
+Đây là chương trình phức tạp nhất trong ba chương trình, và cũng là mục tiêu chính của phần lớn kịch bản thao túng logic ở Chương 4, vì có nhiều biến vận hành có ý nghĩa vật lý rõ ràng. Chương trình mô phỏng một dây chuyền băng truyền công nghiệp với ba trạm xử lý tuần tự, sử dụng các biến sau:
+
+**Bảng 3.15. Biến vận hành của chương trình điều khiển băng truyền**
+
+| Địa chỉ | Tên biến | Ý nghĩa |
+|---|---|---|
+| M5.0 | START | Bit khởi động hệ thống băng truyền |
+| M5.1 | STOP | Bit dừng khẩn cấp toàn hệ thống |
+| M5.4 | Vat_1 | Cảm biến phát hiện vật thể tại trạm 1 |
+| M5.6 | Vat_2 | Cảm biến phát hiện vật thể tại trạm 2 |
+| M6.0 | Vat_3 | Cảm biến phát hiện vật thể tại trạm 3 |
+| MD54 | CD1 | Thời gian dừng xử lý tại trạm 1 (DINT, mili-giây) |
+| MD58 | CD2 | Thời gian dừng xử lý tại trạm 2 (DINT, mili-giây) |
+| MD62 | CD3 | Thời gian dừng xử lý tại trạm 3 (DINT, mili-giây) |
+
+Khi người vận hành nhấn START, bit M5.0 được kích hoạt và băng truyền bắt đầu chạy, đưa vật thể di chuyển về phía trạm 1. Khi cảm biến Vat_1 (M5.4) phát hiện vật thể, băng truyền dừng lại và Timer CD1 được kích hoạt; sau khi CD1 kết thúc, băng truyền tiếp tục chạy để đưa vật thể sang trạm 2. Trạm 2 và trạm 3 lặp lại logic tương tự với Vat_2/CD2 và Vat_3/CD3. Khi vật thể đi qua hết trạm 3, một chu kỳ xử lý hoàn tất và hệ thống sẵn sàng tiếp nhận vật thể tiếp theo. Nút STOP kích hoạt bit M5.1 bất kỳ lúc nào, ngắt toàn bộ hoạt động và đưa hệ thống về trạng thái chờ an toàn.
+
+**Hình 3.20. Chương trình điều khiển băng truyền trên TIA Portal**
+
+Bảng 3.15 chính là bảng tra cứu dùng xuyên suốt Chương 4: `SETPOINT_ATTACK` nhắm vào CD1/CD2/CD3 (MD54/58/62) để phá vỡ nhịp xử lý; `SENSOR_SPOOF` giả mạo Vat_1/Vat_2/Vat_3 (M5.4/M5.6/M6.0) để đánh lừa logic điều phối; `STEALTHY_WRITE` thao túng trực tiếp cặp START/STOP (M5.0/M5.1). Việc trình bày logic hợp lệ trước, cơ chế tấn công sau, giúp thấy rõ mỗi kịch bản đang phá vỡ đúng giả định nào của chương trình điều khiển gốc.
+
 ## 3.3. Kiến trúc mạng và cơ chế quan sát
 
 ### 3.3.1. Sơ đồ kết nối mạng

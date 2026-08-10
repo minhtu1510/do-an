@@ -68,3 +68,4 @@ npm-debug.log*
 web_scada/backend/data/
 
 /bao-cao/
+/data_opc/

@@ -139,7 +139,7 @@ def collect(args) -> int:
     with open(timeline_path, "a", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         if not file_exists:
-            writer.writerow(["start", "end", "label", "start_human", "end_human", "cycle", "status"])
+            writer.writerow(["start", "end", "label", "episode", "start_human", "end_human", "cycle", "status"])
             f.flush()
 
         while not _stop["flag"]:
@@ -165,8 +165,10 @@ def collect(args) -> int:
             print(f"  [>] attack ket thuc {human(t_end)} ({status})")
 
             # 3. Ghi timeline (epoch giay -- tuong thich extract_opcua_features.py).
+            #    'episode' RIENG moi cycle -> grouped CV.
+            episode_id = f"day8_c{cycle:03d}_{scenario}"
             writer.writerow([
-                f"{t_start:.3f}", f"{t_end:.3f}", scenario,
+                f"{t_start:.3f}", f"{t_end:.3f}", scenario, episode_id,
                 human(t_start), human(t_end), cycle, status,
             ])
             f.flush()

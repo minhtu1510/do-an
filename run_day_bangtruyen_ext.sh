@@ -208,17 +208,15 @@ _run_attack() {
 
 run_kill_chain() {
     local ep="${SESSION_ID}:day${DAY}:KILL_CHAIN"
-    label "KILL_CHAIN" "START" "$ep" "5stage_apt"
+    label "KILL_CHAIN" "START" "$ep" "foothold_s7_then_lateral_movement_hmi"
     "$PY_CMD" -u -m attacks_ext.kill_chain \
-        --duration 1800 \
         --session-id "$SESSION_ID" --host-id "$HOST_ID" \
         --label-file "$(label_file)" \
         --episode-id "$ep" --day "$DAY" \
         --target "$TARGET_IP" --rack "$RACK" --slot "$SLOT" \
-        --opc-url "opc.tcp://${TARGET_IP}:4840" \
+        --hmi-target "$HMI_IP" \
         2>&1 || echo "[WARN] KILL_CHAIN returned non-zero"
-    label "KILL_CHAIN" "END" "$ep" "5stage_apt"
-    restore_plc
+    label "KILL_CHAIN" "END" "$ep" "foothold_s7_then_lateral_movement_hmi"
 }
 
 # ── Controller ───────────────────────────────────────────────────
@@ -259,7 +257,7 @@ esac
 start_capture "day7_attacks"
 
 echo ""
-echo "  SCHEDULE: Warmup -> SMB(x3) -> Stealthy(x3) -> Replay(x3) -> LogicAware(x3) -> KillChain(x2) -> Cooldown"
+echo "  SCHEDULE: Warmup -> SMB(x3) -> EngScan(x3) -> Stealthy(x3) -> Replay(x3) -> LogicAware(x3) -> KillChain(x2) -> Cooldown"
 echo ""
 
 # Phase 1: Warmup
@@ -275,6 +273,15 @@ for i in $(seq 1 "$ATTACK_REPETITIONS"); do
     wait_s "$BENIGN_GAP_S" "gap_smb_${i}"
 done
 wait_s "$COOLDOWN_S" "cooldown_after_smb"
+
+# Phase 2b: Engineering/WinCC/TIA Portal Port Scan
+echo "[Phase 2b] Engineering/WinCC/TIA Portal Port Scan"
+for i in $(seq 1 "$ATTACK_REPETITIONS"); do
+    _run_attack "ENG_STATION_PORT_SCAN" "eng_station_scan" \
+        "--target ${HMI_IP}"
+    wait_s "$BENIGN_GAP_S" "gap_engscan_${i}"
+done
+wait_s "$COOLDOWN_S" "cooldown_after_engscan"
 
 # Phase 3: Stealthy Low-Rate Write
 echo "[Phase 3] Stealthy Low-Rate Write"

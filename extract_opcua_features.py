@@ -301,7 +301,9 @@ def extract_features(
                 w[f"status_{sev}_count"] += 1
 
     timeline = load_timeline(timeline_path)
+    episode_intervals = load_timeline_episodes(timeline_path)
     write_output(
+        episode_intervals=episode_intervals,
         windows=windows,
         output_path=output_path,
         window_ms=window_ms,
@@ -314,6 +316,65 @@ def extract_features(
         scenario_id=scenario_id,
         episode_id=episode_id,
     )
+
+
+def load_timeline_episodes(path: Optional[str]):
+    """Đọc timeline của collect_opcua.py, trả về list (start_ms, end_ms, label,
+    episode_id). Mỗi cycle/interval là 1 episode RIÊNG -> phục vụ grouped CV
+    (window cùng 1 lần tấn công không bị chia rời giữa train/test).
+
+    Ưu tiên cột 'episode'; nếu không có thì ghép từ label + 'cycle'; nếu vẫn
+    không có thì dùng chỉ số interval. Không có timeline -> [].
+    """
+    if not path:
+        return []
+    intervals = []
+    try:
+        with open(path, "r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f)
+            if not reader.fieldnames:
+                return []
+            lower = {c.lower().strip(): c for c in reader.fieldnames}
+            sc = lower.get("start") or lower.get("start_time") or lower.get("start_timestamp")
+            ec = lower.get("end") or lower.get("end_time") or lower.get("end_timestamp")
+            lc = lower.get("label") or lower.get("scenario_label") or lower.get("scenario")
+            ep = lower.get("episode")
+            cy = lower.get("cycle")
+            if not (sc and ec and lc):
+                return []
+            for i, row in enumerate(reader, 1):
+                s = normalize_epoch_ms(row.get(sc))
+                e = normalize_epoch_ms(row.get(ec))
+                lab = str(row.get(lc, "")).strip()
+                if s < 0 or e < s or not lab:
+                    continue
+                if ep and row.get(ep):
+                    episode = str(row.get(ep)).strip()
+                elif cy and row.get(cy):
+                    episode = f"{lab}#c{str(row.get(cy)).strip()}"
+                else:
+                    episode = f"{lab}#i{i}"
+                intervals.append((s, e, lab, episode))
+    except OSError:
+        return []
+    return intervals
+
+
+def episode_for_window(w_start_ms, w_end_ms, intervals):
+    """Trả về (label, episode_id) của interval trùng nhiều nhất; None nếu không trùng."""
+    best = None
+    best_overlap = 0
+    for s, e, lab, ep in intervals:
+        overlap = max(0, min(w_end_ms, e) - max(w_start_ms, s))
+        if overlap > best_overlap:
+            best_overlap = overlap
+            best = (lab, ep)
+    return best
+
+
+# Số window benign gộp thành 1 "episode benign" (để grouped CV có nhiều nhóm
+# benign thay vì gom hết vào 1). 12 window x 5s ~ 1 phút.
+BENIGN_CHUNK_WINDOWS = 12
 
 
 # ============================================================
@@ -332,7 +393,9 @@ def write_output(
     host_id: str,
     scenario_id: str,
     episode_id: str,
+    episode_intervals=None,
 ) -> None:
+    episode_intervals = episode_intervals or []
     service_cols = [f"{service}_count" for service in SERVICE_NODE_IDS]
     fieldnames = [
         "window_start_ms", "window_end_ms", "label",
@@ -352,19 +415,30 @@ def write_output(
     with open(output_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
+        benign_idx = 0
         for w_start in sorted(windows.keys()):
             w = windows[w_start]
             w_end = w_start + window_ms
+            # Gán label + episode_id per-window: window trùng 1 lần tấn công ->
+            # nhãn + episode cua lan do; window benign -> gộp chunk de grouped CV
+            # co nhieu nhom benign.
+            match = episode_for_window(w_start, w_end, episode_intervals)
+            if match is not None:
+                win_label, win_episode = match
+            else:
+                win_label = label
+                win_episode = f"benign#chunk{benign_idx // BENIGN_CHUNK_WINDOWS}"
+                benign_idx += 1
             row = {
                 "window_start_ms": w_start,
                 "window_end_ms": w_end,
-                "label": label_for_window(w_start, w_end, timeline, label),
+                "label": win_label,
                 "capture_role": role,
                 "plc_ip": plc_ip or "",
                 "session_id": session_id,
                 "host_id": host_id,
                 "scenario_id": scenario_id,
-                "episode_id": episode_id,
+                "episode_id": win_episode,
                 "opcua_packet_count": w["packet_count"],
                 "opcua_byte_count": w["byte_count"],
                 "opcua_frame_len_mean": round(mean(w["frame_lengths"]), 3),
