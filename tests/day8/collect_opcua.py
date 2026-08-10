@@ -32,19 +32,25 @@ Vi du:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import csv
 import os
 import random
 import signal
-import subprocess
 import sys
 import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-RUN_DAY8 = Path(__file__).with_name("run_day8.py")
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TZ = timezone(timedelta(hours=7))
+
+# Chay IN-PROCESS thay vi subprocess: tren Windows/venv, subprocess (sys.executable)
+# co the khong tro dung python co asyncua -> ImportError tuc thi -> khong tan cong
+# duoc (0.2s "completed" nhung 0 traffic toi PLC). Import thang run_day8 va goi
+# execute_safe/execute_controlled_gated qua asyncio -> het loi moi truong.
+sys.path.insert(0, str(Path(__file__).parent))
+import run_day8 as d8  # noqa: E402
 
 # Chi cac kich ban LAP LAI DUOC (khong can quyen Ghi, khong MITM, khong
 # NOT_CONFIGURED). Loai OPCUA_MALICIOUS_WRITE (can impact opt-in), cac benign
@@ -81,33 +87,27 @@ def human(ts: float) -> str:
     return datetime.fromtimestamp(ts, TZ).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
 
-def run_one_scenario(scenario: str, max_seconds: int, env: dict) -> str:
-    """Chay 1 kich ban qua run_day8.py subprocess. Tra ve trang thai text."""
-    cmd = [
-        sys.executable, str(RUN_DAY8),
-        "--scenario", scenario,
-        "--execute", "--allow-gated",
-    ]
-    try:
-        proc = subprocess.Popen(
-            cmd, cwd=str(REPO_ROOT),
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            env=env,
-        )
-    except Exception as e:
-        return f"spawn_failed:{e}"
+async def _dispatch(scenario: str):
+    """Goi dung executor cua run_day8 (safe truoc, roi gated)."""
+    ev = await d8.execute_safe(scenario)
+    if ev is None:
+        ev = await d8.execute_controlled_gated(scenario)
+    return ev
 
+
+def run_one_scenario(scenario: str, max_seconds: int) -> str:
+    """Chay 1 kich ban IN-PROCESS (asyncio). Tra ve trang thai + so evidence."""
     try:
-        proc.wait(timeout=max_seconds)
-        return "completed"
-    except subprocess.TimeoutExpired:
-        # Ep dung neu kich ban chua tu ket thuc (quan trong voi DoS giu lau).
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-        return "terminated_on_timeout"
+        # +15s margin ngoai max_seconds de kich ban tu hoan tat (chung da co
+        # timeout/hard-cap noi bo); wait_for chi la luoi an toan cuoi.
+        ev = asyncio.run(asyncio.wait_for(_dispatch(scenario), timeout=max_seconds + 15))
+        if ev is None:
+            return "no_executor"
+        return f"executed(evidence={len(ev)})"
+    except asyncio.TimeoutError:
+        return "timeout"
+    except Exception as e:
+        return f"error:{type(e).__name__}:{e}"
 
 
 def collect(args) -> int:
@@ -116,12 +116,11 @@ def collect(args) -> int:
         timeline_path = REPO_ROOT / timeline_path
 
     pool = args.scenarios or DEFAULT_POOL
-    env = dict(os.environ)
     if args.opc_url:
-        env["OPC_URL"] = args.opc_url
+        d8.OPC_URL = args.opc_url  # override endpoint cho cac executor in-process
 
     print(f"[*] Thu thap OPC UA dataset (Day 8)")
-    print(f"[*] run_day8.py : {RUN_DAY8}")
+    print(f"[*] Che do     : IN-PROCESS (import run_day8, khong subprocess)")
     print(f"[*] Timeline    : {timeline_path}")
     print(f"[*] Pool ({len(pool)}): {', '.join(pool)}")
     print(f"[*] warmup={args.warmup}s attack<={args.attack}s cooldown={args.cooldown}s")
@@ -161,7 +160,7 @@ def collect(args) -> int:
             # 2. Attack.
             t_start = now_epoch()
             print(f"  [>] attack bat dau {human(t_start)}")
-            status = run_one_scenario(scenario, args.attack, env)
+            status = run_one_scenario(scenario, args.attack)
             t_end = now_epoch()
             print(f"  [>] attack ket thuc {human(t_end)} ({status})")
 
