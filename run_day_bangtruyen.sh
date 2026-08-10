@@ -102,19 +102,19 @@ CTRL_SPARSE_HMI_S="${CTRL_SPARSE_HMI_S:-3600}"
 CTRL_TIA_ONLY_S="${CTRL_TIA_ONLY_S:-3600}"
 CTRL_IDLE_S="${CTRL_IDLE_S:-1800}"
 CTRL_TIA_ATTACK_S="${CTRL_TIA_ATTACK_S:-18000}"
-CTRL_TIA_ATTACK_TAG_LOGGER="${CTRL_TIA_ATTACK_TAG_LOGGER:-0}"
+CTRL_TIA_ATTACK_TAG_LOGGER="${CTRL_TIA_ATTACK_TAG_LOGGER:-1}"
 CTRL_TIA_ATTACK_TAG_INTERVAL="${CTRL_TIA_ATTACK_TAG_INTERVAL:-2.0}"
 CTRL_DAY4_MIXED_NORMAL_HMI_S="${CTRL_DAY4_MIXED_NORMAL_HMI_S:-2400}"
 CTRL_DAY4_MIXED_TIA_S="${CTRL_DAY4_MIXED_TIA_S:-2400}"
 CTRL_DAY4_MIXED_SPARSE_HMI_S="${CTRL_DAY4_MIXED_SPARSE_HMI_S:-2400}"
 CTRL_DAY4_MIXED_IDLE_S="${CTRL_DAY4_MIXED_IDLE_S:-2400}"
-CTRL_DAY4_MIXED_TIA_TAG_LOGGER="${CTRL_DAY4_MIXED_TIA_TAG_LOGGER:-0}"
+CTRL_DAY4_MIXED_TIA_TAG_LOGGER="${CTRL_DAY4_MIXED_TIA_TAG_LOGGER:-1}"
 CTRL_ATTACK_MIXED_NORMAL_HMI_S="${CTRL_ATTACK_MIXED_NORMAL_HMI_S:-3600}"
 CTRL_ATTACK_MIXED_SPARSE_HMI_S="${CTRL_ATTACK_MIXED_SPARSE_HMI_S:-3600}"
 CTRL_ATTACK_MIXED_TIA_ONLY_S="${CTRL_ATTACK_MIXED_TIA_ONLY_S:-7200}"
 CTRL_ATTACK_MIXED_IDLE_S="${CTRL_ATTACK_MIXED_IDLE_S:-3600}"
-CTRL_ATTACK_MIXED_TIA_TAG_LOGGER="${CTRL_ATTACK_MIXED_TIA_TAG_LOGGER:-0}"
-CTRL_ATTACK_MIXED_IDLE_TAG_LOGGER="${CTRL_ATTACK_MIXED_IDLE_TAG_LOGGER:-0}"
+CTRL_ATTACK_MIXED_TIA_TAG_LOGGER="${CTRL_ATTACK_MIXED_TIA_TAG_LOGGER:-1}"
+CTRL_ATTACK_MIXED_IDLE_TAG_LOGGER="${CTRL_ATTACK_MIXED_IDLE_TAG_LOGGER:-1}"
 CTRL_SPARSE_TAG_LOG_INTERVAL="${CTRL_SPARSE_TAG_LOG_INTERVAL:-2.0}"
 CTRL_SPARSE_HMI_POLL_MIN_S="${CTRL_SPARSE_HMI_POLL_MIN_S:-5.0}"
 CTRL_SPARSE_HMI_POLL_MAX_S="${CTRL_SPARSE_HMI_POLL_MAX_S:-20.0}"
@@ -1314,8 +1314,8 @@ run_controller_mixed() {
     while true; do
         run_controller_segment_until "$deadline_ms" "normal_hmi" "$CTRL_NORMAL_HMI_S" "1" "1" "$TAG_LOG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S" || break
         run_controller_segment_until "$deadline_ms" "sparse_hmi" "$CTRL_SPARSE_HMI_S" "1" "1" "$CTRL_SPARSE_TAG_LOG_INTERVAL" "$CTRL_SPARSE_HMI_POLL_MIN_S" "$CTRL_SPARSE_HMI_POLL_MAX_S" || break
-        run_controller_segment_until "$deadline_ms" "tia_portal_only" "$CTRL_TIA_ONLY_S" "0" "0" "$TAG_LOG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S" || break
-        run_controller_segment_until "$deadline_ms" "idle_quiet" "$CTRL_IDLE_S" "0" "0" "$TAG_LOG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S" || break
+        run_controller_segment_until "$deadline_ms" "tia_portal_only" "$CTRL_TIA_ONLY_S" "1" "0" "$TAG_LOG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S" || break
+        run_controller_segment_until "$deadline_ms" "idle_quiet" "$CTRL_IDLE_S" "1" "0" "$TAG_LOG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S" || break
     done
 }
 
@@ -1337,7 +1337,7 @@ run_controller_day4_mixed() {
         run_controller_segment_until "$deadline_ms" "day4_sparse_hmi" "$CTRL_DAY4_MIXED_SPARSE_HMI_S" "1" "1" "$CTRL_SPARSE_TAG_LOG_INTERVAL" "$CTRL_SPARSE_HMI_POLL_MIN_S" "$CTRL_SPARSE_HMI_POLL_MAX_S" || break
         run_controller_segment_until "$deadline_ms" "day4_tia_portal_b" "$CTRL_DAY4_MIXED_TIA_S" "$CTRL_DAY4_MIXED_TIA_TAG_LOGGER" "0" "$CTRL_TIA_ATTACK_TAG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S" || break
         run_controller_segment_until "$deadline_ms" "day4_normal_hmi_b" "$CTRL_DAY4_MIXED_NORMAL_HMI_S" "1" "1" "$TAG_LOG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S" || break
-        run_controller_segment_until "$deadline_ms" "day4_idle_quiet" "$CTRL_DAY4_MIXED_IDLE_S" "0" "0" "$TAG_LOG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S" || break
+        run_controller_segment_until "$deadline_ms" "day4_idle_quiet" "$CTRL_DAY4_MIXED_IDLE_S" "1" "0" "$TAG_LOG_INTERVAL" "$HMI_POLL_MIN_S" "$HMI_POLL_MAX_S" || break
     done
 }
 

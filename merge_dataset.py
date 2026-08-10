@@ -600,8 +600,16 @@ def build_fusion_dataset(
     net = drop_network_leakage_columns(network_df, keep_unsafe=keep_unsafe_network).copy()
     proc_win = process_features_for_fusion(process_df, window_ms)
     fusion = pd.merge(net, proc_win, on="window_start_ms", how="left")
+    fusion = fusion.sort_values("window_start_ms").reset_index(drop=True)
     proc_cols = [c for c in proc_win.columns if c != "window_start_ms"]
-    fusion[proc_cols] = fusion[proc_cols].fillna(0)
+    
+    if proc_cols:
+        fusion["proc_data_valid"] = fusion[proc_cols[0]].notna().astype(int)
+        # Forward fill and backward fill so 100% of network flows receive process features
+        fusion[proc_cols] = fusion[proc_cols].ffill()
+        fusion[proc_cols] = fusion[proc_cols].bfill()
+        fusion[proc_cols] = fusion[proc_cols].fillna(0)
+
 
     labels = [label_for_window(int(w), window_ms, intervals, session_id) for w in fusion["window_start_ms"]]
     fusion["label"] = [x.label for x in labels]
