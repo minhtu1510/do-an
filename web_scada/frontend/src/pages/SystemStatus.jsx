@@ -1,0 +1,90 @@
+import { useState, useEffect } from "react";
+import { fetchAllTags, fetchPlcStatus } from "../services/api";
+import { connectWebSocket } from "../services/websocket";
+import PageHeader from "../components/PageHeader";
+
+export default function SystemStatus() {
+  const [status, setStatus] = useState(null);
+  const [tags, setTags] = useState({});
+
+  useEffect(() => {
+    fetchPlcStatus().then(setStatus);
+    fetchAllTags().then((data) => {
+      if (data.tags) {
+        const map = {};
+        data.tags.forEach((t) => (map[t.key] = t));
+        setTags(map);
+      }
+    });
+
+    const timer = setInterval(() => {
+      fetchPlcStatus().then(setStatus);
+      fetchAllTags().then((data) => {
+        if (data.tags) {
+          const map = {};
+          data.tags.forEach((t) => (map[t.key] = t));
+          setTags(map);
+        }
+      });
+    }, 5000);
+
+    const unsub = connectWebSocket((data) => {
+      if (data.type === "full_state" && data.status) setStatus(data.status);
+      if (data.type === "full_state" && data.tags) {
+        const map = {};
+        data.tags.forEach((t) => (map[t.key] = t));
+        setTags(map);
+      }
+      if (data.type === "tag_update") {
+        setTags((prev) => ({ ...prev, [data.key]: data.data }));
+      }
+    });
+
+    return () => {
+      clearInterval(timer);
+      unsub();
+    };
+  }, []);
+
+  const staleTags = Object.values(tags).filter((t) => t.stale).length;
+  const totalTags = Object.values(tags).length || status?.subscribed_tags || 9;
+  const goodTags = Object.values(tags).length > 0 ? Object.values(tags).filter((t) => !t.stale).length : totalTags - staleTags;
+
+  return (
+    <div className="p-6 space-y-6">
+      <PageHeader title="System Status" subtitle="Backend, OPC UA gateway and websocket health at a glance." />
+
+      <div className="grid grid-cols-2 gap-3">
+        <InfoRow label="PLC IP" value="192.168.210.211" />
+        <InfoRow label="OPC UA" value={status?.endpoint || "opc.tcp://192.168.210.211:4840"} />
+        <InfoRow label="State" value={status?.connected ? "CONNECTED" : "DISCONNECTED"} color={status?.connected ? "text-green-400" : "text-red-400"} />
+        <InfoRow label="Reconnect count" value={status?.reconnect_count ?? 0} />
+        <InfoRow label="Tags Total" value={totalTags} />
+        <InfoRow label="Tags Good" value={goodTags} color="text-green-400" />
+        <InfoRow label="Tags Stale" value={staleTags} color={staleTags > 0 ? "text-red-400" : "text-gray-400"} />
+        <InfoRow label="Backend uptime" value={formatUptime(status?.uptime_seconds)} />
+        <InfoRow label="Backend started" value={status?.backend_started_at ? new Date(status.backend_started_at).toLocaleTimeString() : "—"} />
+        <InfoRow label="WebSocket" value="ONLINE" color="text-green-400" />
+        <InfoRow label="Last connected" value={status?.last_connected_at ? new Date(status.last_connected_at).toLocaleTimeString() : "—"} />
+        <InfoRow label="Last data" value={status?.last_data_at ? new Date(status.last_data_at).toLocaleTimeString() : "—"} />
+      </div>
+    </div>
+  );
+}
+
+function InfoRow({ label, value, color = "text-gray-300" }) {
+  return (
+    <div className="bg-gray-800 border border-gray-700 rounded px-4 py-3 flex justify-between items-center">
+      <span className="text-xs text-gray-500">{label}</span>
+      <span className={`font-mono text-sm font-bold ${color}`}>{value}</span>
+    </div>
+  );
+}
+
+function formatUptime(secs) {
+  if (secs === null || secs === undefined) return "—";
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  return `${h}h ${m}m ${s}s`;
+}
