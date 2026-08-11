@@ -91,7 +91,9 @@
       "Bash(bash -n run_day_bangtruyen_ext.sh)",
       "Bash(python3 -m py_compile attacks_ext/kill_chain.py)",
       "Bash(python3 -m py_compile attacks_ext/concealed_stop_attack.py)",
-      "Bash(python3 -c \"import asyncua; print\\('asyncua OK', asyncua.__version__ if hasattr\\(asyncua,'__version__'\\) else 'no version attr'\\)\")"
+      "Bash(python3 -c \"import asyncua; print\\('asyncua OK', asyncua.__version__ if hasattr\\(asyncua,'__version__'\\) else 'no version attr'\\)\")",
+      "Bash(grep -n '_run_attack \"\\\\|run_kill_chain$\\\\|Phase' run_day_bangtruyen_ext.sh)",
+      "Bash(python3 -m py_compile attacks_ext/evasion_shaped_write.py)"
     ]
   }
 }

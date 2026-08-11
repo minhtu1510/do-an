@@ -85,12 +85,17 @@ done
 
 [[ -z "$SESSION_ID" ]] && SESSION_ID="day7_ext_s1"
 [[ -z "$HOST_ID" ]]    && HOST_ID="${ATTACKER_HOST_ID:-attacker_host}"
-[[ -z "$CAPTURE_FILTER" ]] && CAPTURE_FILTER="host $TARGET_IP"
 
 if [[ -z "$HMI_IP" ]]; then
     SUBNET_PREFIX=$(echo "$TARGET_IP" | sed -E 's/\.[0-9]+$//')
     HMI_IP="${SUBNET_PREFIX}.31"
 fi
+
+# Capture filter phai bao ca PLC (.211) LAN HMI (.31): SMB_RECON_ENUM,
+# ENG_STATION_PORT_SCAN va nua lateral-movement cua KILL_CHAIN danh vao HMI,
+# neu chi loc "host <PLC>" thi traffic tan cong toi HMI bi tshark drop sach
+# -> pcap co label attack nhung 0 goi tuong ung. Set SAU khi HMI_IP da resolve.
+[[ -z "$CAPTURE_FILTER" ]] && CAPTURE_FILTER="host $TARGET_IP or host $HMI_IP"
 
 mkdir -p "$CAPTURE_DIR/day${DAY}" "$LABEL_DIR" "$LOG_DIR"
 
@@ -258,7 +263,7 @@ esac
 start_capture "day7_attacks"
 
 echo ""
-echo "  SCHEDULE: Warmup -> SMB(x3) -> EngScan(x3) -> Stealthy(x3) -> LogicAware(x3) -> KillChain(x2) -> ConcealedStop(x2) -> Cooldown"
+echo "  SCHEDULE: Warmup -> SMB(x3) -> KillChain(x2) -> ConcealedStop(x2) -> Cooldown"
 echo ""
 
 # Phase 1: Warmup
@@ -275,32 +280,16 @@ for i in $(seq 1 "$ATTACK_REPETITIONS"); do
 done
 wait_s "$COOLDOWN_S" "cooldown_after_smb"
 
-# Phase 2b: Engineering/WinCC/TIA Portal Port Scan
-echo "[Phase 2b] Engineering/WinCC/TIA Portal Port Scan"
-for i in $(seq 1 "$ATTACK_REPETITIONS"); do
-    _run_attack "ENG_STATION_PORT_SCAN" "eng_station_scan" \
-        "--target ${HMI_IP}"
-    wait_s "$BENIGN_GAP_S" "gap_engscan_${i}"
-done
-wait_s "$COOLDOWN_S" "cooldown_after_engscan"
-
-# Phase 3: Stealthy Low-Rate Write
-echo "[Phase 3] Stealthy Low-Rate Write"
-for i in $(seq 1 "$ATTACK_REPETITIONS"); do
-    _run_attack "STEALTHY_WRITE" "stealthy_write" \
-        "--target ${TARGET_IP} --rack ${RACK} --slot ${SLOT}"
-    restore_plc
-    wait_s "$COOLDOWN_S" "cooldown_stealthy_${i}"
-done
-
-# Phase 4: Logic-Aware
-echo "[Phase 4] Logic-Aware"
-for i in $(seq 1 "$ATTACK_REPETITIONS"); do
-    _run_attack "LOGIC_AWARE" "logic_aware" \
-        "--target ${TARGET_IP} --rack ${RACK} --slot ${SLOT}"
-    restore_plc
-    wait_s "$COOLDOWN_S" "cooldown_phase4_${i}"
-done
+# -- Da BO Phase 2b (ENG_STATION_PORT_SCAN standalone): chuc nang port-scan
+#    may Engineering da nam san trong KILL_CHAIN lateral movement (import
+#    PORTS + tcp_probe tu eng_station_scan), chay standalone la dư thua.
+# -- Da BO Phase 3 (STEALTHY_WRITE): trung ten + trung ky thuat + trung vung
+#    ghi voi STEALTHY_WRITE Day 3/4 (label collision), lai ghi MD100 khong
+#    duoc tag logger ghi lai (process-view vo hinh). Module van giu trong repo.
+# -- Da BO Phase 4 (LOGIC_AWARE): ghi S7 vao dung offset M5/CD54/CD58 giong
+#    het RWRITE_BURST (Day3) + SETPOINT/SENSOR_SPOOF (Day4) o packet-level;
+#    chi khac dieu kien/timing -> nguy co trung nhan cao, chat luong du lieu
+#    khong tot. Module van giu trong repo.
 
 # Phase 5: Kill Chain x2
 echo "[Phase 5] Kill Chain (APT Simulation)"
