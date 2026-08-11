@@ -64,7 +64,7 @@ from snap7.util import get_bool, set_bool, get_dint
 from asyncua import Client, ua
 
 BANGTAI_NODE_ID = 'ns=3;s="BangTai"'
-CONCEAL_WRITE_INTERVAL_S = 0.15  # ghi lien tuc trong cua so STOP, phong truong hop PLC tu lam moi gia tri that
+CONCEAL_WRITE_INTERVAL_S = 0.01  # ~khong cho, de network round-trip tu lam gioi han toc do -- xem note trong opcua_conceal_loop
 
 concealment_active = threading.Event()
 stop_all = threading.Event()
@@ -77,18 +77,22 @@ def read_cd1(client) -> int:
 
 async def write_value_only(node, value: bool) -> None:
     """asyncua's Node.write_value() always attaches SourceTimestamp (see
-    asyncua.common.ua_utils.value_to_datavalue) -- the S7-1500 OPC UA server
-    rejects that with BadWriteNotSupported ("does not support writing the
-    combination of value, status and timestamps provided"). Build a DataValue
-    with ONLY Value set (StatusCode/SourceTimestamp/ServerTimestamp all None)
-    and pass it straight through -- value_to_datavalue leaves an existing
-    ua.DataValue untouched, so this bypasses the auto-timestamp entirely."""
-    dv = ua.DataValue(
-        Value=ua.Variant(value, ua.VariantType.Boolean),
-        StatusCode=None,
-        SourceTimestamp=None,
-        ServerTimestamp=None,
-    )
+    asyncua.common.ua_utils.value_to_datavalue: `ua.DataValue(val,
+    SourceTimestamp=datetime.now(...))`) -- the S7-1500 OPC UA server rejects
+    that with BadWriteNotSupported ("does not support writing the combination
+    of value, status and timestamps provided"). Fix: build the DataValue with
+    ONLY the positional Value argument, no extra kwargs at all -- leave every
+    other field (StatusCode, SourceTimestamp, ServerTimestamp) at whatever the
+    installed asyncua version's own class default is.
+    Deliberately NOT touching StatusCode via constructor kwarg or attribute
+    assignment: both failed across different asyncua versions during testing
+    (TypeError: unexpected keyword 'StatusCode' on one install, then
+    FrozenInstanceError: DataValue is an immutable dataclass on another) --
+    the minimal single-positional-arg form is the only construction that has
+    been version-portable so far. value_to_datavalue() leaves an existing
+    ua.DataValue untouched (only wraps bare Python/Variant values), so this
+    reaches write_attribute() exactly as built here, no timestamp added."""
+    dv = ua.DataValue(ua.Variant(value, ua.VariantType.Boolean))
     await node.write_value(dv)
 
 
@@ -115,10 +119,17 @@ async def opcua_conceal_loop(opc_url: str, stats: dict) -> None:
     """Chay song song voi luong S7: khi concealment_active dang bat, LIEN TUC
     ghi True vao BangTai (khong chi 1 lan) vi khong biet chac PLC co tu lam
     moi gia tri nay moi chu ky scan hay khong -- ghi lai lien tuc de toi da
-    hoa co hoi gia tri gia "dinh" duoc trong cua so ngan."""
+    hoa co hoi gia tri gia "dinh" duoc trong cua so ngan.
+
+    Sau moi lan ghi, doc lai NGAY de biet gia tri co "dinh" duoc den lan doc
+    hay da bi PLC ghi de that ngay trong khoang round-trip do -- day la bang
+    chung truc tiep cho cuoc dua thoi gian (PLC tu lam moi vs toc do ghi lai
+    cua minh), thay vi chi suy doan tu quan sat mat thuong tren WinCC."""
     stats["attempts"] = 0
     stats["succeeded"] = 0
     stats["failed"] = 0
+    stats["readback_still_true"] = 0
+    stats["readback_reverted"] = 0
     try:
         async with Client(url=opc_url, timeout=5) as client:
             node = client.get_node(BANGTAI_NODE_ID)
@@ -129,9 +140,14 @@ async def opcua_conceal_loop(opc_url: str, stats: dict) -> None:
                     try:
                         await write_value_only(node, True)
                         stats["succeeded"] += 1
+                        readback = await node.read_value()
+                        if readback is True:
+                            stats["readback_still_true"] += 1
+                        else:
+                            stats["readback_reverted"] += 1
                     except Exception as e:
                         stats["failed"] += 1
-                        if stats["failed"] <= 3:  # tranh spam log neu loi lap lai moi 0.15s
+                        if stats["failed"] <= 3:  # tranh spam log neu loi lap lai moi vong
                             print(f"[WARN] Concealment write that bai: {type(e).__name__}: {e}")
                 await asyncio.sleep(CONCEAL_WRITE_INTERVAL_S)
     except Exception as e:
@@ -236,7 +252,9 @@ def run(args):
                     note=(f"stops={result.get('stop_count', 0)} "
                           f"conceal_attempts={conceal_stats.get('attempts', 0)} "
                           f"conceal_ok={conceal_stats.get('succeeded', 0)} "
-                          f"conceal_failed={conceal_stats.get('failed', 0)}"))
+                          f"conceal_failed={conceal_stats.get('failed', 0)} "
+                          f"readback_still_true={conceal_stats.get('readback_still_true', 0)} "
+                          f"readback_reverted={conceal_stats.get('readback_reverted', 0)}"))
 
 
 def main():
