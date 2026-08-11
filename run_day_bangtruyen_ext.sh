@@ -317,7 +317,7 @@ run_kill_chain
 echo "[Phase 5b] Concealed Stop Attack (stealthy actuator+sensor concealment)"
 for i in 1 2; do
     _run_attack "CONCEALED_STOP_ATTACK" "concealed_stop_attack" \
-        "--target ${TARGET_IP} --rack ${RACK} --slot ${SLOT} --hmi-ip ${HMI_IP} --iface ${CAPTURE_IFACE}"
+        "--target ${TARGET_IP} --rack ${RACK} --slot ${SLOT} --opc-url opc.tcp://${TARGET_IP}:4840"
     restore_plc
     wait_s "$COOLDOWN_S" "cooldown_concealed_${i}"
 done

