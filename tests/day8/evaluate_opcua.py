@@ -8,8 +8,15 @@ Danh gia dataset OPC UA da trich xuat boi extract_opcua_features.py.
 Muc tieu (xem review trong bao-cao/opcua_bao_cao_chi_tiet.md):
   1. Danh gia PHAT HIEN nhi phan benign-vs-attack (GroupKFold theo episode_id).
   2. Danh gia PHAN LOAI da lop, co 2 xu ly da duoc kiem chung tren du lieu:
-       a) Gop INVALID_WRITE + WRITE_DENIED -> malicious_write (wire-identical:
+       a) Gop INVALID_WRITE + WRITE_DENIED -> OPCUA_WRITE_REJECTED (wire-identical:
           deu la 1 lenh Write bi server tu choi -> khong the tach o muc feature).
+          CHU Y: nhan gop nay KHONG duoc dat trung ten voi scenario that
+          "OPCUA_MALICIOUS_WRITE" trong run_day8.py/scenarios.yaml -- do la
+          kich ban RIENG, thuc su ghi thanh cong 1 gia tri sai roi rollback,
+          can DAY8_ALLOW_PROCESS_IMPACT=1, va KHONG nam trong DEFAULT_POOL cua
+          collect_opcua.py nen chua tung duoc thu thap. Dung trung ten se lam
+          nguoi doc hieu nham la da kiem chung phat hien ghi-thanh-cong-co-tac-dong
+          that, trong khi du lieu o day chi la ghi-bi-tu-choi.
        b) KHONG dung class_weight='balanced': benign co create_session=0 tuyet doi
           nen feature da tach benign/session_burst; balanced weighting (upweight
           lop hiem ~50x) chi tao false-positive benign->session_burst gia tao.
@@ -33,8 +40,10 @@ from sklearn.model_selection import GroupKFold, cross_val_predict
 from sklearn.metrics import classification_report, confusion_matrix, f1_score
 
 # Hai lop Write giong het nhau tren wire (1 Write bi tu choi) -> gop lam 1.
-WRITE_MERGE = {"OPCUA_INVALID_WRITE": "OPCUA_MALICIOUS_WRITE",
-               "OPCUA_WRITE_DENIED": "OPCUA_MALICIOUS_WRITE"}
+# ID gop KHONG duoc trung "OPCUA_MALICIOUS_WRITE" -- do la 1 scenario THAT
+# KHAC (ghi thanh cong + rollback, can opt-in, chua thu thap). Xem docstring.
+WRITE_MERGE = {"OPCUA_INVALID_WRITE": "OPCUA_WRITE_REJECTED",
+               "OPCUA_WRITE_DENIED": "OPCUA_WRITE_REJECTED"}
 
 
 def load(features_csv: str):

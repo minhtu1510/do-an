@@ -33,8 +33,12 @@ import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, f1_score
 
-WMERGE = {"OPCUA_INVALID_WRITE": "OPCUA_MALICIOUS_WRITE",
-          "OPCUA_WRITE_DENIED": "OPCUA_MALICIOUS_WRITE"}
+# ID gop KHONG duoc trung "OPCUA_MALICIOUS_WRITE" -- do la scenario THAT KHAC
+# (ghi thanh cong that + rollback, can DAY8_ALLOW_PROCESS_IMPACT=1, khong nam
+# trong DEFAULT_POOL cua collect_opcua.py nen chua tung duoc thu thap). Dung
+# cung ten voi WRITE_MERGE trong evaluate_opcua.py -- xem docstring o do.
+WMERGE = {"OPCUA_INVALID_WRITE": "OPCUA_WRITE_REJECTED",
+          "OPCUA_WRITE_DENIED": "OPCUA_WRITE_REJECTED"}
 
 
 def nonexec_cycles(timeline: str, min_dur: float):

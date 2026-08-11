@@ -1,0 +1,4 @@
+Bangtruyen full-day collection -- host_id=attacker_A session_id=bt_full_attacker_A
+Started: 2026-08-11 10:39:33
+Days: 8
+----------------------------------------
