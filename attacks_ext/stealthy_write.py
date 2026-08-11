@@ -43,6 +43,7 @@ def run(args):
 
     client = snap7.client.Client()
     write_count = 0
+    baseline = None  # set once read succeeds; guards the restore in finally
 
     try:
         client.connect(args.target, args.rack, args.slot)
@@ -67,20 +68,27 @@ def run(args):
             print(f"  [{write_count}] MD{TEST_MARKER} {current} -> {new_val}")
             time.sleep(random.uniform(8, 15))
 
-        buf = bytearray(4)
-        set_dint(buf, 0, baseline)
-        client.write_area(Areas.MK, 0, TEST_MARKER, buf)
-        print(f"[*] Restored MD{TEST_MARKER} = {baseline}")
-
     except Exception as e:
         print(f"[ERR] {e}")
     finally:
+        # Restore lives here (not just after the while loop) so a mid-loop
+        # exception -- e.g. the intermittent S7 "Receive timeout" seen on
+        # this testbed -- still leaves MD{TEST_MARKER} back at baseline
+        # instead of stuck at a modified value.
+        if baseline is not None and client.get_connected():
+            try:
+                buf = bytearray(4)
+                set_dint(buf, 0, baseline)
+                client.write_area(Areas.MK, 0, TEST_MARKER, buf)
+                print(f"[*] Restored MD{TEST_MARKER} = {baseline}")
+            except Exception as e:
+                print(f"[ERR] Restore thất bại, cần khôi phục thủ công MD{TEST_MARKER}={baseline}: {e}")
         if client.get_connected():
             client.disconnect()
         write_label(args.label_file, label_prefix, "END",
                     args.session_id, args.host_id,
                     episode_id=args.episode_id, day=args.day,
-                    note=f"writes={write_count} target=MD{TEST_MARKER}")
+                    note=f"writes={write_count} target=MD{TEST_MARKER} baseline={baseline}")
 
 
 def main():
