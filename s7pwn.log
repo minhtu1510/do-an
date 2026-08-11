@@ -1,0 +1,53 @@
+2026-07-29 08:15:05,736 - INFO - Logging initialized
+2026-07-29 08:15:05,737 - INFO - Created session: session_20260729_081505
+2026-07-29 08:15:05,737 - INFO - Session saved to data/session_20260729_081505.json
+2026-07-29 08:15:44,983 - INFO - Logging initialized
+2026-07-29 08:15:44,984 - INFO - Session loaded: session_20260729_081505
+2026-07-29 08:15:44,995 - INFO - Starting ICSScout Web Application v2.0.0
+2026-07-29 08:15:44,995 - INFO - Server: http://0.0.0.0:5000
+2026-07-29 08:15:44,996 - WARNING - Werkzeug appears to be used in a production deployment. Consider switching to a production web server instead.
+2026-07-29 08:15:45,017 - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.0.98:5000
+2026-07-29 08:15:45,017 - INFO - [33mPress CTRL+C to quit[0m
+2026-07-29 08:15:56,606 - INFO - 127.0.0.1 - - [29/Jul/2026 08:15:56] "GET / HTTP/1.1" 200 -
+2026-07-29 08:15:56,620 - INFO - 127.0.0.1 - - [29/Jul/2026 08:15:56] "GET / HTTP/1.1" 200 -
+2026-07-29 08:15:56,634 - INFO - 127.0.0.1 - - [29/Jul/2026 08:15:56] "GET /ids-offline HTTP/1.1" 200 -
+2026-07-29 08:15:56,644 - INFO - 127.0.0.1 - - [29/Jul/2026 08:15:56] "GET /api/ids-offline/protocols HTTP/1.1" 200 -
+2026-07-29 08:17:55,861 - INFO - 127.0.0.1 - - [29/Jul/2026 08:17:55] "GET / HTTP/1.1" 200 -
+2026-07-29 08:17:56,743 - INFO - 127.0.0.1 - - [29/Jul/2026 08:17:56] "GET /socket.io/?EIO=4&transport=polling&t=P-hSo23 HTTP/1.1" 200 -
+2026-07-29 08:17:56,751 - INFO - Client connected: S5jjk6RaQ0FEPMMVAAAB
+2026-07-29 08:17:56,753 - INFO - 127.0.0.1 - - [29/Jul/2026 08:17:56] "POST /socket.io/?EIO=4&transport=polling&t=P-hSo2B&sid=lTMqGqUBsierkkscAAAA HTTP/1.1" 200 -
+2026-07-29 08:17:56,757 - INFO - 127.0.0.1 - - [29/Jul/2026 08:17:56] "GET /socket.io/?EIO=4&transport=polling&t=P-hSo2G&sid=lTMqGqUBsierkkscAAAA HTTP/1.1" 200 -
+2026-07-29 08:17:56,763 - INFO - 127.0.0.1 - - [29/Jul/2026 08:17:56] "GET /socket.io/?EIO=4&transport=polling&t=P-hSo2O&sid=lTMqGqUBsierkkscAAAA HTTP/1.1" 200 -
+2026-07-29 08:17:57,953 - INFO - Client disconnected: S5jjk6RaQ0FEPMMVAAAB
+2026-07-29 08:17:57,953 - INFO - 127.0.0.1 - - [29/Jul/2026 08:17:57] "GET /socket.io/?EIO=4&transport=websocket&sid=lTMqGqUBsierkkscAAAA HTTP/1.1" 200 -
+2026-07-29 08:17:57,958 - INFO - 127.0.0.1 - - [29/Jul/2026 08:17:57] "GET /ids-offline HTTP/1.1" 200 -
+2026-07-29 08:17:58,075 - INFO - 127.0.0.1 - - [29/Jul/2026 08:17:58] "GET /socket.io/?EIO=4&transport=polling&t=P-hSoMu HTTP/1.1" 200 -
+2026-07-29 08:17:58,095 - INFO - 127.0.0.1 - - [29/Jul/2026 08:17:58] "GET /api/ids-offline/protocols HTTP/1.1" 200 -
+2026-07-29 08:17:58,098 - INFO - Client connected: _yyy9f5POS_Ef5r5AAAD
+2026-07-29 08:17:58,100 - INFO - 127.0.0.1 - - [29/Jul/2026 08:17:58] "POST /socket.io/?EIO=4&transport=polling&t=P-hSoND&sid=mrnxPgce0XOZyr4ZAAAC HTTP/1.1" 200 -
+2026-07-29 08:17:58,100 - INFO - 127.0.0.1 - - [29/Jul/2026 08:17:58] "GET /socket.io/?EIO=4&transport=polling&t=P-hSoNF&sid=mrnxPgce0XOZyr4ZAAAC HTTP/1.1" 200 -
+2026-07-29 08:17:58,105 - INFO - 127.0.0.1 - - [29/Jul/2026 08:17:58] "GET /socket.io/?EIO=4&transport=polling&t=P-hSoNN&sid=mrnxPgce0XOZyr4ZAAAC HTTP/1.1" 200 -
+2026-07-29 08:17:59,123 - INFO - Client disconnected: _yyy9f5POS_Ef5r5AAAD
+2026-07-29 08:17:59,124 - INFO - 127.0.0.1 - - [29/Jul/2026 08:17:59] "GET /socket.io/?EIO=4&transport=websocket&sid=mrnxPgce0XOZyr4ZAAAC HTTP/1.1" 200 -
+2026-07-29 08:18:37,395 - INFO - 127.0.0.1 - - [29/Jul/2026 08:18:37] "GET /ids-offline HTTP/1.1" 200 -
+2026-07-29 08:18:38,416 - INFO - 127.0.0.1 - - [29/Jul/2026 08:18:38] "GET /socket.io/?EIO=4&transport=polling&t=P-hSyDC HTTP/1.1" 200 -
+2026-07-29 08:18:38,466 - INFO - Client connected: 8nmQ9IoIFUXrpBH5AAAF
+2026-07-29 08:18:38,544 - INFO - 127.0.0.1 - - [29/Jul/2026 08:18:38] "POST /socket.io/?EIO=4&transport=polling&t=P-hSyD-&sid=mzsJNnlQ5v6-0a1IAAAE HTTP/1.1" 200 -
+2026-07-29 08:18:38,545 - INFO - 127.0.0.1 - - [29/Jul/2026 08:18:38] "GET /socket.io/?EIO=4&transport=polling&t=P-hSyE0&sid=mzsJNnlQ5v6-0a1IAAAE HTTP/1.1" 200 -
+2026-07-29 08:18:38,547 - INFO - 127.0.0.1 - - [29/Jul/2026 08:18:38] "GET /api/ids-offline/protocols HTTP/1.1" 200 -
+2026-07-29 08:18:41,222 - INFO - 127.0.0.1 - - [29/Jul/2026 08:18:41] "POST /api/ids-offline/analyze HTTP/1.1" 200 -
+2026-07-29 08:18:41,762 - INFO - Client disconnected: 8nmQ9IoIFUXrpBH5AAAF
+2026-07-29 08:18:41,763 - INFO - 127.0.0.1 - - [29/Jul/2026 08:18:41] "GET /socket.io/?EIO=4&transport=websocket&sid=mzsJNnlQ5v6-0a1IAAAE HTTP/1.1" 200 -
+2026-07-29 08:19:22,683 - INFO - 127.0.0.1 - - [29/Jul/2026 08:19:22] "GET /ids-offline HTTP/1.1" 200 -
+2026-07-29 08:19:23,676 - INFO - 127.0.0.1 - - [29/Jul/2026 08:19:23] "GET /socket.io/?EIO=4&transport=polling&t=P-hT7GO HTTP/1.1" 200 -
+2026-07-29 08:19:23,742 - INFO - Client connected: hFTUXFREGQoMAWiiAAAH
+2026-07-29 08:19:23,747 - INFO - 127.0.0.1 - - [29/Jul/2026 08:19:23] "POST /socket.io/?EIO=4&transport=polling&t=P-hT7HM&sid=vMBkK0B7cAb1dxoiAAAG HTTP/1.1" 200 -
+2026-07-29 08:19:23,748 - INFO - 127.0.0.1 - - [29/Jul/2026 08:19:23] "GET /socket.io/?EIO=4&transport=polling&t=P-hT7HQ&sid=vMBkK0B7cAb1dxoiAAAG HTTP/1.1" 200 -
+2026-07-29 08:19:23,750 - INFO - 127.0.0.1 - - [29/Jul/2026 08:19:23] "GET /api/ids-offline/protocols HTTP/1.1" 200 -
+2026-07-29 08:19:23,756 - INFO - 127.0.0.1 - - [29/Jul/2026 08:19:23] "GET /socket.io/?EIO=4&transport=polling&t=P-hT7He&sid=vMBkK0B7cAb1dxoiAAAG HTTP/1.1" 200 -
+2026-07-29 08:19:27,990 - INFO - 127.0.0.1 - - [29/Jul/2026 08:19:27] "POST /api/ids-offline/analyze HTTP/1.1" 200 -
+2026-07-29 08:19:28,273 - INFO - Client disconnected: hFTUXFREGQoMAWiiAAAH
+2026-07-29 08:19:28,273 - INFO - 127.0.0.1 - - [29/Jul/2026 08:19:28] "GET /socket.io/?EIO=4&transport=websocket&sid=vMBkK0B7cAb1dxoiAAAG HTTP/1.1" 200 -

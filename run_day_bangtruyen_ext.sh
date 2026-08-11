@@ -4,7 +4,8 @@ set -euo pipefail
 # ================================================================
 # run_day_bangtruyen_ext.sh
 # Day 7: Advanced Attack Scenarios
-#   SMB Enum + EWS Rogue + EWS Firmware + Replay + Logic-Aware + KillChain
+#   SMB Enum + Eng Station Scan + Stealthy Write + Logic-Aware + Kill Chain
+#   + Concealed Stop Attack (actuator+sensor concealment, Urbina CCS16-style)
 #
 # Chạy:
 #   bash run_day_bangtruyen_ext.sh --day 7 --role attacker \
@@ -257,7 +258,7 @@ esac
 start_capture "day7_attacks"
 
 echo ""
-echo "  SCHEDULE: Warmup -> SMB(x3) -> EngScan(x3) -> Stealthy(x3) -> Replay(x3) -> LogicAware(x3) -> KillChain(x2) -> Cooldown"
+echo "  SCHEDULE: Warmup -> SMB(x3) -> EngScan(x3) -> Stealthy(x3) -> LogicAware(x3) -> KillChain(x2) -> ConcealedStop(x2) -> Cooldown"
 echo ""
 
 # Phase 1: Warmup
@@ -292,13 +293,9 @@ for i in $(seq 1 "$ATTACK_REPETITIONS"); do
     wait_s "$COOLDOWN_S" "cooldown_stealthy_${i}"
 done
 
-# Phase 4: S7 Replay + Logic-Aware
-echo "[Phase 4] S7 Replay + Logic-Aware"
+# Phase 4: Logic-Aware
+echo "[Phase 4] Logic-Aware"
 for i in $(seq 1 "$ATTACK_REPETITIONS"); do
-    _run_attack "S7_REPLAY" "s7_replay" \
-        "--target ${TARGET_IP} --rack ${RACK} --slot ${SLOT}"
-    wait_s "$BENIGN_GAP_S" "gap_replay_${i}"
-
     _run_attack "LOGIC_AWARE" "logic_aware" \
         "--target ${TARGET_IP} --rack ${RACK} --slot ${SLOT}"
     restore_plc
@@ -314,6 +311,16 @@ label "BENIGN_NORMAL" "END" "pre_killchain_gap" ""
 run_kill_chain
 wait_s "$COOLDOWN_L" "cooldown_kc1"
 run_kill_chain
+
+# Phase 5b: Concealed Stop Attack (S7 actuator STOP + OPC UA sensor
+# concealment, Urbina et al. CCS16-style) x2
+echo "[Phase 5b] Concealed Stop Attack (stealthy actuator+sensor concealment)"
+for i in 1 2; do
+    _run_attack "CONCEALED_STOP_ATTACK" "concealed_stop_attack" \
+        "--target ${TARGET_IP} --rack ${RACK} --slot ${SLOT} --hmi-ip ${HMI_IP} --iface ${CAPTURE_IFACE}"
+    restore_plc
+    wait_s "$COOLDOWN_S" "cooldown_concealed_${i}"
+done
 
 # Phase 6: Final cooldown
 label "BENIGN_NORMAL" "START" "day7_cooldown_final" ""

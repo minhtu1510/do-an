@@ -1,0 +1,17 @@
+{'timestamp': '2026-07-29T08:15:04.494125', 'level': 'INFO', 'module': 'logger', 'function': 'setup_logging', 'line': 107, 'message': 'Logging initialized'}
+{'timestamp': '2026-07-29T08:15:05.736302', 'level': 'INFO', 'module': 'logger', 'function': 'setup_logging', 'line': 107, 'message': 'Logging initialized'}
+{'timestamp': '2026-07-29T08:15:05.737205', 'level': 'INFO', 'module': 'session_manager', 'function': 'create_session', 'line': 111, 'message': 'Created session: session_20260729_081505'}
+{'timestamp': '2026-07-29T08:15:05.737587', 'level': 'INFO', 'module': 'session_manager', 'function': 'save_session', 'line': 267, 'message': 'Session saved to data/session_20260729_081505.json'}
+{'timestamp': '2026-07-29T08:15:44.474008', 'level': 'INFO', 'module': 'logger', 'function': 'setup_logging', 'line': 107, 'message': 'Logging initialized'}
+{'timestamp': '2026-07-29T08:15:44.983918', 'level': 'INFO', 'module': 'logger', 'function': 'setup_logging', 'line': 107, 'message': 'Logging initialized'}
+{'timestamp': '2026-07-29T08:15:44.984229', 'level': 'INFO', 'module': 'session_manager', 'function': 'load_session', 'line': 314, 'message': 'Session loaded: session_20260729_081505'}
+{'timestamp': '2026-07-29T08:15:44.995883', 'level': 'INFO', 'module': 'app', 'function': 'start_web_app', 'line': 1961, 'message': 'Starting ICSScout Web Application v2.0.0'}
+{'timestamp': '2026-07-29T08:15:44.996080', 'level': 'INFO', 'module': 'app', 'function': 'start_web_app', 'line': 1962, 'message': 'Server: http://0.0.0.0:5000'}
+{'timestamp': '2026-07-29T08:17:56.752266', 'level': 'INFO', 'module': 'app', 'function': 'handle_connect', 'line': 1899, 'message': 'Client connected: S5jjk6RaQ0FEPMMVAAAB'}
+{'timestamp': '2026-07-29T08:17:57.953497', 'level': 'INFO', 'module': 'app', 'function': 'handle_disconnect', 'line': 1906, 'message': 'Client disconnected: S5jjk6RaQ0FEPMMVAAAB'}
+{'timestamp': '2026-07-29T08:17:58.099648', 'level': 'INFO', 'module': 'app', 'function': 'handle_connect', 'line': 1899, 'message': 'Client connected: _yyy9f5POS_Ef5r5AAAD'}
+{'timestamp': '2026-07-29T08:17:59.123885', 'level': 'INFO', 'module': 'app', 'function': 'handle_disconnect', 'line': 1906, 'message': 'Client disconnected: _yyy9f5POS_Ef5r5AAAD'}
+{'timestamp': '2026-07-29T08:18:38.543368', 'level': 'INFO', 'module': 'app', 'function': 'handle_connect', 'line': 1899, 'message': 'Client connected: 8nmQ9IoIFUXrpBH5AAAF'}
+{'timestamp': '2026-07-29T08:18:41.763085', 'level': 'INFO', 'module': 'app', 'function': 'handle_disconnect', 'line': 1906, 'message': 'Client disconnected: 8nmQ9IoIFUXrpBH5AAAF'}
+{'timestamp': '2026-07-29T08:19:23.746431', 'level': 'INFO', 'module': 'app', 'function': 'handle_connect', 'line': 1899, 'message': 'Client connected: hFTUXFREGQoMAWiiAAAH'}
+{'timestamp': '2026-07-29T08:19:28.273557', 'level': 'INFO', 'module': 'app', 'function': 'handle_disconnect', 'line': 1906, 'message': 'Client disconnected: hFTUXFREGQoMAWiiAAAH'}
