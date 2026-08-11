@@ -76,10 +76,19 @@ def run(args):
     import snap7
     client = snap7.client.Client()
     attack_count = 0
+    original = None  # captured once connected; guards the restore in finally
 
     try:
         client.connect(args.target, args.rack, args.slot)
         print(f"[+] Connected. Monitoring + logic-aware attack...")
+
+        m5_orig = client.read_area(Areas.MK, 0, 5, 2)
+        original = {
+            "START": get_bool(m5_orig, 0, 0),
+            "STOP": get_bool(m5_orig, 0, 1),
+            "Vat_2": get_bool(m5_orig, 0, 6),
+            "CD2": get_dint(client.read_area(Areas.MK, 0, 58, 4), 0),
+        }
 
         end_time = time.time() + args.duration
         while time.time() < end_time:
@@ -95,12 +104,32 @@ def run(args):
     except Exception as e:
         print(f"[ERR] {e}")
     finally:
+        # execute() can leave START/STOP/Vat_2/CD2 modified (STOP_DURING_
+        # TRANSPORT, INJECT_PHANTOM, TIMER_SHOCK); restore them here so a
+        # mid-loop exception -- or just reaching --duration -- doesn't leave
+        # the conveyor stuck stopped / the timer shocked. Unconditional
+        # write-back of the pre-attack snapshot is a no-op for any field
+        # execute() never touched.
+        if original is not None and client.get_connected():
+            try:
+                m5 = client.read_area(Areas.MK, 0, 5, 1)
+                set_bool(m5, 0, 0, original["START"])
+                set_bool(m5, 0, 1, original["STOP"])
+                set_bool(m5, 0, 6, original["Vat_2"])
+                client.write_area(Areas.MK, 0, 5, m5)
+                buf = bytearray(4)
+                set_dint(buf, 0, original["CD2"])
+                client.write_area(Areas.MK, 0, 58, buf)
+                print(f"[*] Restored START={original['START']} STOP={original['STOP']} "
+                      f"Vat_2={original['Vat_2']} CD2={original['CD2']}")
+            except Exception as e:
+                print(f"[ERR] Restore thất bại, cần khôi phục thủ công: {e}")
         if client.get_connected():
             client.disconnect()
         write_label(args.label_file, label_prefix, "END",
                     args.session_id, args.host_id,
                     episode_id=args.episode_id, day=args.day,
-                    note=f"attacks={attack_count}")
+                    note=f"attacks={attack_count} original={original}")
 
 
 def main():
