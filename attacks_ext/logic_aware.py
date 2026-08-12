@@ -11,9 +11,13 @@ Goi tu bash:
       --label-file labels/day7_timeline.csv
 """
 
+import os
+import random
 import time
 import struct
 from attacks_ext.config_ext import base_parser, write_label
+
+_DIVERSE = os.environ.get("ATTACK_PROFILE", "standard") == "diverse_mix"
 
 try:
     from snap7.type import Areas
@@ -99,7 +103,7 @@ def run(args):
                 result = execute(client, name)
                 attack_count += 1
                 print(f"  [{attack_count}] {name} ({reason}) -> {result}")
-            time.sleep(3)
+            time.sleep(random.uniform(1.0, 15.0) if _DIVERSE else 3)
 
     except Exception as e:
         print(f"[ERR] {e}")

@@ -91,7 +91,26 @@
       "Bash(bash -n run_day_bangtruyen_ext.sh)",
       "Bash(python3 -m py_compile attacks_ext/kill_chain.py)",
       "Bash(python3 -m py_compile attacks_ext/concealed_stop_attack.py)",
-      "Bash(python3 -c \"import asyncua; print\\('asyncua OK', asyncua.__version__ if hasattr\\(asyncua,'__version__'\\) else 'no version attr'\\)\")"
+      "Bash(python3 -c \"import asyncua; print\\('asyncua OK', asyncua.__version__ if hasattr\\(asyncua,'__version__'\\) else 'no version attr'\\)\")",
+      "Bash(python -c ' *)",
+      "Artifact",
+      "WebFetch(domain:www.unb.ca)",
+      "Bash(awk \"/^run_attacker_day5\\\\\\(\\\\\\)/,/^}/\" run_day_bangtruyen.sh)",
+      "Bash(bash -n run_day_bangtruyen.sh)",
+      "Bash(bash -n run_ddos_burst_2attacker.sh)",
+      "Bash(chmod +x run_ddos_burst_2attacker.sh)",
+      "Bash(bash run_ddos_burst_2attacker.sh --help)",
+      "Bash(xargs wc -l)",
+      "Bash(grep -n \"^\\\\\\\\\\\\\\\\section\\\\|^\\\\\\\\\\\\\\\\subsection\\\\|^\\\\\\\\\\\\\\\\title\\\\|^\\\\\\\\\\\\\\\\abstract\" paper.tex)",
+      "Bash(grep -n '\\\\\\\\section{\\\\|\\\\\\\\title{\\\\|\\\\\\\\begin{abstract}\\\\|\\\\\\\\subsection{' paper.tex)",
+      "Bash(xargs -I{} wc -l {})",
+      "Bash(grep -n '\\\\\\\\section{' paper.tex)",
+      "Bash(grep -n '^\\\\\\\\section{' paper.tex)",
+      "Bash(grep -n \"open\\(\\\\|savefig\\\\|with open\\\\|writeFile\\\\|Path\\(label\\\\|label\\)\\\\|for label in\\\\|os.path.join.*label\\\\| > \\\\$\\\\| >\\\\\"\\\\| > \\\\\"\" train_eval.py run_day6_confusion_matrices.py)",
+      "Bash(awk '/^\\\\\\\\section\\\\{/{print NR\": \"$0}' paper.tex)",
+      "Bash(xargs -I{} sh -c 'echo \"--{}--\"; grep -E \"^from|^import\" {}')",
+      "Bash(grep -n '^\\\\s*[A-Z_]*\\)\\\\s*$\\\\|^\\\\s*[A-Z_]*\\)\\\\s*#' run_day_bangtruyen.sh)",
+      "Bash(bash -n run_day6_extended.sh)"
     ]
   }
 }

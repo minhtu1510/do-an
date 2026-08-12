@@ -10,10 +10,17 @@ Goi tu bash:
       --label-file labels/day7_timeline.csv
 """
 
+import os
 import socket
 import time
 import random
 from attacks_ext.config_ext import base_parser, write_label
+
+# ATTACK_PROFILE=diverse_mix (bien moi truong, giong co che da co trong
+# run_day_bangtruyen.sh) -- trai deu toc do probe tren pho rong hon de tap
+# train co ca vi du nhanh lan vi du thua, khong chi 1 toc do co dinh.
+_PROFILE = os.environ.get("ATTACK_PROFILE", "standard")
+_DIVERSE = _PROFILE == "diverse_mix"
 
 SMBS = ["C$", "ADMIN$", "IPC$", "Users", "WinCC", "SCADA", "HMI", "PLC",
         "Engineering", "Project", "Backup", "Config", "Data", "Logs", "Share"]
@@ -84,7 +91,7 @@ def run(args):
             for _ in range(5):
                 smb2_neg(args.target)
                 probes += 1
-                time.sleep(random.uniform(0.2, 0.5))
+                time.sleep(random.uniform(0.2, 8.0) if _DIVERSE else random.uniform(0.2, 0.5))
 
             # Share probe burst
             for share in SMBS:
@@ -96,13 +103,13 @@ def run(args):
                     probes += 1
                 except Exception:
                     pass
-                time.sleep(0.1)
+                time.sleep(random.uniform(0.1, 3.0) if _DIVERSE else 0.1)
 
             # RPC pipe probe
             for _ in RPC_PIPES:
                 smb2_neg(args.target)
                 probes += 1
-                time.sleep(random.uniform(0.3, 0.6))
+                time.sleep(random.uniform(0.3, 8.0) if _DIVERSE else random.uniform(0.3, 0.6))
 
             if probes % 30 == 0:
                 print(f"  [{probes}] SMB probes sent")

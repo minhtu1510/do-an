@@ -78,17 +78,17 @@ echo "======================================================================"
 echo "  BANG TAI -- CONTROLLER, noi tiep 4 pha S7 (khop run_full_2attacker.sh)"
 echo "======================================================================"
 
-echo ""; echo ">>> PHA 1a (khop May A / Day1-6) controller bat dau [$(date '+%H:%M:%S')]"
-run_ctrl_days "bt_phase1a_A" "1 2 3 4 5 6"
+echo ""; echo ">>> PHA 1a (khop May A / Day1-6 TRAIN) controller bat dau [$(date '+%H:%M:%S')]"
+run_ctrl_days "bt_train_A_day16" "1 2 3 4 5 6"
 
-echo ""; echo ">>> PHA 1b (khop May B / Day1-6) controller bat dau [$(date '+%H:%M:%S')]"
-run_ctrl_days "bt_phase1b_B" "1 2 3 4 5 6"
+echo ""; echo ">>> PHA 1b (khop May B / Day1-6 OOD) controller bat dau [$(date '+%H:%M:%S')]"
+run_ctrl_days "bt_ood_B_day16" "1 2 3 4 5 6"
 
-echo ""; echo ">>> PHA 1c (khop May A / Day7) controller bat dau [$(date '+%H:%M:%S')]"
-run_ctrl_days "bt_phase1c_A" "7"
+echo ""; echo ">>> PHA 1c (khop May A / Day7 TRAIN) controller bat dau [$(date '+%H:%M:%S')]"
+run_ctrl_days "bt_train_A_day7" "7"
 
-echo ""; echo ">>> PHA 1d (khop May B / Day7) controller bat dau [$(date '+%H:%M:%S')]"
-run_ctrl_days "bt_phase1d_B" "7"
+echo ""; echo ">>> PHA 1d (khop May B / Day7 OOD) controller bat dau [$(date '+%H:%M:%S')]"
+run_ctrl_days "bt_ood_B_day7" "7"
 
 echo ""
 echo "======================================================================"

@@ -13,9 +13,13 @@ Gọi từ bash:
       --label-file labels/day7_timeline.csv
 """
 
+import os
+import random
 import socket
 import time
 from attacks_ext.config_ext import base_parser, write_label
+
+_DIVERSE = os.environ.get("ATTACK_PROFILE", "standard") == "diverse_mix"
 
 PORTS = {
     102:  "S7comm (PLCSIM / local engineering S7 service)",
@@ -61,8 +65,8 @@ def run(args):
                 if is_open:
                     open_ports[port] = desc
                 print(f"  [{scan_rounds}] {port:<5} ({desc}) -> {'OPEN' if is_open else 'closed'}")
-                time.sleep(0.1)
-            time.sleep(2.0)
+                time.sleep(random.uniform(0.1, 2.0) if _DIVERSE else 0.1)
+            time.sleep(random.uniform(2.0, 25.0) if _DIVERSE else 2.0)
 
     except Exception as e:
         print(f"[ERR] {e}")

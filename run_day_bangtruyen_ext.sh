@@ -42,6 +42,12 @@ ATTACK_REPETITIONS="${ATTACK_REPETITIONS:-3}"
 ATTACK_DURATION_S="${ATTACK_DURATION_S:-600}"
 SHORT_ATTACK_DURATION_S="${SHORT_ATTACK_DURATION_S:-300}"
 
+# standard (mac dinh, khong doi hanh vi cu) | diverse_mix (trai deu toc do,
+# xem attacks_ext/*.py -- doc bien nay qua os.environ, can export truoc khi
+# goi _run_attack).
+ATTACK_PROFILE="${ATTACK_PROFILE:-standard}"
+export ATTACK_PROFILE
+
 CAPTURE_DIR="${CAPTURE_DIR:-captures}"
 LABEL_DIR="${LABEL_DIR:-labels}"
 LOG_DIR="${LOG_DIR:-logs}"
@@ -106,6 +112,7 @@ echo "  Target  : $TARGET_IP  (rack=$RACK slot=$SLOT)"
 echo "  HMI     : $HMI_IP"
 echo "  Session : $SESSION_ID  | Host: $HOST_ID"
 echo "  Iface   : ${CAPTURE_IFACE:-auto}"
+echo "  Profile : $ATTACK_PROFILE"
 echo "================================================================"
 
 # ── Helpers ─────────────────────────────────────────────────────
@@ -258,7 +265,8 @@ esac
 start_capture "day7_attacks"
 
 echo ""
-echo "  SCHEDULE: Warmup -> SMB(x3) -> EngScan(x3) -> Stealthy(x3) -> LogicAware(x3) -> KillChain(x2) -> ConcealedStop(x2) -> Cooldown"
+echo "  SCHEDULE: Warmup -> SMB(x3) -> EngScan(x3) -> LogicAware(x3) -> KillChain(x2) -> ConcealedStop(x2) -> Cooldown"
+echo "  (Stealthy Low-Rate Write bo khoi Day 7 -- gan nhu trung lap voi STEALTHY_WRITE cua Day 4, cung 1 y tuong ghi lech nho, giu ban Day 4 lam dai dien)"
 echo ""
 
 # Phase 1: Warmup
@@ -283,15 +291,6 @@ for i in $(seq 1 "$ATTACK_REPETITIONS"); do
     wait_s "$BENIGN_GAP_S" "gap_engscan_${i}"
 done
 wait_s "$COOLDOWN_S" "cooldown_after_engscan"
-
-# Phase 3: Stealthy Low-Rate Write
-echo "[Phase 3] Stealthy Low-Rate Write"
-for i in $(seq 1 "$ATTACK_REPETITIONS"); do
-    _run_attack "STEALTHY_WRITE" "stealthy_write" \
-        "--target ${TARGET_IP} --rack ${RACK} --slot ${SLOT}"
-    restore_plc
-    wait_s "$COOLDOWN_S" "cooldown_stealthy_${i}"
-done
 
 # Phase 4: Logic-Aware
 echo "[Phase 4] Logic-Aware"
