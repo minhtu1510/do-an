@@ -111,7 +111,8 @@
       "Bash(xargs -I{} sh -c 'echo \"--{}--\"; grep -E \"^from|^import\" {}')",
       "Bash(grep -n '^\\\\s*[A-Z_]*\\)\\\\s*$\\\\|^\\\\s*[A-Z_]*\\)\\\\s*#' run_day_bangtruyen.sh)",
       "Bash(bash -n run_day6_extended.sh)",
-      "Bash(python3 -c *)"
+      "Bash(python3 -c *)",
+      "Bash(grep -n '\\)\\\\s*$' run_day_bangtruyen.sh)"
     ]
   }
 }
