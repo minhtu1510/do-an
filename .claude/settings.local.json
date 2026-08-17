@@ -113,7 +113,8 @@
       "Bash(bash -n run_day6_extended.sh)",
       "Bash(python3 -c *)",
       "Bash(grep -n '\\)\\\\s*$' run_day_bangtruyen.sh)",
-      "Bash(echo \"exit=$?\")"
+      "Bash(echo \"exit=$?\")",
+      "Bash(bash -n \"E:/Đồ án/code/iiot/run_all_bangtruyen_days.sh\")"
     ]
   }
 }

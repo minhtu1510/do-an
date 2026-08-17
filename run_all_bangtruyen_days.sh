@@ -67,6 +67,8 @@ DAY8_CYCLES=""
 DAY8_WARMUP="${DAY8_WARMUP:-60}"
 DAY8_COOLDOWN="${DAY8_COOLDOWN:-45}"
 DAY8_SESSION_TAG="train"
+DAY8_BALANCED=0
+DAY8_GROUP_DURATION="${DAY8_GROUP_DURATION:-3600}"
 
 usage() {
     cat <<'EOF'
@@ -90,6 +92,12 @@ Tuy chon:
   --day8-warmup N         Warmup moi cycle Day 8 (default 60s)
   --day8-cooldown N       Cooldown moi cycle Day 8 (default 45s)
   --day8-session-tag T    'train' (default) hoac 'oodtest' cho Day 8
+  --day8-balanced         Chay Day 8 theo 3 nhom kich ban rieng (thay vi 1 pool
+                           11 kich ban random chung) de moi lop co so episode
+                           deu nhau hon -- xem run_day_8_balanced() ben duoi.
+                           Bo qua --day8-cycles/--scenarios khi dung co nay.
+  --day8-group-duration N Thoi luong MOI nhom trong che do --day8-balanced
+                           (default 3600s = 1h/nhom x 3 nhom = 3h tong)
 
 Vi du xem dau file nay (comment tren cung).
 EOF
@@ -113,6 +121,8 @@ while [[ $# -gt 0 ]]; do
         --day8-warmup) DAY8_WARMUP="$2"; shift 2 ;;
         --day8-cooldown) DAY8_COOLDOWN="$2"; shift 2 ;;
         --day8-session-tag) DAY8_SESSION_TAG="$2"; shift 2 ;;
+        --day8-balanced) DAY8_BALANCED=1; shift ;;
+        --day8-group-duration) DAY8_GROUP_DURATION="$2"; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         *) echo "[ERROR] Unknown option: $1" >&2; usage; exit 1 ;;
     esac
@@ -206,6 +216,32 @@ run_day_8() {
     "${cmd[@]}"
 }
 
+# Day 8 chia 3 nhom kich ban (thay vi random.choice tren ca 11 kich ban moi
+# cycle) de moi lop co so episode deu nhau hon trong cung 1 tong thoi luong --
+# xem ly do trong lich su trao doi (pool 11 kich ban random + warmup/cooldown
+# co dinh 60/45s moi cycle lam loang mat do mau/lop khi chay 1 pool lon).
+# Nhom theo dac tinh: probe nhanh khong tier / tier ngan-trung / tier dai-hold.
+DAY8_GROUP_1="OPCUA_ENDPOINT_DISCOVERY OPCUA_NODE_BROWSE OPCUA_WRITE_DENIED OPCUA_INVALID_WRITE OPCUA_PROTOCOL_FUZZ"
+DAY8_GROUP_2="OPCUA_SESSION_BURST OPCUA_READ_SCRAPING OPCUA_RECURSIVE_BROWSE"
+DAY8_GROUP_3="OPCUA_SLOWLORIS OPCUA_BEHAVIORAL_PROFILING OPCUA_SUBSCRIPTION_FLOOD"
+
+run_day_8_balanced() {
+    local gi=0 group ok_all=1
+    for group in "$DAY8_GROUP_1" "$DAY8_GROUP_2" "$DAY8_GROUP_3"; do
+        gi=$((gi + 1))
+        local cmd=("$PY_CMD" "$DAY8_SCRIPT" --host-id "$HOST_ID" --session-tag "$DAY8_SESSION_TAG"
+                   --plc-ip "$TARGET_IP" --warmup "$DAY8_WARMUP" --cooldown "$DAY8_COOLDOWN"
+                   --duration "$DAY8_GROUP_DURATION" --scenarios $group)
+        echo ">>> Day 8 nhom ${gi}/3 (${group}): ${cmd[*]}"
+        if ! "${cmd[@]}"; then
+            echo "[WARN] Day 8 nhom ${gi} that bai, tiep tuc nhom tiep theo"
+            ok_all=0
+        fi
+    done
+    echo "    LUU Y: bat capture rieng o cong mirror cho ca 3 nhom Day 8 (khong dung TShark cua Day 1-7)."
+    [[ "$ok_all" == "1" ]]
+}
+
 for DAY in $DAYS; do
     echo ""
     echo "----------------------------------------------------------------------"
@@ -216,7 +252,13 @@ for DAY in $DAYS; do
     case "$DAY" in
         1|2|3|4|5|6) ok=0; run_day_1_6 "$DAY" && ok=1 ;;
         7)            ok=0; run_day_7 && ok=1 ;;
-        8)            ok=0; run_day_8 && ok=1 ;;
+        8)            ok=0
+                       if [[ "$DAY8_BALANCED" == "1" ]]; then
+                           run_day_8_balanced && ok=1
+                       else
+                           run_day_8 && ok=1
+                       fi
+                       ;;
         *) echo "[WARN] Bo qua day khong hop le: $DAY"; continue ;;
     esac
 
