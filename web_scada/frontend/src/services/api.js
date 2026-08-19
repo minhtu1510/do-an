@@ -19,6 +19,11 @@ export async function fetchStatus() {
   return res.json();
 }
 
+export async function fetchSystemResources() {
+  const res = await apiFetch("/system/resources");
+  return res.json();
+}
+
 export async function fetchPlcStatus() {
   const res = await apiFetch("/plc/status");
   return res.json();

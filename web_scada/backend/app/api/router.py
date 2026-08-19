@@ -13,6 +13,7 @@ from ..auth import require_role
 from ..events import event_service
 from ..scenarios import scenario_catalog, scenario_store
 from ..scenarios.models import ScenarioResult
+from ..system import sample as sample_system_resources
 
 load_dotenv()
 
@@ -40,6 +41,13 @@ async def plc_status(_user=Depends(require_role("viewer"))):
     status = {**_backend_status(), "timestamp": datetime.now(TZ).isoformat()}
     event_service.add_many(alarm_engine.process_gateway_status(status))
     return status
+
+
+@api_router.get("/system/resources")
+async def system_resources(_user=Depends(require_role("viewer"))):
+    """CPU/RAM of the machine running this backend (the gateway host) — not the
+    PLC, which has no general-purpose OS to sample. See app/system/service.py."""
+    return {**sample_system_resources(), "timestamp": datetime.now(TZ).isoformat()}
 
 
 @api_router.get("/tags")

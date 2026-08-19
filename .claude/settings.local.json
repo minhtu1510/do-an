@@ -93,7 +93,9 @@
       "Bash(python3 -m py_compile attacks_ext/concealed_stop_attack.py)",
       "Bash(python3 -c \"import asyncua; print\\('asyncua OK', asyncua.__version__ if hasattr\\(asyncua,'__version__'\\) else 'no version attr'\\)\")",
       "Bash(grep -n '_run_attack \"\\\\|run_kill_chain$\\\\|Phase' run_day_bangtruyen_ext.sh)",
-      "Bash(python3 -m py_compile attacks_ext/evasion_shaped_write.py)"
+      "Bash(python3 -m py_compile attacks_ext/evasion_shaped_write.py)",
+      "Bash(python tests/day8/evaluate_opcua.py --features data_opc/day8_out/opcua_harvest_ext_aa.csv --out-dir data_opc/day8_out/eval_v2)",
+      "Bash(python tests/day8/plot_opcua_eval.py --confusion data_opc/day8_out/eval_v2/confusion_matrix.csv --results data_opc/day8_out/eval_v2/eval_results.json --out-dir data_opc/day8_out/eval_v2)"
     ]
   }
 }

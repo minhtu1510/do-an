@@ -69,3 +69,6 @@ web_scada/backend/data/
 
 /bao-cao/
 /data_opc/
+
+# Real Day 1-6 dataset repo (large raw pcaps/csv, kept local only)
+/SemanticAware-S7comm-Dataset/

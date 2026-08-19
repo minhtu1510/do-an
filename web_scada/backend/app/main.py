@@ -22,6 +22,7 @@ from .events import event_service
 from .history.router import history_router
 from .ids_upload.router import ids_upload_router
 from .ml_results.router import ml_results_router
+from .system import sample as sample_system_resources, warm_up as warm_up_system_resources
 from .websocket.manager import ws_manager
 
 logger = logging.getLogger("web_scada")
@@ -81,13 +82,30 @@ async def lifespan(app: FastAPI):
     task = asyncio.create_task(gateway.start())
     logger.info(f"OPC UA gateway connecting to {OPCUA_ENDPOINT}...")
 
+    warm_up_system_resources()
+
+    async def system_resources_loop():
+        while True:
+            await asyncio.sleep(2)
+            try:
+                await ws_manager.broadcast_system_resources(sample_system_resources())
+            except Exception:
+                pass
+
+    resources_task = asyncio.create_task(system_resources_loop())
+
     yield
 
     logger.info("Web-SCADA backend shutting down...")
     await gateway.stop()
     task.cancel()
+    resources_task.cancel()
     try:
         await task
+    except asyncio.CancelledError:
+        pass
+    try:
+        await resources_task
     except asyncio.CancelledError:
         pass
     logger.info("Web-SCADA backend stopped cleanly")

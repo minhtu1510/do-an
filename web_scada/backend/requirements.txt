@@ -13,6 +13,7 @@ websockets>=12.0
 python-dotenv>=1.0.0
 bcrypt>=4.1.0
 pyjwt>=2.8.0
+psutil>=5.9
 
 # For loading/running the 3-layer IDS model from ../../train_eval.py (predict only,
 # training/SHAP still done via the CLI script directly, not through the web backend)

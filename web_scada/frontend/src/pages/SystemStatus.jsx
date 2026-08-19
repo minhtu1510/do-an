@@ -1,14 +1,27 @@
 import { useState, useEffect } from "react";
-import { fetchAllTags, fetchPlcStatus } from "../services/api";
+import { fetchAllTags, fetchPlcStatus, fetchSystemResources } from "../services/api";
 import { connectWebSocket } from "../services/websocket";
 import PageHeader from "../components/PageHeader";
+import Gauge from "../components/Gauge";
+
+const GOOD_GREEN = "#0ca30c";
+const WARN_AMBER = "#c98500";
+const ATTACK_RED = "#e66767";
+
+function gaugeColor(pct) {
+  if (pct >= 85) return ATTACK_RED;
+  if (pct >= 60) return WARN_AMBER;
+  return GOOD_GREEN;
+}
 
 export default function SystemStatus() {
   const [status, setStatus] = useState(null);
   const [tags, setTags] = useState({});
+  const [resources, setResources] = useState(null);
 
   useEffect(() => {
     fetchPlcStatus().then(setStatus);
+    fetchSystemResources().then(setResources);
     fetchAllTags().then((data) => {
       if (data.tags) {
         const map = {};
@@ -38,6 +51,9 @@ export default function SystemStatus() {
       if (data.type === "tag_update") {
         setTags((prev) => ({ ...prev, [data.key]: data.data }));
       }
+      if (data.type === "system_resources") {
+        setResources({ cpu_percent: data.cpu_percent, memory_percent: data.memory_percent });
+      }
     });
 
     return () => {
@@ -53,6 +69,17 @@ export default function SystemStatus() {
   return (
     <div className="p-6 space-y-6">
       <PageHeader title="System Status" subtitle="Backend, OPC UA gateway and websocket health at a glance." />
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="flex flex-col items-center gap-2 rounded border border-gray-700 bg-gray-800 p-4">
+          <Gauge value={resources?.cpu_percent ?? 0} color={gaugeColor(resources?.cpu_percent ?? 0)} label="CPU — máy backend" />
+          <div className="text-center text-[10px] text-gray-600">Tài nguyên máy chạy Web-SCADA gateway, không phải PLC (PLC không có hệ điều hành để đo).</div>
+        </div>
+        <div className="flex flex-col items-center gap-2 rounded border border-gray-700 bg-gray-800 p-4">
+          <Gauge value={resources?.memory_percent ?? 0} color={gaugeColor(resources?.memory_percent ?? 0)} label="RAM — máy backend" />
+          <div className="text-center text-[10px] text-gray-600">Tăng khi gateway phải xử lý khối lượng OPC UA lớn (vd: subscription flood).</div>
+        </div>
+      </div>
 
       <div className="grid grid-cols-2 gap-3">
         <InfoRow label="PLC IP" value="192.168.210.211" />

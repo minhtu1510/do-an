@@ -3,6 +3,8 @@ import {
   Bar, BarChart, CartesianGrid, Cell, ComposedChart, Legend, Line,
   ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis,
 } from "recharts";
+import { jsPDF } from "jspdf";
+import html2canvas from "html2canvas";
 import PageHeader from "../components/PageHeader";
 import Gauge from "../components/Gauge";
 import Sparkline from "../components/Sparkline";
@@ -118,7 +120,7 @@ export default function IdsUpload() {
   const [status, setStatus] = useState(null);
   const [file, setFile] = useState(null);
   const [plcIp, setPlcIp] = useState("192.168.210.211");
-  const [windowS, setWindowS] = useState(5.0);
+  const [windowS, setWindowS] = useState(2.0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
@@ -130,6 +132,8 @@ export default function IdsUpload() {
   const [speed, setSpeed] = useState(5);
   const audioCtxRef = useRef(null);
   const prevAttackCountRef = useRef(0);
+  const reportRef = useRef(null);
+  const [exportingPdf, setExportingPdf] = useState(false);
 
   useEffect(() => {
     fetchIdsStatus().then(setStatus).catch(() => setStatus({ configured: false, model_dir: "" }));
@@ -190,6 +194,47 @@ export default function IdsUpload() {
   function handlePause() { setPlaying(false); }
   function handleSeek(e) { setVirtualMs(Number(e.target.value)); setPlaying(false); }
   function handleReset() { setVirtualMs(0); setPlaying(false); }
+
+  async function handleExportPdf() {
+    if (!reportRef.current || !result) return;
+    setExportingPdf(true);
+    try {
+      const canvas = await html2canvas(reportRef.current, { backgroundColor: "#030712", scale: 2 });
+      const imgData = canvas.toDataURL("image/png");
+
+      const pdf = new jsPDF({ orientation: "p", unit: "pt", format: "a4" });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+
+      pdf.setFontSize(16);
+      pdf.text("IDS Upload — Bao cao phan tich", 40, 50);
+      pdf.setFontSize(10);
+      pdf.text(`File pcap: ${result.source_file || "-"}`, 40, 75);
+      pdf.text(`Model: ${result.model_dir || "-"}`, 40, 90);
+      pdf.text(`Thoi gian xuat: ${new Date().toLocaleString()}`, 40, 105);
+      pdf.text(`Tong flow: ${result.total_flows}  |  Flow tan cong: ${result.attack_flows} (${(result.attack_ratio * 100).toFixed(1)}%)`, 40, 120);
+      pdf.text("Toan bo bieu do/bang duoi day la trang thai dang hien thi tren man hinh (ke ca vi tri phat lai neu dang tua).", 40, 140);
+
+      const imgWidth = pageWidth;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      let heightLeft = imgHeight;
+      let position = 0;
+
+      pdf.addPage();
+      pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+      heightLeft -= pageHeight;
+      while (heightLeft > 0) {
+        position = heightLeft - imgHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+        heightLeft -= pageHeight;
+      }
+
+      pdf.save(`ids_report_${Date.now()}.pdf`);
+    } finally {
+      setExportingPdf(false);
+    }
+  }
 
   const live = useMemo(() => aggregateFromPoints(revealedTimeline), [revealedTimeline]);
   const colorMap = useMemo(() => new Map(), [result]);
@@ -275,6 +320,7 @@ export default function IdsUpload() {
         <label className="flex flex-col gap-1">
           <span className="text-xs uppercase text-gray-500">Window (s)</span>
           <input type="number" step="0.5" value={windowS} onChange={(e) => setWindowS(e.target.value)} className="w-24 rounded border border-gray-700 bg-gray-950 px-3 py-1.5 text-sm text-gray-200" />
+          <span className="text-[10px] text-gray-600">Model hiện tại train trên cửa sổ 2s — đổi giá trị này sẽ lệch phân bố đặc trưng.</span>
         </label>
         <button
           type="submit"
@@ -291,6 +337,16 @@ export default function IdsUpload() {
 
       {result && (
         <>
+          <div className="flex justify-end">
+            <button
+              onClick={handleExportPdf}
+              disabled={exportingPdf}
+              className="rounded border border-gray-700 bg-gray-800 px-3 py-1.5 text-xs font-semibold text-gray-300 hover:border-blue-600 hover:text-blue-300 disabled:opacity-50"
+            >
+              {exportingPdf ? "Đang xuất..." : "⬇ Xuất báo cáo PDF"}
+            </button>
+          </div>
+
           {canPlay && (
             <div className="flex flex-wrap items-center gap-3 rounded border border-gray-700 bg-gray-800 p-4">
               <button
@@ -326,6 +382,7 @@ export default function IdsUpload() {
             </div>
           )}
 
+          <div ref={reportRef} className="space-y-6 bg-gray-950 p-1">
           {/* Z-pattern: most important numbers top-left, gauges top-right */}
           <div className="grid gap-4 lg:grid-cols-[1fr_1fr_auto_auto]">
             <StatTile label="Tổng số flow" value={live.total_flows} accent={CATEGORICAL[0]}>
@@ -457,6 +514,7 @@ export default function IdsUpload() {
                 </div>
               </>
             )}
+          </div>
           </div>
         </>
       )}

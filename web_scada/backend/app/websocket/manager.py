@@ -54,6 +54,16 @@ class ConnectionManager:
             except Exception:
                 pass
 
+    async def broadcast_system_resources(self, resources: dict):
+        for ws in self._connections:
+            try:
+                await ws.send_json({
+                    "type": "system_resources",
+                    **resources,
+                })
+            except Exception:
+                pass
+
     @property
     def count(self):
         return len(self._connections)
