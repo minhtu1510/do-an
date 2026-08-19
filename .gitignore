@@ -76,3 +76,6 @@ web_scada/backend/data/
 # Trained IDS model (layer3_classifier.joblib alone is ~430MB — over GitHub's
 # 100MB hard file limit; retrain locally with train_eval.py instead of committing)
 /model/
+
+# Portable Windows tool bundle (exe + DLLs, ~700 files) — not source, don't commit
+/ICSScout_Portable/
