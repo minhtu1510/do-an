@@ -5,6 +5,9 @@ import {
 } from "recharts";
 import { jsPDF } from "jspdf";
 import html2canvas from "html2canvas";
+import {
+  UploadCloud, Play, Pause, RotateCcw, FileDown, Loader2, AlertTriangle,
+} from "lucide-react";
 import PageHeader from "../components/PageHeader";
 import Gauge from "../components/Gauge";
 import Sparkline from "../components/Sparkline";
@@ -291,77 +294,88 @@ export default function IdsUpload() {
   return (
     <div className="p-6 space-y-6">
       <PageHeader
+        icon={UploadCloud}
         title="IDS — Upload Pcap"
         subtitle="Trích xuất đặc trưng (extract_s7_features.py) rồi chấm điểm qua IDS 3 lớp (train_eval.py) — chỉ hiện kết quả thật từ model đã train."
       />
 
       {status && !status.configured && (
-        <div className="rounded border border-yellow-900/50 bg-yellow-950/20 px-4 py-3 text-xs text-yellow-500">
-          Chưa có model đã train tại <code className="rounded bg-gray-900 px-1">{status.model_dir}</code>. Chạy{" "}
-          <code className="rounded bg-gray-900 px-1">python train_eval.py --dataset &lt;day1_6_labeled.csv&gt; --mode train --output {status.model_dir}</code>{" "}
-          trên dữ liệu Day 1-6 thật trước.
+        <div className="flex items-start gap-2 rounded-lg border border-yellow-900/50 bg-yellow-950/20 px-4 py-3 text-xs text-yellow-500">
+          <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+          <span>
+            Chưa có model đã train tại <code className="rounded bg-gray-900 px-1">{status.model_dir}</code>. Chạy{" "}
+            <code className="rounded bg-gray-900 px-1">python train_eval.py --dataset &lt;day1_6_labeled.csv&gt; --mode train --output {status.model_dir}</code>{" "}
+            trên dữ liệu Day 1-6 thật trước.
+          </span>
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="flex flex-wrap items-end gap-3 rounded border border-gray-700 bg-gray-800 p-4">
+      <form onSubmit={handleSubmit} className="flex flex-wrap items-end gap-3 rounded-lg border border-gray-700 bg-gray-800 p-4 shadow-sm shadow-black/20">
         <label className="flex flex-col gap-1">
           <span className="text-xs uppercase text-gray-500">File pcap/pcapng</span>
           <input
             type="file"
             accept=".pcap,.pcapng"
             onChange={(e) => setFile(e.target.files?.[0] || null)}
-            className="text-xs text-gray-300 file:mr-2 file:rounded file:border-0 file:bg-gray-900 file:px-3 file:py-1.5 file:text-xs file:text-gray-300"
+            className="text-xs text-gray-300 file:mr-2 file:rounded file:border-0 file:bg-gray-900 file:px-3 file:py-1.5 file:text-xs file:text-gray-300 file:transition-colors file:hover:bg-gray-800"
           />
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-xs uppercase text-gray-500">PLC IP</span>
-          <input value={plcIp} onChange={(e) => setPlcIp(e.target.value)} className="rounded border border-gray-700 bg-gray-950 px-3 py-1.5 text-sm text-gray-200" />
+          <input value={plcIp} onChange={(e) => setPlcIp(e.target.value)} className="rounded border border-gray-700 bg-gray-950 px-3 py-1.5 text-sm text-gray-200 outline-none transition-colors focus:border-blue-600" />
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-xs uppercase text-gray-500">Window (s)</span>
-          <input type="number" step="0.5" value={windowS} onChange={(e) => setWindowS(e.target.value)} className="w-24 rounded border border-gray-700 bg-gray-950 px-3 py-1.5 text-sm text-gray-200" />
+          <input type="number" step="0.5" value={windowS} onChange={(e) => setWindowS(e.target.value)} className="w-24 rounded border border-gray-700 bg-gray-950 px-3 py-1.5 text-sm text-gray-200 outline-none transition-colors focus:border-blue-600" />
           <span className="text-[10px] text-gray-600">Model hiện tại train trên cửa sổ 2s — đổi giá trị này sẽ lệch phân bố đặc trưng.</span>
         </label>
         <button
           type="submit"
           disabled={busy || !file}
-          className="rounded bg-blue-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-50"
+          className="flex items-center gap-1.5 rounded bg-blue-600 px-4 py-1.5 text-sm font-semibold text-white shadow-sm shadow-blue-950 transition-colors hover:bg-blue-500 disabled:opacity-50"
         >
+          {busy && <Loader2 size={14} className="animate-spin" />}
           {busy ? "Đang phân tích..." : "Phân tích"}
         </button>
       </form>
 
       {error && (
-        <div className="rounded border border-red-900/50 bg-red-950/30 px-4 py-3 text-sm text-red-400">{error}</div>
+        <div className="flex items-start gap-2 rounded-lg border border-red-900/50 bg-red-950/30 px-4 py-3 text-sm text-red-400 animate-fade-in">
+          <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+          {error}
+        </div>
       )}
 
       {result && (
         <>
-          <div className="flex justify-end">
+          <div className="flex justify-end animate-fade-in">
             <button
               onClick={handleExportPdf}
               disabled={exportingPdf}
-              className="rounded border border-gray-700 bg-gray-800 px-3 py-1.5 text-xs font-semibold text-gray-300 hover:border-blue-600 hover:text-blue-300 disabled:opacity-50"
+              className="flex items-center gap-1.5 rounded border border-gray-700 bg-gray-800 px-3 py-1.5 text-xs font-semibold text-gray-300 transition-colors hover:border-blue-600 hover:text-blue-300 disabled:opacity-50"
             >
-              {exportingPdf ? "Đang xuất..." : "⬇ Xuất báo cáo PDF"}
+              {exportingPdf ? <Loader2 size={13} className="animate-spin" /> : <FileDown size={13} />}
+              {exportingPdf ? "Đang xuất..." : "Xuất báo cáo PDF"}
             </button>
           </div>
 
           {canPlay && (
-            <div className="flex flex-wrap items-center gap-3 rounded border border-gray-700 bg-gray-800 p-4">
+            <div className="flex flex-wrap items-center gap-3 rounded-lg border border-gray-700 bg-gray-800 p-4 shadow-sm shadow-black/20 animate-fade-in">
               <button
                 onClick={playing ? handlePause : handlePlay}
-                className="rounded bg-blue-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-blue-500"
+                className="flex items-center gap-1.5 rounded bg-blue-600 px-4 py-1.5 text-sm font-semibold text-white shadow-sm shadow-blue-950 transition-colors hover:bg-blue-500"
               >
-                {playing ? "⏸ Tạm dừng" : "▶ Phát lại"}
+                {playing ? <Pause size={14} /> : <Play size={14} />}
+                {playing ? "Tạm dừng" : "Phát lại"}
               </button>
-              <button onClick={handleReset} className="rounded border border-gray-700 px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200">
-                ⏮ Về đầu
+              <button onClick={handleReset} className="flex items-center gap-1.5 rounded border border-gray-700 px-3 py-1.5 text-xs text-gray-400 transition-colors hover:border-gray-600 hover:text-gray-200">
+                <RotateCcw size={12} />
+                Về đầu
               </button>
               <select
                 value={speed}
                 onChange={(e) => setSpeed(Number(e.target.value))}
-                className="rounded border border-gray-700 bg-gray-950 px-2 py-1.5 text-xs text-gray-300"
+                className="rounded border border-gray-700 bg-gray-950 px-2 py-1.5 text-xs text-gray-300 transition-colors hover:border-gray-600"
               >
                 <option value={1}>x1</option>
                 <option value={5}>x5</option>
@@ -391,10 +405,10 @@ export default function IdsUpload() {
             <StatTile label="Flow bị gắn nhãn tấn công" value={live.attack_flows} color={live.attack_flows > 0 ? "text-red-400" : "text-green-400"} accent={attackColor}>
               <Sparkline data={buckets} dataKey="attackRatio" color={attackColor} />
             </StatTile>
-            <div className="flex items-center justify-center rounded border border-gray-700 bg-gray-800 p-4">
+            <div className="flex items-center justify-center rounded-lg border border-gray-700 bg-gray-800 p-4 shadow-sm shadow-black/20">
               <Gauge value={attackPct} color={attackColor} label="Tỷ lệ tấn công" />
             </div>
-            <div className="flex flex-col items-center justify-center rounded border border-gray-700 bg-gray-800 p-4">
+            <div className="flex flex-col items-center justify-center rounded-lg border border-gray-700 bg-gray-800 p-4 shadow-sm shadow-black/20">
               <Gauge value={currentFlow ? currentFlow.confidence * 100 : 0} color={currentColor} label="Confidence hiện tại" />
               {currentFlow && (
                 <span className="mt-1 rounded px-2 py-0.5 text-[10px] font-bold" style={{ backgroundColor: `${colorFor(currentFlow.prediction, colorMap)}33`, color: colorFor(currentFlow.prediction, colorMap) }}>
@@ -421,7 +435,7 @@ export default function IdsUpload() {
             </ChartPanel>
           )}
           {historian && !fusionSeries?.hasOverlap && (
-            <div className="rounded border border-gray-700 bg-gray-800 p-4 text-xs text-gray-500">
+            <div className="rounded-lg border border-gray-700 bg-gray-800 p-4 text-xs text-gray-500 shadow-sm shadow-black/20">
               Không có dữ liệu historian trùng khung thời gian với file pcap này — Fusion Chart chỉ vẽ khi Trends historian thật sự đang ghi trong lúc pcap được thu (không suy diễn/nội suy).
             </div>
           )}
@@ -482,7 +496,7 @@ export default function IdsUpload() {
             </ChartPanel>
           </div>
 
-          <div className="rounded border border-gray-700 bg-gray-800 overflow-hidden">
+          <div className="overflow-hidden rounded-lg border border-gray-700 bg-gray-800 shadow-sm shadow-black/20">
             <div className="border-b border-gray-700 px-4 py-3 text-sm font-semibold text-gray-200">
               Chi tiết flow không phải BENIGN ({feedRows.length})
             </div>
@@ -524,11 +538,11 @@ export default function IdsUpload() {
 
 function StatTile({ label, value, color = "text-white", accent, children }) {
   return (
-    <div className="overflow-hidden rounded border border-gray-700 bg-gray-800">
+    <div className="overflow-hidden rounded-lg border border-gray-700 bg-gray-800 shadow-sm shadow-black/20 transition-colors hover:border-gray-600">
       {accent && <div className="h-1" style={{ backgroundColor: accent }} />}
       <div className="p-4">
         <div className="text-xs uppercase text-gray-500">{label}</div>
-        <div className={`mt-1 text-2xl font-bold ${color}`}>{value}</div>
+        <div className={`mt-1 font-mono text-2xl font-bold ${color}`}>{value}</div>
         {children}
       </div>
     </div>
@@ -537,7 +551,7 @@ function StatTile({ label, value, color = "text-white", accent, children }) {
 
 function ChartPanel({ title, subtitle, children }) {
   return (
-    <div className="rounded border border-gray-700 bg-gray-800 p-4">
+    <div className="rounded-lg border border-gray-700 bg-gray-800 p-4 shadow-sm shadow-black/20">
       <div className="mb-3">
         <div className="text-sm font-semibold text-gray-200">{title}</div>
         {subtitle && <div className="text-xs text-gray-500">{subtitle}</div>}

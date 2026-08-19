@@ -6,6 +6,7 @@ import {
   fetchMlConfusionMatrix,
   fetchMlFeatureImportance,
 } from "../services/api";
+import { BarChart3, FolderX, AlertTriangle } from "lucide-react";
 import PageHeader from "../components/PageHeader";
 import Gauge from "../components/Gauge";
 
@@ -77,56 +78,65 @@ export default function DatasetStats() {
   return (
     <div className="p-6 space-y-6">
       <PageHeader
+        icon={BarChart3}
         title="Dataset & Model Stats"
         subtitle="Read directly from train_ml.py output on disk. No number here is synthesized — this page is empty until real results exist."
       />
 
       {!configured ? (
-        <div className="bg-gray-800 rounded border border-gray-700 p-6">
-          <div className="text-sm font-semibold text-gray-200">ML results directory</div>
-          <div className="mt-2 text-2xl font-bold text-yellow-400">Not configured</div>
-          <div className="mt-2 text-sm text-gray-500">
-            No directory found at <code className="rounded bg-gray-900 px-1.5 py-0.5 text-gray-300">{status?.results_dir || "ml_results/"}</code>.
-            Run <code className="rounded bg-gray-900 px-1.5 py-0.5 text-gray-300">python train_ml.py --output-dir ml_results</code> at
-            the repo root (on a machine with the real dataset), then copy the output directory here — or set{" "}
-            <code className="rounded bg-gray-900 px-1.5 py-0.5 text-gray-300">ML_RESULTS_DIR</code> to wherever it was copied — and reload this page.
+        <div className="flex items-start gap-4 rounded-lg border border-gray-700 bg-gray-800 p-6 shadow-sm shadow-black/20">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-yellow-950/40 text-yellow-500">
+            <FolderX size={18} />
+          </div>
+          <div>
+            <div className="text-sm font-semibold text-gray-200">ML results directory</div>
+            <div className="mt-1 text-2xl font-bold text-yellow-400">Not configured</div>
+            <div className="mt-2 text-sm leading-relaxed text-gray-500">
+              No directory found at <code className="rounded bg-gray-900 px-1.5 py-0.5 text-gray-300">{status?.results_dir || "ml_results/"}</code>.
+              Run <code className="rounded bg-gray-900 px-1.5 py-0.5 text-gray-300">python train_ml.py --output-dir ml_results</code> at
+              the repo root (on a machine with the real dataset), then copy the output directory here — or set{" "}
+              <code className="rounded bg-gray-900 px-1.5 py-0.5 text-gray-300">ML_RESULTS_DIR</code> to wherever it was copied — and reload this page.
+            </div>
           </div>
         </div>
       ) : (
         <>
           {/* Z-pattern hero row — best result at a glance before the detail tables */}
           <div className="grid gap-4 lg:grid-cols-[auto_1fr_1fr]">
-            <div className="flex items-center justify-center rounded border border-gray-700 bg-gray-800 p-4">
+            <div className="flex items-center justify-center rounded-lg border border-gray-700 bg-gray-800 p-4 shadow-sm shadow-black/20">
               {bestAccuracyPct !== null ? (
                 <Gauge value={bestAccuracyPct} color={bestAccuracyPct >= 80 ? GOOD_GREEN : bestAccuracyPct >= 60 ? WARN_AMBER : "#e66767"} label="Best balanced acc." />
               ) : (
                 <div className="text-center text-xs text-gray-500">Chưa có metric</div>
               )}
             </div>
-            <div className="overflow-hidden rounded border border-gray-700 bg-gray-800">
+            <div className="overflow-hidden rounded-lg border border-gray-700 bg-gray-800 shadow-sm shadow-black/20 transition-colors hover:border-gray-600">
               <div className="h-1" style={{ backgroundColor: BLUE }} />
               <div className="p-4">
                 <div className="text-xs uppercase text-gray-500">Số experiment</div>
-                <div className="mt-1 text-2xl font-bold" style={{ color: BLUE }}>{status.experiments?.length ?? 0}</div>
+                <div className="mt-1 font-mono text-2xl font-bold" style={{ color: BLUE }}>{status.experiments?.length ?? 0}</div>
               </div>
             </div>
-            <div className="overflow-hidden rounded border border-gray-700 bg-gray-800">
+            <div className="overflow-hidden rounded-lg border border-gray-700 bg-gray-800 shadow-sm shadow-black/20 transition-colors hover:border-gray-600">
               <div className="h-1" style={{ backgroundColor: AQUA }} />
               <div className="p-4">
                 <div className="text-xs uppercase text-gray-500">Run trong experiment đang chọn</div>
-                <div className="mt-1 text-2xl font-bold" style={{ color: AQUA }}>{runs.length}</div>
+                <div className="mt-1 font-mono text-2xl font-bold" style={{ color: AQUA }}>{runs.length}</div>
               </div>
             </div>
           </div>
 
-          <div className="bg-gray-800 rounded border border-gray-700 overflow-hidden">
+          <div className="overflow-hidden rounded-lg border border-gray-700 bg-gray-800 shadow-sm shadow-black/20">
             <div className="border-b border-gray-700 px-4 py-3 text-sm font-semibold text-gray-200">
               Model performance summary (mean ± std across folds/seeds)
             </div>
             {!summary || summary.length === 0 ? (
-              <div className="p-6 text-sm text-gray-500">
-                Results dir found ({status.results_dir}) but <code className="rounded bg-gray-900 px-1.5 py-0.5 text-gray-300">summary_mean_std.csv</code> is missing.
-                Re-run train_ml.py — it writes this file at the end of a full run.
+              <div className="flex items-start gap-2 p-6 text-sm text-gray-500">
+                <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                <span>
+                  Results dir found ({status.results_dir}) but <code className="rounded bg-gray-900 px-1.5 py-0.5 text-gray-300">summary_mean_std.csv</code> is missing.
+                  Re-run train_ml.py — it writes this file at the end of a full run.
+                </span>
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -144,7 +154,7 @@ export default function DatasetStats() {
                   </thead>
                   <tbody className="divide-y divide-gray-700">
                     {summary.map((row, i) => (
-                      <tr key={i}>
+                      <tr key={i} className="transition-colors hover:bg-gray-900/40">
                         <td className="px-4 py-2 text-gray-200">{row.experiment}</td>
                         <td className="px-4 py-2 text-gray-400">{row.validation_type}</td>
                         <td className="px-4 py-2 text-gray-400">{row.task}</td>
@@ -162,7 +172,7 @@ export default function DatasetStats() {
 
           {status.experiments?.length > 0 && (
             <div className="grid gap-4 lg:grid-cols-2">
-              <div className="bg-gray-800 rounded border border-gray-700 p-4 space-y-4">
+              <div className="space-y-4 rounded-lg border border-gray-700 bg-gray-800 p-4 shadow-sm shadow-black/20">
                 <div className="flex flex-wrap items-center gap-3">
                   <div className="text-sm font-semibold text-gray-200">Confusion matrix</div>
                   <RunPicker
@@ -177,7 +187,7 @@ export default function DatasetStats() {
                 {confusion ? <ConfusionMatrix data={confusion} /> : <EmptyNote text="No confusion-matrix CSV for this run." />}
               </div>
 
-              <div className="bg-gray-800 rounded border border-gray-700 p-4 space-y-4">
+              <div className="space-y-4 rounded-lg border border-gray-700 bg-gray-800 p-4 shadow-sm shadow-black/20">
                 <div className="text-sm font-semibold text-gray-200">Feature importance (top features)</div>
                 {featureImportance ? (
                   <FeatureImportanceBars features={featureImportance} />
@@ -197,7 +207,7 @@ function RunPicker({ experiments, selectedExperiment, onExperiment, runs, select
   return (
     <div className="flex flex-wrap gap-2 text-xs">
       <select
-        className="rounded border border-gray-700 bg-gray-900 px-2 py-1 text-gray-300"
+        className="rounded border border-gray-700 bg-gray-900 px-2 py-1 text-gray-300 transition-colors hover:border-gray-600"
         value={selectedExperiment}
         onChange={(e) => onExperiment(e.target.value)}
       >
@@ -206,7 +216,7 @@ function RunPicker({ experiments, selectedExperiment, onExperiment, runs, select
         ))}
       </select>
       <select
-        className="rounded border border-gray-700 bg-gray-900 px-2 py-1 text-gray-300"
+        className="rounded border border-gray-700 bg-gray-900 px-2 py-1 text-gray-300 transition-colors hover:border-gray-600"
         value={selectedRun}
         onChange={(e) => onRun(e.target.value)}
         disabled={runs.length === 0}
@@ -245,7 +255,7 @@ function ConfusionMatrix({ data }) {
                 return (
                   <td key={j} className="group relative px-2 py-1 text-center">
                     <div
-                      className="rounded px-2 py-1 font-mono font-semibold"
+                      className="rounded px-2 py-1 font-mono font-semibold transition-transform group-hover:scale-105"
                       style={{ backgroundColor: heatColor(ratio), color: ratio > 0.55 ? "#0b0b0b" : "#e5e7eb" }}
                     >
                       {value}

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { LayoutDashboard } from "lucide-react";
 import { connectWebSocket } from "../services/websocket";
 import { fetchAllTags, fetchPlcStatus } from "../services/api";
 import TagCard from "../components/TagCard";
@@ -81,6 +82,7 @@ export default function Overview() {
   return (
     <div className="p-6 space-y-6">
       <PageHeader
+        icon={LayoutDashboard}
         title="Production Overview"
         subtitle="Live summary from OPC UA tags. Internal stage bits are not treated as physical sensors."
       />
@@ -94,7 +96,7 @@ export default function Overview() {
         <KPICard label="Active alarms" value={activeAlarms} color={activeAlarms > 0 ? "text-red-400" : "text-green-400"} />
       </div>
 
-      <div className="bg-gray-800 rounded border border-gray-700 p-6">
+      <div className="rounded-lg border border-gray-700 bg-gray-800 p-6 shadow-sm shadow-black/20">
         <div className="flex items-center justify-between mb-3">
           <div>
             <div className="text-sm font-semibold text-gray-200">Production progress</div>
@@ -104,9 +106,9 @@ export default function Overview() {
           </div>
           <div className={`text-sm font-bold ${statusColor(conveyorStatus)}`}>{conveyorStatus}</div>
         </div>
-        <div className="h-4 rounded bg-gray-900 border border-gray-700 overflow-hidden">
+        <div className="h-4 rounded-full bg-gray-900 border border-gray-700 overflow-hidden">
           <div
-            className={`h-full transition-all duration-500 ${offline ? "bg-gray-700" : isRunning ? "bg-green-500" : "bg-blue-600"}`}
+            className={`h-full rounded-full transition-all duration-500 ${offline ? "bg-gray-700" : isRunning ? "bg-green-500" : "bg-blue-600"}`}
             style={{ width: `${progress}%` }}
           />
         </div>
@@ -118,7 +120,7 @@ export default function Overview() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
-        <div className="bg-gray-800 rounded border border-gray-700 p-5">
+        <div className="rounded-lg border border-gray-700 bg-gray-800 p-5 shadow-sm shadow-black/20">
           <div className="mb-4 text-sm font-semibold text-gray-200">Process stages</div>
           <div className="grid gap-3 sm:grid-cols-3">
             {["vat_1", "vat_2", "vat_3"].map((key, index) => {
@@ -126,7 +128,7 @@ export default function Overview() {
             const active = !t?.stale && t?.value === true;
             const unknown = !t || t.stale;
             return (
-              <div key={key} className={`rounded border p-4 ${active ? "border-blue-500 bg-blue-950/30" : unknown ? "border-gray-700 bg-gray-900/40" : "border-gray-700 bg-gray-900/20"}`}>
+              <div key={key} className={`rounded-lg border p-4 transition-colors ${active ? "border-blue-500 bg-blue-950/30" : unknown ? "border-gray-700 bg-gray-900/40" : "border-gray-700 bg-gray-900/20"}`}>
                 <div className="text-xs text-gray-500">Stage {index + 1}</div>
                 <div className={`mt-2 text-lg font-bold ${active ? "text-blue-300" : unknown ? "text-gray-600" : "text-gray-300"}`}>
                   {unknown ? "UNKNOWN" : active ? "ACTIVE" : "INACTIVE"}
@@ -157,9 +159,9 @@ export default function Overview() {
 
 function KPICard({ label, value, color = "text-white" }) {
   return (
-    <div className="bg-gray-800 rounded border border-gray-700 p-4 text-center">
-      <div className="text-xs text-gray-500 uppercase">{label}</div>
-      <div className={`text-2xl font-bold mt-1 ${color}`}>{value}</div>
+    <div className="rounded-lg border border-gray-700 bg-gray-800 p-4 text-center shadow-sm shadow-black/20 transition-colors hover:border-gray-600">
+      <div className="text-xs uppercase tracking-wide text-gray-500">{label}</div>
+      <div className={`mt-1 font-mono text-2xl font-bold ${color}`}>{value}</div>
     </div>
   );
 }

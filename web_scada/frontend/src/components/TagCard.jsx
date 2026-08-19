@@ -14,7 +14,7 @@ export default function TagCard({ label, sublabel, value, unit, quality, stale, 
   const textColor = isStale ? "text-gray-600" : typeof value === "boolean" ? (value ? "text-green-400" : "text-gray-400") : "text-blue-300";
 
   return (
-    <div className={`rounded border p-3 ${bgColor} ${className || ""}`}>
+    <div className={`rounded-lg border p-3 transition-colors ${bgColor} ${className || ""}`}>
       <div className="text-xs text-gray-500">{label}</div>
       {sublabel && <div className="text-[10px] text-gray-600">{sublabel}</div>}
       <div className={`text-xl font-mono font-bold mt-1 ${textColor}`}>

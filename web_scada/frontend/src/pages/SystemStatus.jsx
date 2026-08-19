@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { ServerCog } from "lucide-react";
 import { fetchAllTags, fetchPlcStatus, fetchSystemResources } from "../services/api";
 import { connectWebSocket } from "../services/websocket";
 import PageHeader from "../components/PageHeader";
@@ -68,14 +69,14 @@ export default function SystemStatus() {
 
   return (
     <div className="p-6 space-y-6">
-      <PageHeader title="System Status" subtitle="Backend, OPC UA gateway and websocket health at a glance." />
+      <PageHeader icon={ServerCog} title="System Status" subtitle="Backend, OPC UA gateway and websocket health at a glance." />
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <div className="flex flex-col items-center gap-2 rounded border border-gray-700 bg-gray-800 p-4">
+        <div className="flex flex-col items-center gap-2 rounded-lg border border-gray-700 bg-gray-800 p-4 shadow-sm shadow-black/20 transition-colors hover:border-gray-600">
           <Gauge value={resources?.cpu_percent ?? 0} color={gaugeColor(resources?.cpu_percent ?? 0)} label="CPU — máy backend" />
           <div className="text-center text-[10px] text-gray-600">Tài nguyên máy chạy Web-SCADA gateway, không phải PLC (PLC không có hệ điều hành để đo).</div>
         </div>
-        <div className="flex flex-col items-center gap-2 rounded border border-gray-700 bg-gray-800 p-4">
+        <div className="flex flex-col items-center gap-2 rounded-lg border border-gray-700 bg-gray-800 p-4 shadow-sm shadow-black/20 transition-colors hover:border-gray-600">
           <Gauge value={resources?.memory_percent ?? 0} color={gaugeColor(resources?.memory_percent ?? 0)} label="RAM — máy backend" />
           <div className="text-center text-[10px] text-gray-600">Tăng khi gateway phải xử lý khối lượng OPC UA lớn (vd: subscription flood).</div>
         </div>
@@ -101,7 +102,7 @@ export default function SystemStatus() {
 
 function InfoRow({ label, value, color = "text-gray-300" }) {
   return (
-    <div className="bg-gray-800 border border-gray-700 rounded px-4 py-3 flex justify-between items-center">
+    <div className="flex items-center justify-between rounded-lg border border-gray-700 bg-gray-800 px-4 py-3 shadow-sm shadow-black/20 transition-colors hover:border-gray-600">
       <span className="text-xs text-gray-500">{label}</span>
       <span className={`font-mono text-sm font-bold ${color}`}>{value}</span>
     </div>

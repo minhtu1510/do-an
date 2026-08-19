@@ -72,3 +72,7 @@ web_scada/backend/data/
 
 # Real Day 1-6 dataset repo (large raw pcaps/csv, kept local only)
 /SemanticAware-S7comm-Dataset/
+
+# Trained IDS model (layer3_classifier.joblib alone is ~430MB — over GitHub's
+# 100MB hard file limit; retrain locally with train_eval.py instead of committing)
+/model/

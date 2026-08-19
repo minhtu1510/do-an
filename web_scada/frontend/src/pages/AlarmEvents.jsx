@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Bell, Check, Database, Inbox } from "lucide-react";
 import { ackEvent, fetchEvents } from "../services/api";
 import { connectWebSocket } from "../services/websocket";
 import PageHeader from "../components/PageHeader";
@@ -52,21 +53,25 @@ export default function AlarmEvents() {
   return (
     <div className="p-6 space-y-6">
       <PageHeader
+        icon={Bell}
         title="Alarms & Events"
         subtitle="In-memory events generated from live OPC UA tag and connection changes."
         right={<ExportCsvButton />}
       />
 
       <div className="grid gap-4 sm:grid-cols-3">
-        <SummaryCard label="Active alarms" value={activeCount} color={activeCount > 0 ? "text-red-400" : "text-green-400"} />
-        <SummaryCard label="Stored events" value={events.length} />
-        <SummaryCard label="Persistence" value="In memory" color="text-yellow-400" />
+        <SummaryCard label="Active alarms" value={activeCount} color={activeCount > 0 ? "text-red-400" : "text-green-400"} icon={Bell} />
+        <SummaryCard label="Stored events" value={events.length} icon={Inbox} />
+        <SummaryCard label="Persistence" value="In memory" color="text-yellow-400" icon={Database} />
       </div>
 
-      <div className="bg-gray-800 rounded border border-gray-700 overflow-hidden">
+      <div className="overflow-hidden rounded-lg border border-gray-700 bg-gray-800 shadow-sm shadow-black/20">
         <div className="border-b border-gray-700 px-4 py-3 text-sm font-semibold text-gray-200">Recent events</div>
         {events.length === 0 ? (
-          <div className="p-6 text-sm text-gray-500">No events recorded yet.</div>
+          <div className="flex flex-col items-center gap-2 p-10 text-sm text-gray-500">
+            <Inbox size={28} className="text-gray-700" />
+            No events recorded yet.
+          </div>
         ) : (
           <div className="divide-y divide-gray-700">
             {events.map((event) => (
@@ -81,11 +86,18 @@ export default function AlarmEvents() {
   );
 }
 
-function SummaryCard({ label, value, color = "text-white" }) {
+function SummaryCard({ label, value, color = "text-white", icon: Icon }) {
   return (
-    <div className="bg-gray-800 rounded border border-gray-700 p-4 text-center">
-      <div className="text-xs uppercase text-gray-500">{label}</div>
-      <div className={`mt-1 text-2xl font-bold ${color}`}>{value}</div>
+    <div className="flex items-center gap-3 rounded-lg border border-gray-700 bg-gray-800 p-4 shadow-sm shadow-black/20 transition-colors hover:border-gray-600">
+      {Icon && (
+        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gray-900 ${color}`}>
+          <Icon size={16} />
+        </div>
+      )}
+      <div>
+        <div className="text-xs uppercase tracking-wide text-gray-500">{label}</div>
+        <div className={`font-mono text-2xl font-bold ${color}`}>{value}</div>
+      </div>
     </div>
   );
 }
@@ -101,7 +113,7 @@ function EventRow({ event, onAck }) {
   const needsAck = event.status === "ACTIVE" && !event.acked_by;
 
   return (
-    <div className="grid gap-3 px-4 py-3 md:grid-cols-[140px_110px_1fr_100px_150px] md:items-center">
+    <div className="grid gap-3 px-4 py-3 transition-colors hover:bg-gray-900/40 md:grid-cols-[140px_110px_1fr_100px_150px] md:items-center">
       <div className="text-xs text-gray-500">{formatTime(event.timestamp)}</div>
       <div>
         <span className={`rounded px-2 py-1 text-[10px] font-bold ${severityColor}`}>{event.severity}</span>
@@ -121,8 +133,9 @@ function EventRow({ event, onAck }) {
         ) : needsAck && hasRole("operator") ? (
           <button
             onClick={() => onAck(event.id)}
-            className="rounded border border-gray-700 bg-gray-900 px-2 py-1 text-[10px] font-semibold text-gray-300 hover:border-blue-600 hover:text-blue-300"
+            className="flex items-center gap-1 rounded border border-gray-700 bg-gray-900 px-2 py-1 text-[10px] font-semibold text-gray-300 transition-colors hover:border-blue-600 hover:text-blue-300"
           >
+            <Check size={11} />
             Ack
           </button>
         ) : needsAck ? (

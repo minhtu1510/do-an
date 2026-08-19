@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Workflow, ChevronDown, AlertTriangle } from "lucide-react";
 import { connectWebSocket } from "../services/websocket";
 import { fetchAllTags } from "../services/api";
 import TagCard from "../components/TagCard";
@@ -40,12 +41,13 @@ export default function ProcessMonitor() {
   return (
     <div className="p-6 space-y-6">
       <PageHeader
+        icon={Workflow}
         title="Process Monitor"
         subtitle="Motor/conveyor, internal stage bits, counters, and stage timers from live OPC UA tags."
       />
 
       <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-        <div className="bg-gray-800 rounded border border-gray-700 p-6">
+        <div className="rounded-lg border border-gray-700 bg-gray-800 p-6 shadow-sm shadow-black/20">
           <div className="mb-6 flex items-center justify-between">
             <div>
               <div className="text-sm font-semibold text-gray-200">Line flow</div>
@@ -57,9 +59,12 @@ export default function ProcessMonitor() {
           </div>
 
           {sensorSpoofSuspected && (
-            <div className="mb-4 rounded border border-red-600 bg-red-950/40 px-4 py-3 text-sm font-semibold text-red-300">
-              ⚠ Sensor spoof suspected — vat_1, vat_2 and vat_3 are all active at the same time,
-              which is not physically possible on a single-lane conveyor.
+            <div className="mb-4 flex items-start gap-2 rounded-lg border border-red-600 bg-red-950/40 px-4 py-3 text-sm font-semibold text-red-300 animate-fade-in">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+              <span>
+                Sensor spoof suspected — vat_1, vat_2 and vat_3 are all active at the same time,
+                which is not physically possible on a single-lane conveyor.
+              </span>
             </div>
           )}
 
@@ -82,7 +87,7 @@ export default function ProcessMonitor() {
             <TagCard label={tags.hien_thi?.display_name || "Completed production quantity"} sublabel="hien_thi" value={tags.hien_thi?.value} quality={tags.hien_thi?.quality} stale={tags.hien_thi?.stale} />
           </div>
 
-          <div className="bg-gray-800 rounded border border-gray-700 p-4">
+          <div className="rounded-lg border border-gray-700 bg-gray-800 p-4 shadow-sm shadow-black/20">
             <div className="mb-3 text-sm font-semibold text-gray-200">Stage timers</div>
             <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
               {["cd1", "cd2", "cd3"].map((key) => {
@@ -94,7 +99,7 @@ export default function ProcessMonitor() {
             </div>
           </div>
 
-          <div className="bg-gray-800 rounded border border-gray-700 p-4">
+          <div className="rounded-lg border border-gray-700 bg-gray-800 p-4 shadow-sm shadow-black/20">
             <div className="mb-3 text-sm font-semibold text-gray-200">Subscribed process tags</div>
             <div className="space-y-2">
               {["bang_tai", "vat_1", "vat_2", "vat_3", "nhap", "hien_thi", "cd1", "cd2", "cd3"].map((key) => {
@@ -121,7 +126,7 @@ function FlowNode({ label, tag, active, offline, value, danger }) {
   const text = stale ? "text-gray-600" : danger ? "text-red-300" : active ? "text-green-300" : "text-gray-300";
 
   return (
-    <div className={`w-full max-w-md rounded border px-5 py-4 ${border}`}>
+    <div className={`w-full max-w-md rounded-lg border px-5 py-4 transition-colors ${border}`}>
       <div className="flex items-center justify-between gap-4">
         <div>
           <div className="font-semibold text-gray-100">{label}</div>
@@ -134,13 +139,13 @@ function FlowNode({ label, tag, active, offline, value, danger }) {
 }
 
 function Arrow() {
-  return <div className="text-lg text-gray-600">v</div>;
+  return <ChevronDown size={18} className="text-gray-600" />;
 }
 
 function TagRow({ tag, fallbackKey }) {
   const stale = !tag || tag.stale;
   return (
-    <div className={`flex items-center justify-between rounded border px-3 py-2 ${stale ? "border-red-900/40 bg-red-950/10" : "border-gray-700 bg-gray-900/40"}`}>
+    <div className={`flex items-center justify-between rounded-lg border px-3 py-2 transition-colors ${stale ? "border-red-900/40 bg-red-950/10" : "border-gray-700 bg-gray-900/40"}`}>
       <div>
         <div className="text-sm text-gray-200">{tag?.display_name || fallbackKey}</div>
         <div className="text-[10px] text-gray-600">{tag?.key || fallbackKey}</div>

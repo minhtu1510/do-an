@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Area, AreaChart, CartesianGrid, Legend, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
+import { TrendingUp, AlertTriangle, History } from "lucide-react";
 import { fetchAttackEvents, fetchProcessHistory } from "../services/api";
 import PageHeader from "../components/PageHeader";
 import Gauge from "../components/Gauge";
@@ -126,43 +127,48 @@ export default function Trends() {
   return (
     <div className="p-6 space-y-6">
       <PageHeader
+        icon={TrendingUp}
         title="Trends & History"
         subtitle="Lịch sử tag thật (SQLite/Postgres historian) — chỉ ghi khi giá trị thay đổi, không nội suy số liệu giả."
       />
 
       {!attackEvents.configured && (
-        <div className="rounded border border-yellow-900/50 bg-yellow-950/20 px-4 py-3 text-xs text-yellow-500">
-          Chưa cấu hình <code className="rounded bg-gray-900 px-1">ATTACK_EVENT_FILE</code> — không có mốc tấn công nào được overlay lên biểu đồ. Copy file CSV từ máy attack (attack_event_logger.py) sang máy chạy backend này và set biến môi trường đó để bật overlay.
+        <div className="flex items-start gap-2 rounded-lg border border-yellow-900/50 bg-yellow-950/20 px-4 py-3 text-xs text-yellow-500">
+          <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+          <span>
+            Chưa cấu hình <code className="rounded bg-gray-900 px-1">ATTACK_EVENT_FILE</code> — không có mốc tấn công nào được overlay lên biểu đồ. Copy file CSV từ máy attack (attack_event_logger.py) sang máy chạy backend này và set biến môi trường đó để bật overlay.
+          </span>
         </div>
       )}
 
       {!hasAnyData ? (
-        <div className="rounded border border-gray-700 bg-gray-800 p-6 text-sm text-gray-500">
+        <div className="flex flex-col items-center gap-2 rounded-lg border border-gray-700 bg-gray-800 p-10 text-sm text-gray-500">
+          <History size={28} className="text-gray-700" />
           Chưa có dữ liệu lịch sử — historian chỉ ghi khi tag đổi giá trị thật. Chờ băng chuyền hoạt động hoặc chạy kịch bản tấn công để có dữ liệu.
         </div>
       ) : (
         <>
           {/* Z-pattern hero row — the numbers that matter most, top-left to top-right */}
           <div className="grid gap-4 lg:grid-cols-[1fr_1fr_auto]">
-            <div className="overflow-hidden rounded border border-gray-700 bg-gray-800">
+            <div className="overflow-hidden rounded-lg border border-gray-700 bg-gray-800 shadow-sm shadow-black/20 transition-colors hover:border-gray-600">
               <div className="h-1" style={{ backgroundColor: AQUA }} />
               <div className="p-4">
                 <div className="text-xs uppercase text-gray-500">Tổng điểm dữ liệu</div>
-                <div className="mt-1 text-2xl font-bold" style={{ color: AQUA }}>{totalPoints}</div>
+                <div className="mt-1 font-mono text-2xl font-bold" style={{ color: AQUA }}>{totalPoints}</div>
                 <Sparkline data={activityBuckets} color={AQUA} />
               </div>
             </div>
-            <div className="overflow-hidden rounded border border-gray-700 bg-gray-800">
+            <div className="overflow-hidden rounded-lg border border-gray-700 bg-gray-800 shadow-sm shadow-black/20 transition-colors hover:border-gray-600">
               <div className="h-1" style={{ backgroundColor: attackEvents.events.length > 0 ? ATTACK_RED : GOOD_GREEN }} />
               <div className="p-4">
                 <div className="text-xs uppercase text-gray-500">Mốc tấn công overlay</div>
-                <div className="mt-1 text-2xl font-bold" style={{ color: attackEvents.events.length > 0 ? ATTACK_RED : GOOD_GREEN }}>
+                <div className="mt-1 font-mono text-2xl font-bold" style={{ color: attackEvents.events.length > 0 ? ATTACK_RED : GOOD_GREEN }}>
                   {attackEvents.events.length}
                 </div>
                 <Sparkline data={attackBuckets} color={ATTACK_RED} />
               </div>
             </div>
-            <div className="flex items-center justify-center rounded border border-gray-700 bg-gray-800 p-4">
+            <div className="flex items-center justify-center rounded-lg border border-gray-700 bg-gray-800 p-4 shadow-sm shadow-black/20">
               <Gauge value={uptimePct} color={uptimeColor} label="Uptime băng chuyền" />
             </div>
           </div>
@@ -232,7 +238,7 @@ export default function Trends() {
 
 function ChartPanel({ title, subtitle, children }) {
   return (
-    <div className="rounded border border-gray-700 bg-gray-800 p-4">
+    <div className="rounded-lg border border-gray-700 bg-gray-800 p-4 shadow-sm shadow-black/20">
       <div className="mb-3">
         <div className="text-sm font-semibold text-gray-200">{title}</div>
         {subtitle && <div className="text-xs text-gray-500">{subtitle}</div>}
