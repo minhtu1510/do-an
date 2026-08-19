@@ -39,6 +39,17 @@ export async function fetchTag(key) {
   return res.json();
 }
 
+export async function writeTag(key, value) {
+  const res = await apiFetch(`/tags/${key}/write`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ value }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.message || body.detail || "Ghi lệnh thất bại");
+  return body;
+}
+
 export async function fetchEvents(limit = 100) {
   const res = await apiFetch(`/events?limit=${limit}`);
   return res.json();

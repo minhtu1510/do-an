@@ -38,7 +38,7 @@ tags:
     description: "RUN/STOP state of the conveyor"
     data_type: Boolean
     group: equipment
-    writable: false
+    writable: true
     history_enabled: true
     semantic_type: equipment_status
 
@@ -48,7 +48,9 @@ tags:
     description: "Number of products to be processed"
     data_type: Int16
     group: production
-    writable: false
+    writable: true
+    minimum: 0
+    maximum: 9999
     history_enabled: true
     semantic_type: production_target
 

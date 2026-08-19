@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { clearSession, getSession, setSession } from "../services/authToken";
 
-const ROLE_RANK = { viewer: 0, operator: 1, admin: 2 };
+const ROLE_RANK = { viewer: 0, operator: 1, controller: 2, admin: 3 };
 
 const AuthContext = createContext(null);
 

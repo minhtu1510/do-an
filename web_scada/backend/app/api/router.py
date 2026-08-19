@@ -6,11 +6,14 @@ import os
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response
 from dotenv import load_dotenv
+from pydantic import BaseModel
 from datetime import datetime, timezone, timedelta
 
 from ..alarms import alarm_engine
 from ..auth import require_role
 from ..events import event_service
+from ..events.models import EventRecord
+from ..opcua.gateway import TagWriteError
 from ..scenarios import scenario_catalog, scenario_store
 from ..scenarios.models import ScenarioResult
 from ..system import sample as sample_system_resources
@@ -81,6 +84,64 @@ async def get_tag(tag_key: str, _user=Depends(require_role("viewer"))):
             "message": "Tag configured but not yet subscribed",
         }
     return value
+
+
+class TagWriteRequest(BaseModel):
+    value: bool | int | float
+
+
+@api_router.post("/tags/{tag_key}/write")
+async def write_tag(tag_key: str, body: TagWriteRequest, user=Depends(require_role("controller"))):
+    """Write a value to a whitelisted PLC tag (see `writable` in opcua_tags.yaml).
+    Every call is logged as an event, whether it succeeds or fails validation,
+    so there is always an audit trail of who issued which command.
+    """
+    from ..websocket.manager import ws_manager
+
+    g = _gateway()
+    old_value = g.get_value(tag_key)
+    old = old_value["value"] if old_value else None
+
+    try:
+        new_tag_value = await g.write_value(tag_key, body.value)
+    except TagWriteError as e:
+        event_service.add(EventRecord(
+            event_type="COMMAND_REJECTED",
+            severity="WARNING",
+            message=f"{user.username} tried to write {tag_key}={body.value!r}: {e}",
+            tag_key=tag_key,
+            old_value=old,
+            new_value=body.value,
+            status="CLEARED",
+        ))
+        return JSONResponse(status_code=422, content={"error": "invalid_write", "message": str(e)})
+    except RuntimeError as e:
+        event_service.add(EventRecord(
+            event_type="COMMAND_FAILED",
+            severity="ERROR",
+            message=f"{user.username} tried to write {tag_key}={body.value!r}: {e}",
+            tag_key=tag_key,
+            old_value=old,
+            new_value=body.value,
+            status="CLEARED",
+        ))
+        return JSONResponse(status_code=503, content={"error": "write_failed", "message": str(e)})
+
+    result = new_tag_value.to_dict()
+    event = event_service.add(EventRecord(
+        event_type="COMMAND_WRITE",
+        severity="WARNING",
+        message=f"{user.username} set {tag_key}: {old!r} -> {result['value']!r}",
+        tag_key=tag_key,
+        old_value=old,
+        new_value=result["value"],
+        status="CLEARED",
+    ))
+    payload = event.to_dict()
+    payload["active_count"] = alarm_engine.active_alarm_count()
+    await ws_manager.broadcast_event(payload)
+    await ws_manager.broadcast_tag_update(tag_key, result)
+    return {"written": True, "tag": result}
 
 
 @api_router.get("/events")

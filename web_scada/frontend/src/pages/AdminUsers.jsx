@@ -4,7 +4,7 @@ import PageHeader from "../components/PageHeader";
 import { changeUserRole, createUser, deleteUser, fetchUsers } from "../services/api";
 import { useAuth } from "../stores/authStore";
 
-const ROLES = ["viewer", "operator", "admin"];
+const ROLES = ["viewer", "operator", "controller", "admin"];
 
 export default function AdminUsers() {
   const { session } = useAuth();

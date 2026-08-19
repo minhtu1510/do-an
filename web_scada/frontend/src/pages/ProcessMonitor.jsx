@@ -1,11 +1,13 @@
 import { useState, useEffect } from "react";
-import { Workflow, ChevronDown, AlertTriangle } from "lucide-react";
+import { Workflow, ChevronDown, AlertTriangle, Play, Square, Send } from "lucide-react";
 import { connectWebSocket } from "../services/websocket";
-import { fetchAllTags } from "../services/api";
+import { fetchAllTags, writeTag } from "../services/api";
+import { useAuth } from "../stores/authStore";
 import TagCard from "../components/TagCard";
 import PageHeader from "../components/PageHeader";
 
 export default function ProcessMonitor() {
+  const { hasRole } = useAuth();
   const [tags, setTags] = useState({});
 
   useEffect(() => {
@@ -79,6 +81,10 @@ export default function ProcessMonitor() {
             <Arrow />
             <FlowNode label="Product counter" tag={tags.hien_thi} active={!tags.hien_thi?.stale} value={counterValue(tags.hien_thi)} />
           </div>
+
+          {hasRole("controller") && (
+            <ControlPanel bangTai={bangTai} isRunning={isRunning} offline={offline} nhap={tags.nhap} />
+          )}
         </div>
 
         <div className="space-y-4">
@@ -109,6 +115,90 @@ export default function ProcessMonitor() {
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function ControlPanel({ bangTai, isRunning, offline, nhap }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [target, setTarget] = useState("");
+
+  async function handleConveyorToggle() {
+    const nextValue = !isRunning;
+    const verb = nextValue ? "CHẠY (RUN)" : "DỪNG (STOP)";
+    if (!window.confirm(`Gửi lệnh ${verb} băng tải xuống PLC thật? Hành động này có tác động vật lý ngay lập tức.`)) return;
+    setError(null);
+    setBusy(true);
+    try {
+      await writeTag("bang_tai", nextValue);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSetTarget(e) {
+    e.preventDefault();
+    const value = Number(target);
+    if (!Number.isFinite(value)) return;
+    if (!window.confirm(`Gửi số lượng sản phẩm mục tiêu = ${value} xuống PLC thật?`)) return;
+    setError(null);
+    setBusy(true);
+    try {
+      await writeTag("nhap", value);
+      setTarget("");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-amber-700/40 bg-amber-950/10 p-4 shadow-sm shadow-black/20">
+      <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-amber-300">
+        <AlertTriangle size={14} />
+        Control Panel — ghi lệnh trực tiếp xuống PLC thật
+      </div>
+
+      {error && (
+        <div className="mb-3 rounded border border-red-900/50 bg-red-950/30 px-3 py-2 text-xs text-red-400">{error}</div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          onClick={handleConveyorToggle}
+          disabled={busy || offline}
+          className={`flex items-center gap-1.5 rounded px-4 py-1.5 text-sm font-semibold text-white shadow-sm transition-colors disabled:opacity-50 ${
+            isRunning ? "bg-red-600 hover:bg-red-500" : "bg-green-600 hover:bg-green-500"
+          }`}
+        >
+          {isRunning ? <Square size={14} /> : <Play size={14} />}
+          {isRunning ? "Dừng băng tải" : "Chạy băng tải"}
+        </button>
+
+        <form onSubmit={handleSetTarget} className="flex items-center gap-2">
+          <input
+            type="number"
+            min={0}
+            max={9999}
+            value={target}
+            onChange={(e) => setTarget(e.target.value)}
+            placeholder={nhap?.value != null ? String(nhap.value) : "Số lượng"}
+            className="w-28 rounded border border-gray-700 bg-gray-950 px-3 py-1.5 text-sm text-gray-200 outline-none transition-colors focus:border-amber-500"
+          />
+          <button
+            type="submit"
+            disabled={busy || target === ""}
+            className="flex items-center gap-1.5 rounded border border-gray-700 bg-gray-800 px-3 py-1.5 text-xs font-semibold text-gray-300 transition-colors hover:border-amber-500 hover:text-amber-300 disabled:opacity-50"
+          >
+            <Send size={12} />
+            Set nhap
+          </button>
+        </form>
       </div>
     </div>
   );

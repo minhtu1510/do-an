@@ -1,9 +1,10 @@
 """FastAPI dependencies for authentication and role-based access control.
 
 Role hierarchy (each level includes everything the level below can do):
-  viewer   -> read-only operational pages (Overview, Process Monitor, Alarms, Trends, System Status)
-  operator -> viewer + Security/IDS, Dataset & Model Stats
-  admin    -> operator + user management
+  viewer     -> read-only operational pages (Overview, Process Monitor, Alarms, Trends, System Status)
+  operator   -> viewer + Security/IDS, Dataset & Model Stats
+  controller -> operator + write access to whitelisted PLC tags (see opcua_tags.yaml `writable`)
+  admin      -> controller + user management
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from .security import decode_access_token
 
 _bearer = HTTPBearer(auto_error=False)
 
-ROLE_RANK = {"viewer": 0, "operator": 1, "admin": 2}
+ROLE_RANK = {"viewer": 0, "operator": 1, "controller": 2, "admin": 3}
 
 
 def _load_user(user_id: int) -> User | None:

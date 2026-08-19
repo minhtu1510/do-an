@@ -15,7 +15,7 @@ from .db import Base
 
 TZ = timezone(timedelta(hours=7))
 
-ROLES = ("admin", "operator", "viewer")
+ROLES = ("admin", "controller", "operator", "viewer")
 
 
 class User(Base):

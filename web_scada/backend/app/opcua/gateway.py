@@ -5,12 +5,28 @@ import logging
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Optional, Callable
 
-from asyncua import Client
+from asyncua import Client, ua
 
 from .tag_registry import TagRegistry, TagValue, get_tag_registry
 
 logger = logging.getLogger("opcua_gateway")
 TZ = timezone(timedelta(hours=7))
+
+_VARIANT_TYPE_BY_DATA_TYPE = {
+    "Boolean": ua.VariantType.Boolean,
+    "Int16": ua.VariantType.Int16,
+    "Int32": ua.VariantType.Int32,
+    "Float": ua.VariantType.Float,
+    "Double": ua.VariantType.Double,
+    "String": ua.VariantType.String,
+}
+
+
+class TagWriteError(ValueError):
+    """Raised for a write request that fails validation — not writable, out of
+    range, or wrong type. Distinct from RuntimeError (connection problems) so
+    the API layer can map it to a 4xx instead of a 5xx.
+    """
 
 
 class OPCUAGateway:
@@ -212,6 +228,43 @@ class OPCUAGateway:
             stale=False,
             config=tag_cfg,
         )
+
+    async def write_value(self, key: str, value) -> TagValue:
+        """Write a value to a whitelisted tag, then read it back so the caller
+        (and the UI, via the normal tag_update broadcast) sees the PLC's real
+        resulting state rather than an assumed echo of what was sent.
+        """
+        cfg = self.registry.get_by_key(key)
+        if cfg is None:
+            raise TagWriteError(f"Tag '{key}' does not exist in registry")
+        if not cfg.writable:
+            raise TagWriteError(f"Tag '{key}' is not writable")
+
+        if cfg.data_type == "Boolean":
+            if not isinstance(value, bool):
+                raise TagWriteError(f"Tag '{key}' expects a boolean value")
+        else:
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise TagWriteError(f"Tag '{key}' expects a numeric value")
+            if cfg.minimum is not None and value < cfg.minimum:
+                raise TagWriteError(f"Value {value} is below minimum {cfg.minimum} for '{key}'")
+            if cfg.maximum is not None and value > cfg.maximum:
+                raise TagWriteError(f"Value {value} is above maximum {cfg.maximum} for '{key}'")
+
+        variant_type = _VARIANT_TYPE_BY_DATA_TYPE.get(cfg.data_type)
+        if variant_type is None:
+            raise TagWriteError(f"Tag '{key}' has unsupported data_type '{cfg.data_type}' for writing")
+
+        if not self._connected or not self.client:
+            raise RuntimeError("OPC UA gateway is not connected")
+
+        node = self.client.get_node(cfg.node_id)
+        await node.write_value(ua.DataValue(ua.Variant(value, variant_type)))
+
+        tag_value = await self._read_tag_once(cfg)
+        self._values[key] = tag_value
+        self._notify_callbacks(key, tag_value)
+        return tag_value
 
     async def _poll_loop(self):
         logger.info("OPC UA polling loop started")
