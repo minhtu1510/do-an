@@ -1,0 +1,193 @@
+version: 1
+day: 8
+title: OPC UA attack surface scenarios
+description: >
+  Day 8 is scoped to OPC UA only -- the controller OPC UA server and
+  Web-SCADA gateway. The S7comm scenarios that used to be re-listed here
+  for continuity now live solely in the Day 1-6 dataset (see
+  run_day_bangtruyen.sh); Web/API, logic-aware, and cross-layer scenarios
+  were removed because they either had no controlled executor in this
+  testbed or conceptually duplicated attacks_ext/logic_aware.py and
+  attacks_ext/kill_chain.py (Day 7). Keeping this catalog OPC-UA-only
+  avoids double-counting the same attack idea across Day 7/Day 8.
+defaults:
+  target_ip_env: TARGET_IP
+  opc_url_env: OPC_URL
+  web_api_env: WEB_SCADA_API
+  capture_iface_env: CAPTURE_IFACE
+# mitre_technique / mitre_technique_name below are verified against the live
+# MITRE ATT&CK for ICS matrix (attack.mitre.org/matrices/ics/), not guessed.
+# Benign scenarios intentionally carry no mitre_technique — they are not attacks.
+groups:
+  opcua:
+    title: Nhom B - OPC UA
+    description: OPC UA attack surface using the controller OPC UA server and Web-SCADA gateway.
+    scenarios:
+      - id: OPCUA_BENIGN_SUBSCRIPTION
+        label: OPCUA_BENIGN_SUBSCRIPTION
+        objective: Establish a normal OPC UA subscription to configured tags.
+        protocol: OPC UA
+        # Benign baseline traffic — no MITRE technique applies.
+        safe_to_execute: true
+        requires_manual_gate: false
+        preconditions: [OPC UA endpoint reachable, Anonymous or configured read allowed, Tags exist]
+        evidence: [CreateSubscription, MonitoredItemCreate, DataChange or periodic reads]
+      - id: OPCUA_BENIGN_RECONNECT
+        label: OPCUA_BENIGN_RECONNECT
+        objective: Generate normal reconnect traffic for baseline comparison.
+        protocol: OPC UA
+        # Benign baseline traffic — no MITRE technique applies.
+        safe_to_execute: true
+        requires_manual_gate: false
+        preconditions: [OPC UA endpoint reachable, Short reconnect interval approved]
+        evidence: [OpenSecureChannel, CreateSession, CloseSession repeated]
+      - id: OPCUA_ENDPOINT_DISCOVERY
+        label: OPCUA_ENDPOINT_DISCOVERY
+        objective: Query OPC UA endpoint/security policy metadata.
+        protocol: OPC UA
+        mitre_technique: T0888
+        mitre_technique_name: Remote System Information Discovery
+        safe_to_execute: true
+        requires_manual_gate: false
+        preconditions: [TCP/4840 reachable]
+        evidence: [GetEndpoints request, Endpoint/security policy list]
+      - id: OPCUA_NODE_BROWSE
+        label: OPCUA_NODE_BROWSE
+        objective: Browse namespace and discover exposed nodes.
+        protocol: OPC UA
+        mitre_technique: T0861
+        mitre_technique_name: Point & Tag Identification
+        safe_to_execute: true
+        requires_manual_gate: false
+        preconditions: [Browse permission available]
+        evidence: [Browse requests, NodeIds, BrowseName list]
+      - id: OPCUA_UNAUTHORIZED_SESSION
+        label: OPCUA_UNAUTHORIZED_SESSION
+        objective: Attempt session creation with invalid identity.
+        protocol: OPC UA
+        mitre_technique: T0859
+        mitre_technique_name: Valid Accounts
+        safe_to_execute: true
+        requires_manual_gate: false
+        preconditions: [Server has user/password auth path or rejects invalid identity]
+        evidence: [CreateSession/ActivateSession failure, BadIdentityTokenInvalid]
+      - id: OPCUA_WRITE_DENIED
+        label: OPCUA_WRITE_DENIED
+        objective: Attempt write to read-only node and verify denial.
+        protocol: OPC UA
+        mitre_technique: T1692.001
+        mitre_technique_name: "Unauthorized Message: Command Message"
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Known read-only node, Expected BadUserAccessDenied, No process impact]
+        evidence: [Write request, BadUserAccessDenied or BadNotWritable]
+      - id: OPCUA_INVALID_WRITE
+        label: OPCUA_INVALID_WRITE
+        objective: Attempt invalid type/range write and verify rejection.
+        protocol: OPC UA
+        mitre_technique: T1692.001
+        mitre_technique_name: "Unauthorized Message: Command Message"
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Known node, Invalid value selected to be rejected, Rollback not needed]
+        evidence: [Write request, BadTypeMismatch or range error]
+      - id: OPCUA_SESSION_BURST
+        label: OPCUA_SESSION_BURST
+        objective: Create bounded burst of OPC UA sessions.
+        protocol: OPC UA
+        mitre_technique: T0814
+        mitre_technique_name: Denial of Service
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Dedicated lab window, Low bounded connection count, Recovery plan]
+        evidence: [Session burst, Server diagnostics, Reconnect/stale events]
+      - id: OPCUA_SUBSCRIPTION_FLOOD
+        label: OPCUA_SUBSCRIPTION_FLOOD
+        objective: Single session subscribing a bounded number of monitored items at a short publishing interval to stress the server application layer, distinct from S7_FLOOD's connection-level stress.
+        protocol: OPC UA
+        mitre_technique: T0814
+        mitre_technique_name: Denial of Service
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Dedicated lab window, Bounded item count and publishing interval, Recovery plan]
+        evidence: [MonitoredItemCreate burst, Server diagnostics, Publish latency/backlog]
+      - id: OPCUA_MALICIOUS_WRITE
+        label: OPCUA_MALICIOUS_WRITE
+        objective: Successfully write a plausible-but-wrong value to a real writable node to produce a process anomaly (not just a protocol rejection), then roll back.
+        protocol: OPC UA
+        mitre_technique: T0836
+        mitre_technique_name: Modify Parameter
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Dedicated writable test node confirmed, Baseline value captured, Mandatory rollback verified, Operator approval]
+        evidence: [Write request, Confirmed value change, Rollback confirmation]
+      - id: OPCUA_CERTIFICATE_REJECTED
+        label: OPCUA_CERTIFICATE_REJECTED
+        objective: Attempt connection with untrusted client certificate.
+        protocol: OPC UA
+        mitre_technique: T0859
+        mitre_technique_name: Valid Accounts
+        safe_to_execute: true
+        requires_manual_gate: false
+        preconditions: [Server security policy enabled, Client cert not trusted]
+        evidence: [OpenSecureChannel failure, Certificate rejected status]
+      - id: OPCUA_READ_SCRAPING
+        label: OPCUA_READ_SCRAPING
+        objective: Rapid repeated Read requests against real process tags on a single session to characterize data-exfiltration-style scraping, distinct from Browse (structure) and Subscription Flood (server-push volume).
+        protocol: OPC UA
+        mitre_technique: T0802
+        mitre_technique_name: Automated Collection
+        safe_to_execute: true
+        requires_manual_gate: false
+        preconditions: [Known process tags, Bounded read count and rate]
+        evidence: [Read request burst, Read rate, Sampled values]
+      - id: OPCUA_METHOD_CALL_ABUSE
+        label: OPCUA_METHOD_CALL_ABUSE
+        objective: Discover and attempt to invoke any exposed Method node without prior authorization context.
+        protocol: OPC UA
+        mitre_technique: T0871
+        mitre_technique_name: Execution through API
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Server exposes at least one Method node under Objects, Operator approval, Recovery plan]
+        evidence: [Call request, Method result or rejection, Server state before/after]
+      - id: OPCUA_PROTOCOL_FUZZ
+        label: OPCUA_PROTOCOL_FUZZ
+        objective: Send a small bounded set of malformed OPC UA binary (UA-TCP) frames and record server response, distinct from PROTOCOL_FUZZ's S7comm target.
+        protocol: OPC UA
+        mitre_technique: T0814
+        mitre_technique_name: Denial of Service
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Dedicated lab window, Fuzz frame count bounded, Recovery plan]
+        evidence: [Malformed UA-TCP frame trace, Server response or timeout, Device health log]
+      - id: OPCUA_BEHAVIORAL_PROFILING
+        label: OPCUA_BEHAVIORAL_PROFILING
+        objective: Maintain a single long-lived anonymous subscription to all process tags and log value changes over time (industrial espionage / process-behaviour reconnaissance). The signature is an anonymous session that stays subscribed far longer than a legitimate SCADA poll cycle.
+        protocol: OPC UA
+        mitre_technique: T0801
+        mitre_technique_name: Monitor Process State
+        safe_to_execute: true
+        requires_manual_gate: false
+        preconditions: [Anonymous read allowed, Tags exist]
+        evidence: [Long-lived subscription, Value-change log over time, Anonymous session duration]
+      - id: OPCUA_SLOWLORIS
+        label: OPCUA_SLOWLORIS
+        objective: Hold multiple OPC UA sessions open near the server session limit and keep them alive with a periodic harmless read (instead of the fast open/close of SESSION_BURST), to occupy the session pool so a legitimate client is refused with BadTooManySessions. A quiet DoS with no packet storm.
+        protocol: OPC UA
+        mitre_technique: T0814
+        mitre_technique_name: Denial of Service
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Dedicated lab window, Bounded session count, Bounded hold time, Recovery plan]
+        evidence: [Held session count, New-client rejection probe, Server diagnostics]
+      - id: OPCUA_RECURSIVE_BROWSE
+        label: OPCUA_RECURSIVE_BROWSE
+        objective: Repeatedly browse the address space recursively (bounded depth) so a small request triggers a full server-side tree walk (asymmetric load). Note - the S7-1500 namespace here is small, so load comes from repetition, not tree size.
+        protocol: OPC UA
+        mitre_technique: T0814
+        mitre_technique_name: Denial of Service
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Dedicated lab window, Bounded depth and iteration count, Recovery plan]
+        evidence: [Recursive Browse requests, Nodes-visited rate, Server load]

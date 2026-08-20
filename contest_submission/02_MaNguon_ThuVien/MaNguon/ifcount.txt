@@ -1,0 +1,48 @@
+﻿37:if [[ -z "${PY_CMD:-}" ]]; then
+39:fi
+86:if [[ "$ENABLE_CPU_CONTROL_ATTACK" != "1" ]]; then
+88:fi
+89:if [[ "$ALLOW_PA_WRITE_ATTACKS" != "1" ]]; then
+91:fi
+109:    else
+111:    fi
+120:    fi
+121:    if [[ -z "$CAPTURE_IFACE" ]]; then
+126:    fi
+129:    if [[ "$CAPTURE_IFACE" =~ ^[0-9]+$ ]]; then
+134:        fi
+135:    elif ! grep -Fq -- "$CAPTURE_IFACE" <<<"$ifaces"; then
+139:    fi
+145:    if [[ "$CAPTURE_ENABLED" != "1" ]]; then
+148:    fi
+231:        else:
+312:    if [[ "$DAY" == "1" ]]; then
+323:    elif [[ "$DAY" == "2" ]]; then
+391:    elif [[ "$DAY" == "3" ]]; then
+402:        if [[ "$ENABLE_CPU_CONTROL_ATTACK" == "1" ]]; then
+403:        if [[ "$ENABLE_CPU_CONTROL_ATTACK" == "1" ]]; then
+438:        else
+440:        fi
+456:        if [[ "$ALLOW_PA_WRITE_ATTACKS" == "1" ]]; then
+484:        else
+486:        fi
+494:    elif [[ "$DAY" == "4" ]]; then
+624:    elif [[ "$DAY" == "5" ]]; then
+680:        else
+698:        fi
+744:    elif [[ "$DAY" == "6" ]]; then
+827:        else
+829:        fi
+834:        if [[ "$ALLOW_PA_WRITE_ATTACKS" == "1" ]]; then
+860:        else
+862:        fi
+999:        else
+1017:        fi
+1051:    fi
+1057:if [[ "$PREFLIGHT_ENABLED" == "1" ]]; then
+1059:        if [[ "$REQUIRE_PREFLIGHT" == "1" ]]; then
+1062:        fi
+1064:    fi
+1065:fi
+1067:if [[ "${PREFLIGHT_ONLY:-0}" == "1" ]]; then
+1070:fi

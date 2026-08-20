@@ -1,0 +1,220 @@
+{% extends "base.html" %}
+
+{% block title %}Device Manager{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6">
+    <h1 class="text-3xl font-bold text-white mb-6 flex items-center">
+        <i class="fas fa-server mr-3 text-indigo-500"></i>
+        Device Manager
+    </h1>
+
+    <div class="glass rounded-lg p-6">
+        <div class="flex justify-between items-center mb-4">
+            <h2 class="text-xl font-semibold">Discovered Devices</h2>
+            <button onclick="scanDevices()" class="bg-indigo-600 hover:bg-indigo-700 px-4 py-2 rounded">
+                <i class="fas fa-sync-alt mr-2"></i>
+                Refresh
+            </button>
+        </div>
+
+        <div id="device-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div class="text-center py-12 text-slate-500 col-span-full">
+                <i class="fas fa-server text-6xl mb-4"></i>
+                <p>No devices found</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+console.log('[Device Manager] Script started');
+
+async function loadDevices() {
+    console.log('[loadDevices] Called - fetching from /api/devices...');
+    try {
+        const result = await apiCall('/api/devices');
+        console.log('[loadDevices] API response:', result);
+        console.log('[loadDevices] Success:', result.success);
+        console.log('[loadDevices] Total devices:', result.devices ? result.devices.length : 0);
+        console.log('[loadDevices] Device IPs:', result.devices ? result.devices.map(d => d.ip) : []);
+
+        console.log('[loadDevices] Calling renderDeviceGrid with', result.devices ? result.devices.length : 0, 'devices');
+        renderDeviceGrid(result.devices || []);
+    } catch (error) {
+        console.error('[loadDevices] FAILED:', error);
+        showToast('Failed to load devices: ' + error.message, 'error');
+    }
+}
+console.log('[Device Manager] loadDevices function defined');
+
+function renderDeviceGrid(devices) {
+    const grid = document.getElementById('device-grid');
+
+    if (devices.length === 0) {
+        grid.innerHTML = `
+            <div class="text-center py-12 text-slate-500 col-span-full">
+                <i class="fas fa-server text-6xl mb-4"></i>
+                <p>No devices found</p>
+            </div>
+        `;
+        return;
+    }
+
+    grid.innerHTML = devices.map(device => {
+        const statusColor = device.status === 'Online' ? 'bg-green-500' : 'bg-red-500';
+        const deviceIcon = device.device_type === 'PLC' ? 'fa-microchip' :
+                          device.device_type === 'HMI' ? 'fa-desktop' :
+                          device.device_type === 'Gateway' ? 'fa-network-wired' :
+                          device.device_type === 'Router' ? 'fa-router' :
+                          device.device_type === 'Switch' ? 'fa-ethernet' :
+                          'fa-server';
+
+        return `
+        <div class="bg-slate-700/50 rounded-lg p-4 hover:bg-slate-700 transition">
+            <div class="flex justify-between items-start mb-3">
+                <div class="flex items-start gap-3">
+                    <div class="text-3xl text-indigo-400">
+                        <i class="fas ${deviceIcon}"></i>
+                    </div>
+                    <div>
+                        <div class="font-mono text-lg font-bold">${device.ip}</div>
+                        <div class="text-sm text-slate-400">
+                            ${device.hostname ? device.hostname : 'No hostname'}
+                        </div>
+                        <div class="text-xs text-slate-500">
+                            ${device.vendor !== 'Unknown' ? device.vendor : ''}
+                            ${device.model !== 'Unknown' ? device.model : ''}
+                        </div>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <div class="w-3 h-3 ${statusColor} rounded-full"></div>
+                </div>
+            </div>
+
+            <!-- Device Type & MAC -->
+            <div class="mb-2 text-sm">
+                <span class="text-slate-400">Type:</span>
+                <span class="text-indigo-300">${device.device_type}</span>
+                ${device.mac ? `<span class="text-slate-400 ml-2">MAC:</span> <span class="text-slate-300 font-mono text-xs">${device.mac}</span>` : ''}
+            </div>
+
+            <!-- OS Guess -->
+            ${device.os_guess ? `
+            <div class="mb-2 text-sm">
+                <span class="text-slate-400">OS:</span>
+                <span class="text-slate-300">${device.os_guess}</span>
+            </div>
+            ` : ''}
+
+            <!-- Protocols -->
+            ${device.protocols && device.protocols.length > 0 ? `
+            <div class="flex flex-wrap gap-1 mb-2">
+                ${device.protocols.map(p => {
+                    const protocolClass = p === 'S7' ? 'protocol-s7' :
+                                        p === 'Modbus TCP' ? 'protocol-modbus' :
+                                        p === 'OPC UA' ? 'protocol-opcua' :
+                                        'protocol-other';
+                    return `<span class="protocol-badge ${protocolClass} text-xs">${p}</span>`;
+                }).join('')}
+            </div>
+            ` : ''}
+
+            <!-- Open Ports -->
+            ${device.open_ports && device.open_ports.length > 0 ? `
+            <div class="mb-3 text-sm">
+                <span class="text-slate-400">Open Ports:</span>
+                <div class="mt-1 flex flex-wrap gap-1">
+                    ${device.open_ports.slice(0, 8).map(port =>
+                        `<span class="bg-slate-800 px-2 py-0.5 rounded text-xs font-mono text-slate-300">${port}</span>`
+                    ).join('')}
+                    ${device.open_ports.length > 8 ? `<span class="text-slate-500 text-xs">+${device.open_ports.length - 8} more</span>` : ''}
+                </div>
+            </div>
+            ` : ''}
+
+            <div class="flex gap-2">
+                <button onclick="viewDevice('${device.ip}')" class="flex-1 bg-indigo-600 hover:bg-indigo-700 px-3 py-1 rounded text-sm">
+                    <i class="fas fa-eye mr-1"></i> View
+                </button>
+                <button onclick="scanDevice('${device.ip}')" class="flex-1 bg-red-600 hover:bg-red-700 px-3 py-1 rounded text-sm">
+                    <i class="fas fa-bug mr-1"></i> Scan
+                </button>
+                <button onclick="monitorDevice('${device.ip}')" class="flex-1 bg-green-600 hover:bg-green-700 px-3 py-1 rounded text-sm">
+                    <i class="fas fa-heartbeat mr-1"></i> Monitor
+                </button>
+            </div>
+        </div>
+        `;
+    }).join('');
+}
+
+async function scanDevices() {
+    showToast('Scanning for devices...', 'info');
+    await apiCall('/api/devices/scan', { method: 'POST' });
+    await loadDevices();
+    showToast('Scan complete', 'success');
+}
+
+function viewDevice(ip) {
+    // TODO: Show device details modal
+    showToast(`Viewing device ${ip}`, 'info');
+}
+
+function scanDevice(ip) {
+    window.location.href = `/vulnerability-scanner?device=${ip}`;
+}
+
+function monitorDevice(ip) {
+    window.location.href = `/monitoring?device=${ip}`;
+}
+
+// Use the global socket from base.html instead of creating a new one
+console.log('[Device Manager] Setting up socket listeners');
+console.log('[Device Manager] Socket object:', typeof socket !== 'undefined' ? 'exists' : 'undefined');
+
+// WebSocket connection listeners
+socket.on('connect', function() {
+    console.log('[Device Manager] WebSocket connected');
+});
+
+socket.on('disconnect', function() {
+    console.log('[Device Manager] WebSocket disconnected');
+});
+
+// WebSocket connection for real-time updates
+socket.on('devices_updated', function(data) {
+    console.log('[Device Manager] Received devices_updated event:', data);
+    showToast(`${data.devices_added} device(s) added. Total: ${data.total_devices}`, 'success');
+
+    // Reload devices
+    console.log('[Device Manager] Calling loadDevices() from devices_updated event...');
+    loadDevices();
+});
+
+socket.on('scan_complete', function(data) {
+    console.log('[Device Manager] Received scan_complete event:', data);
+    console.log('[Device Manager] Reloading devices in 500ms...');
+    // Reload devices after scan completes
+    setTimeout(() => {
+        console.log('[Device Manager] Calling loadDevices() from scan_complete event...');
+        loadDevices();
+    }, 500);
+});
+
+console.log('[Device Manager] Waiting for DOMContentLoaded...');
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('[Device Manager] DOMContentLoaded fired!');
+    console.log('[Device Manager] Calling initial loadDevices()...');
+    loadDevices();
+
+    // Also reload every 5 seconds if there's an active scan
+    setInterval(() => {
+        // Check if we should auto-reload
+        // (You could add a flag to track active scans)
+    }, 5000);
+});
+console.log('[Device Manager] Event listeners registered');
+</script>
+{% endblock %}

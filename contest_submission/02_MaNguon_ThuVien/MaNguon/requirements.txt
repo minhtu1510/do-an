@@ -1,0 +1,9 @@
+python-snap7
+scapy
+wmi
+pywin32  # Required on Windows
+prompt_toolkit>=3.0.36
+flask>=2.3.0
+flask-socketio>=5.3.0
+flask-cors>=4.0.0
+pymodbus>=3.0.0

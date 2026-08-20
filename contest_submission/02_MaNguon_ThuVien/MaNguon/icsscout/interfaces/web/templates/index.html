@@ -1,0 +1,385 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6">
+    <!-- Welcome Banner -->
+    <div class="gradient-bg rounded-lg p-8 mb-6 text-white">
+        <h1 class="text-4xl font-bold mb-2">Welcome to ICSScout</h1>
+        <p class="text-lg opacity-90">Industrial Control Systems Security Assessment Platform</p>
+        <div class="mt-4 flex gap-4 flex-wrap">
+            <a href="/packet-analyzer" class="bg-white text-indigo-600 px-6 py-3 rounded-lg font-semibold hover:bg-gray-100 transition">
+                <i class="fas fa-network-wired mr-2"></i>
+                Start Packet Capture
+            </a>
+            <a href="/network-scanner" class="bg-white/20 backdrop-blur text-white px-6 py-3 rounded-lg font-semibold hover:bg-white/30 transition">
+                <i class="fas fa-radar mr-2"></i>
+                Scan Network
+            </a>
+            <a href="/vulnerability-scanner" class="bg-white/20 backdrop-blur text-white px-6 py-3 rounded-lg font-semibold hover:bg-white/30 transition">
+                <i class="fas fa-bug mr-2"></i>
+                Scan Vulnerabilities
+            </a>
+            <a href="/risk-assessment" class="bg-red-500 text-white px-6 py-3 rounded-lg font-semibold hover:bg-red-600 transition">
+                <i class="fas fa-shield-virus mr-2"></i>
+                Risk Assessment
+            </a>
+        </div>
+    </div>
+
+    <!-- Quick Stats -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+        <div class="glass rounded-lg p-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <div class="text-slate-400 text-sm">Devices Found</div>
+                    <div id="stat-devices" class="text-3xl font-bold text-white">0</div>
+                </div>
+                <i class="fas fa-server text-4xl text-indigo-500"></i>
+            </div>
+        </div>
+
+        <div class="glass rounded-lg p-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <div class="text-slate-400 text-sm">PLCs Detected</div>
+                    <div id="stat-plcs" class="text-3xl font-bold text-white">0</div>
+                </div>
+                <i class="fas fa-microchip text-4xl text-green-500"></i>
+            </div>
+        </div>
+
+        <div class="glass rounded-lg p-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <div class="text-slate-400 text-sm">Packets Captured</div>
+                    <div id="stat-packets-total" class="text-3xl font-bold text-white">0</div>
+                </div>
+                <i class="fas fa-chart-line text-4xl text-blue-500"></i>
+            </div>
+        </div>
+
+        <div class="glass rounded-lg p-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <div class="text-slate-400 text-sm">Vulnerabilities</div>
+                    <div id="stat-vulns" class="text-3xl font-bold text-red-500">0</div>
+                </div>
+                <i class="fas fa-shield-alt text-4xl text-red-500"></i>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Protocol Distribution -->
+        <div class="glass rounded-lg p-6">
+            <h2 class="text-xl font-bold text-white mb-4 flex items-center">
+                <i class="fas fa-chart-pie text-indigo-500 mr-2"></i>
+                Protocol Distribution
+            </h2>
+            <canvas id="protocol-chart"></canvas>
+        </div>
+
+        <!-- Recent Activity -->
+        <div class="glass rounded-lg p-6 lg:col-span-2">
+            <h2 class="text-xl font-bold text-white mb-4 flex items-center">
+                <i class="fas fa-history text-indigo-500 mr-2"></i>
+                Recent Activity
+            </h2>
+            <div id="activity-log" class="space-y-2 max-h-64 overflow-y-auto">
+                <div class="text-slate-500 text-center py-8">
+                    No recent activity
+                </div>
+            </div>
+        </div>
+
+        <!-- Device List -->
+        <div class="glass rounded-lg p-6 lg:col-span-3">
+            <h2 class="text-xl font-bold text-white mb-4 flex items-center">
+                <i class="fas fa-server text-indigo-500 mr-2"></i>
+                Discovered Devices
+            </h2>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="bg-slate-800 border-b border-slate-700">
+                        <tr class="text-left text-slate-400">
+                            <th class="px-4 py-2">IP Address</th>
+                            <th class="px-4 py-2">Vendor</th>
+                            <th class="px-4 py-2">Model</th>
+                            <th class="px-4 py-2">Type</th>
+                            <th class="px-4 py-2">Protocols</th>
+                            <th class="px-4 py-2">Status</th>
+                            <th class="px-4 py-2">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="device-table" class="text-slate-300">
+                        <tr>
+                            <td colspan="7" class="text-center py-8 text-slate-500">
+                                <i class="fas fa-radar text-4xl mb-2"></i>
+                                <p>No devices discovered yet</p>
+                                <p class="text-sm mt-2 mb-4">Use Network Scanner to discover devices on your network</p>
+                                <button onclick="window.location.href='/network-scanner'" class="mt-2 bg-indigo-600 hover:bg-indigo-700 px-4 py-2 rounded text-white">
+                                    <i class="fas fa-radar mr-2"></i>
+                                    Start Network Scan
+                                </button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let protocolChart = null;
+
+// Load dashboard data
+async function loadDashboard() {
+    try {
+        // Load status
+        const status = await apiCall('/api/status');
+
+        // Load devices
+        const devices = await apiCall('/api/devices');
+        updateDeviceStats(devices.devices);
+        renderDeviceTable(devices.devices);
+
+        // Load capture status
+        const captureStatus = await apiCall('/api/capture/status');
+        if (captureStatus.statistics) {
+            document.getElementById('stat-packets-total').textContent =
+                captureStatus.statistics.total_packets.toLocaleString();
+
+            updateProtocolChart(captureStatus.statistics.protocols);
+        }
+
+        // Load recent activities
+        const activities = await apiCall('/api/activities?count=20');
+        if (activities.success && activities.activities.length > 0) {
+            renderActivities(activities.activities);
+        }
+
+    } catch (error) {
+        console.error('Failed to load dashboard:', error);
+    }
+}
+
+// Update device statistics
+function updateDeviceStats(devices) {
+    document.getElementById('stat-devices').textContent = devices.length;
+
+    const plcs = devices.filter(d => d.device_type === 'PLC').length;
+    document.getElementById('stat-plcs').textContent = plcs;
+}
+
+// Render device table
+function renderDeviceTable(devices) {
+    const tbody = document.getElementById('device-table');
+
+    if (devices.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="7" class="text-center py-8 text-slate-500">
+                    No devices discovered yet
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    tbody.innerHTML = devices.map(device => `
+        <tr class="border-b border-slate-700/50 hover:bg-slate-700/30">
+            <td class="px-4 py-3 font-mono">${device.ip}</td>
+            <td class="px-4 py-3">${device.vendor}</td>
+            <td class="px-4 py-3">${device.model}</td>
+            <td class="px-4 py-3">
+                <span class="protocol-badge protocol-other">${device.device_type}</span>
+            </td>
+            <td class="px-4 py-3">
+                ${device.protocols.map(p => `<span class="protocol-badge protocol-other text-xs">${p}</span>`).join(' ')}
+            </td>
+            <td class="px-4 py-3">
+                <span class="inline-flex items-center">
+                    <div class="w-2 h-2 bg-green-500 rounded-full mr-2"></div>
+                    ${device.status}
+                </span>
+            </td>
+            <td class="px-4 py-3">
+                <button onclick="scanDevice('${device.ip}')" class="bg-indigo-600 hover:bg-indigo-700 px-3 py-1 rounded text-xs">
+                    <i class="fas fa-search mr-1"></i> Scan
+                </button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+// Update protocol chart
+function updateProtocolChart(protocols) {
+    const ctx = document.getElementById('protocol-chart').getContext('2d');
+
+    if (protocolChart) {
+        protocolChart.destroy();
+    }
+
+    const labels = Object.keys(protocols);
+    const data = Object.values(protocols);
+
+    protocolChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: labels,
+            datasets: [{
+                data: data,
+                backgroundColor: [
+                    '#3b82f6', // S7 - blue
+                    '#10b981', // Modbus - green
+                    '#f59e0b', // OPC UA - orange
+                    '#6b7280'  // Other - gray
+                ],
+                borderWidth: 0
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                    labels: {
+                        color: '#e2e8f0',
+                        padding: 15
+                    }
+                }
+            }
+        }
+    });
+}
+
+// Scan device
+async function scanDevice(ip) {
+    showToast(`Scanning ${ip}...`, 'info');
+
+    try {
+        const result = await apiCall('/api/vulnerability/scan', {
+            method: 'POST',
+            body: JSON.stringify({ devices: [ip] })
+        });
+
+        showToast(`Scan complete for ${ip}`, 'success');
+
+        // Redirect to vulnerability scanner
+        window.location.href = '/vulnerability-scanner';
+
+    } catch (error) {
+        showToast(`Scan failed: ${error.message}`, 'error');
+    }
+}
+
+// Render recent activities
+function renderActivities(activities) {
+    const activityLog = document.getElementById('activity-log');
+
+    if (activities.length === 0) {
+        activityLog.innerHTML = '<div class="text-slate-500 text-center py-8">No recent activity</div>';
+        return;
+    }
+
+    activityLog.innerHTML = activities.map(activity => {
+        const time = new Date(activity.timestamp);
+        const timeStr = time.toLocaleTimeString();
+
+        // Color classes
+        const colorClasses = {
+            'blue': 'text-blue-400 bg-blue-500/10',
+            'green': 'text-green-400 bg-green-500/10',
+            'yellow': 'text-yellow-400 bg-yellow-500/10',
+            'red': 'text-red-400 bg-red-500/10',
+            'purple': 'text-purple-400 bg-purple-500/10',
+            'orange': 'text-orange-400 bg-orange-500/10'
+        };
+
+        const colorClass = colorClasses[activity.color] || colorClasses['blue'];
+
+        return `
+            <div class="flex items-start space-x-3 p-3 rounded-lg hover:bg-slate-700/30 transition">
+                <div class="${colorClass} w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0">
+                    <i class="fas ${activity.icon} text-sm"></i>
+                </div>
+                <div class="flex-1 min-w-0">
+                    <p class="text-white text-sm">${activity.message}</p>
+                    <p class="text-slate-400 text-xs mt-1">${timeStr}</p>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+// Add new activity to log (for real-time updates)
+function addActivity(activity) {
+    const activityLog = document.getElementById('activity-log');
+
+    // Remove "no activity" message if present
+    if (activityLog.querySelector('.text-center')) {
+        activityLog.innerHTML = '';
+    }
+
+    const time = new Date(activity.timestamp);
+    const timeStr = time.toLocaleTimeString();
+
+    const colorClasses = {
+        'blue': 'text-blue-400 bg-blue-500/10',
+        'green': 'text-green-400 bg-green-500/10',
+        'yellow': 'text-yellow-400 bg-yellow-500/10',
+        'red': 'text-red-400 bg-red-500/10',
+        'purple': 'text-purple-400 bg-purple-500/10',
+        'orange': 'text-orange-400 bg-orange-500/10'
+    };
+
+    const colorClass = colorClasses[activity.color] || colorClasses['blue'];
+
+    const activityHTML = `
+        <div class="flex items-start space-x-3 p-3 rounded-lg hover:bg-slate-700/30 transition animate-fade-in">
+            <div class="${colorClass} w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0">
+                <i class="fas ${activity.icon} text-sm"></i>
+            </div>
+            <div class="flex-1 min-w-0">
+                <p class="text-white text-sm">${activity.message}</p>
+                <p class="text-slate-400 text-xs mt-1">${timeStr}</p>
+            </div>
+        </div>
+    `;
+
+    // Add to top of list
+    activityLog.insertAdjacentHTML('afterbegin', activityHTML);
+
+    // Keep only last 20 activities
+    const activities = activityLog.children;
+    while (activities.length > 20) {
+        activityLog.removeChild(activities[activities.length - 1]);
+    }
+}
+
+// WebSocket: Real-time updates
+socket.on('new_packet', function() {
+    // Update packet count
+    const current = parseInt(document.getElementById('stat-packets-total').textContent.replace(/,/g, ''));
+    document.getElementById('stat-packets-total').textContent = (current + 1).toLocaleString();
+});
+
+socket.on('activity_logged', function(activity) {
+    // Add new activity to log in real-time
+    addActivity(activity);
+});
+
+// Load dashboard on page load
+document.addEventListener('DOMContentLoaded', function() {
+    loadDashboard();
+
+    // Refresh every 30 seconds
+    setInterval(loadDashboard, 30000);
+});
+</script>
+{% endblock %}

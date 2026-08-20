@@ -1,0 +1,81 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.claude/
+process/
+captures/
+*.pcap
+*.pcapng
+labels/
+ml_results/
+logs/
+# Virtual environments
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Test coverage
+.coverage
+htmlcov/
+
+# Temporary files
+*.tmp
+*.temp
+/data
+
+# Day 8 scenario runner output (regenerated per run)
+/test_results/
+
+# Node / frontend
+node_modules/
+npm-debug.log*
+
+# Secrets — JWT_SECRET / ADMIN_PASSWORD / DB creds live in these
+.env
+*.env
+web_scada/backend/data/
+
+/bao-cao/
+/data_opc/
+
+# Real Day 1-6 dataset repo (large raw pcaps/csv, kept local only)
+/SemanticAware-S7comm-Dataset/
+
+# Trained IDS model (layer3_classifier.joblib alone is ~430MB — over GitHub's
+# 100MB hard file limit; retrain locally with train_eval.py instead of committing)
+/model/
+
+# Portable Windows tool bundle (exe + DLLs, ~700 files) — not source, don't commit
+/ICSScout_Portable/

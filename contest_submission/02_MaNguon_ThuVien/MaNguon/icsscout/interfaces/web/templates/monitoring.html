@@ -1,0 +1,1063 @@
+{% extends "base.html" %}
+
+{% block title %}Multi-PLC Monitoring{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6">
+    <h1 class="text-3xl font-bold text-white mb-6 flex items-center">
+        <i class="fas fa-heartbeat mr-3 text-green-500"></i>
+        Multi-PLC Monitoring
+    </h1>
+
+    <!-- Global Stats -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <div class="glass rounded-lg p-4">
+            <div class="text-slate-400 text-sm mb-1">Total PLCs</div>
+            <div id="stat-total-plcs" class="text-3xl font-bold text-indigo-400">0</div>
+        </div>
+        <div class="glass rounded-lg p-4">
+            <div class="text-slate-400 text-sm mb-1">Monitoring</div>
+            <div id="stat-monitoring" class="text-3xl font-bold text-green-400">0</div>
+        </div>
+        <div class="glass rounded-lg p-4">
+            <div class="text-slate-400 text-sm mb-1">Total Samples</div>
+            <div id="stat-total-samples" class="text-3xl font-bold text-blue-400">0</div>
+        </div>
+        <div class="glass rounded-lg p-4">
+            <div class="text-slate-400 text-sm mb-1">Total Anomalies</div>
+            <div id="stat-total-anomalies" class="text-3xl font-bold text-red-400">0</div>
+        </div>
+    </div>
+
+    <!-- Add PLC Panel -->
+    <div class="glass rounded-lg p-6 mb-6">
+        <div class="flex justify-between items-center mb-4">
+            <h2 class="text-xl font-semibold">Add PLC to Monitor</h2>
+            <div class="flex gap-2">
+                <button onclick="scanAllSlots()" class="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg text-sm">
+                    <i class="fas fa-search mr-2"></i>
+                    Scan All Slots
+                </button>
+                <button onclick="loadFromDevices()" class="bg-indigo-600 hover:bg-indigo-700 px-4 py-2 rounded-lg text-sm">
+                    <i class="fas fa-download mr-2"></i>
+                    Load from Devices
+                </button>
+                <button onclick="toggleAddForm()" class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg text-sm">
+                    <i class="fas fa-plus mr-2"></i>
+                    Add Manual
+                </button>
+            </div>
+        </div>
+
+        <!-- Scan All Slots Input -->
+        <div id="scan-slots-form" class="hidden mb-4">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3">
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-medium text-slate-300 mb-2">IP Address to Scan</label>
+                    <input type="text" id="scan-ip"
+                        class="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white"
+                        placeholder="192.168.210.211">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-300 mb-2">
+                        Max Slots to Scan
+                        <span class="text-xs text-slate-400">(0 to N)</span>
+                    </label>
+                    <input type="number" id="scan-max-slots" value="8" min="1" max="128"
+                        class="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white"
+                        placeholder="8">
+                </div>
+            </div>
+            <p class="text-xs text-slate-400 mb-3">
+                <i class="fas fa-info-circle mr-1"></i>
+                Scanning many slots takes time. Recommended: 4-8 slots for typical PLCs, 16-32 for distributed systems.
+            </p>
+            <div class="flex gap-2">
+                <button onclick="executeScanSlots()" class="bg-purple-600 hover:bg-purple-700 px-6 py-2 rounded-lg">
+                    <i class="fas fa-play mr-2"></i>
+                    Start Scan
+                </button>
+                <button onclick="cancelScanSlots()" class="bg-slate-600 hover:bg-slate-700 px-4 py-2 rounded-lg">
+                    Cancel
+                </button>
+            </div>
+        </div>
+
+        <!-- Scan Results -->
+        <div id="scan-results" class="hidden">
+            <div class="bg-slate-700/30 rounded-lg p-4 mb-4">
+                <div class="flex justify-between items-center mb-3">
+                    <div class="font-semibold">Found PLCs at <span id="scanned-ip" class="text-indigo-400"></span></div>
+                    <button onclick="cancelScanSlots()" class="text-sm text-slate-400 hover:text-white">
+                        <i class="fas fa-times mr-1"></i> Close
+                    </button>
+                </div>
+                <div id="scan-results-list" class="space-y-2">
+                    <!-- Results will be shown here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Manual Add Form -->
+        <div id="add-form" class="hidden">
+            <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-4">
+                <div>
+                    <label class="block text-sm font-medium text-slate-300 mb-2">Protocol</label>
+                    <select id="new-protocol" onchange="toggleProtocolFields()"
+                        class="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white">
+                        <option value="S7">Siemens S7</option>
+                        <option value="MODBUS">Modbus TCP</option>
+                        <option value="OPCUA">OPC UA</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-300 mb-2">IP Address</label>
+                    <input type="text" id="new-ip"
+                        class="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white"
+                        placeholder="192.168.210.211">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-300 mb-2">Name</label>
+                    <input type="text" id="new-name"
+                        class="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white"
+                        placeholder="PLC-01">
+                </div>
+
+                <!-- S7-specific fields -->
+                <div id="s7-fields-rack">
+                    <label class="block text-sm font-medium text-slate-300 mb-2">Rack</label>
+                    <input type="number" id="new-rack"
+                        class="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white"
+                        value="0" min="0" max="7">
+                </div>
+                <div id="s7-fields-slot">
+                    <label class="block text-sm font-medium text-slate-300 mb-2">Slot</label>
+                    <input type="number" id="new-slot"
+                        class="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white"
+                        value="1" min="0" max="31">
+                </div>
+
+                <!-- Modbus-specific fields -->
+                <div id="modbus-fields-port" class="hidden">
+                    <label class="block text-sm font-medium text-slate-300 mb-2">Port</label>
+                    <input type="number" id="new-modbus-port"
+                        class="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white"
+                        value="502" min="1" max="65535">
+                </div>
+                <div id="modbus-fields-unit" class="hidden">
+                    <label class="block text-sm font-medium text-slate-300 mb-2">Unit ID</label>
+                    <input type="number" id="new-unit-id"
+                        class="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white"
+                        value="1" min="0" max="247">
+                </div>
+
+                <!-- OPC UA-specific fields -->
+                <div id="opcua-fields-port" class="hidden" colspan="2">
+                    <label class="block text-sm font-medium text-slate-300 mb-2">Port</label>
+                    <input type="number" id="new-opcua-port"
+                        class="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-white"
+                        value="4840" min="1" max="65535">
+                </div>
+            </div>
+            <button onclick="addPLC()" class="bg-green-600 hover:bg-green-700 px-6 py-2 rounded-lg">
+                <i class="fas fa-check mr-2"></i>
+                Add Device
+            </button>
+        </div>
+
+        <!-- Select from Devices -->
+        <div id="device-select" class="hidden">
+            <div id="device-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
+                <!-- Devices will be loaded here -->
+            </div>
+            <button onclick="toggleAddForm()" class="text-sm text-slate-400 hover:text-white">
+                <i class="fas fa-times mr-1"></i> Cancel
+            </button>
+        </div>
+    </div>
+
+    <!-- Control Panel -->
+    <div class="glass rounded-lg p-4 mb-6">
+        <div class="flex gap-4">
+            <button onclick="startAllMonitoring()" class="bg-green-600 hover:bg-green-700 px-6 py-2 rounded-lg font-semibold">
+                <i class="fas fa-play mr-2"></i>
+                Start All
+            </button>
+            <button onclick="stopAllMonitoring()" class="bg-red-600 hover:bg-red-700 px-6 py-2 rounded-lg font-semibold">
+                <i class="fas fa-stop mr-2"></i>
+                Stop All
+            </button>
+            <button onclick="clearAnomalies()" class="bg-yellow-600 hover:bg-yellow-700 px-4 py-2 rounded-lg">
+                <i class="fas fa-trash mr-2"></i>
+                Clear Anomalies
+            </button>
+            <button onclick="exportData()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg">
+                <i class="fas fa-download mr-2"></i>
+                Export Data
+            </button>
+        </div>
+    </div>
+
+    <!-- PLC Cards Grid -->
+    <div id="plc-grid" class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <!-- PLC cards will be added here -->
+        <div class="text-center py-12 text-slate-500 col-span-full">
+            <i class="fas fa-server text-6xl mb-4"></i>
+            <p class="text-lg">No PLCs added yet</p>
+            <p class="text-sm">Click "Add Manual" or "Load from Devices" to start monitoring</p>
+        </div>
+    </div>
+
+    <!-- Aggregated Anomalies -->
+    <div class="glass rounded-lg p-6">
+        <div class="flex justify-between items-center mb-4">
+            <h2 class="text-xl font-semibold">All Anomalies</h2>
+            <div class="flex gap-2">
+                <select id="anomaly-filter" onchange="filterAnomalies()" class="bg-slate-700 border border-slate-600 rounded px-3 py-1 text-sm">
+                    <option value="all">All PLCs</option>
+                </select>
+                <select id="severity-filter" onchange="filterAnomalies()" class="bg-slate-700 border border-slate-600 rounded px-3 py-1 text-sm">
+                    <option value="all">All Severities</option>
+                    <option value="CRITICAL">Critical</option>
+                    <option value="HIGH">High</option>
+                    <option value="MEDIUM">Medium</option>
+                    <option value="LOW">Low</option>
+                </select>
+            </div>
+        </div>
+        <div id="all-anomalies" class="space-y-2 max-h-96 overflow-y-auto">
+            <div class="text-center py-8 text-slate-500">
+                <i class="fas fa-check-circle text-4xl mb-2"></i>
+                <p>No anomalies detected</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+// State
+let plcs = {};  // plc_id -> {ip, name, sessionId, status, data}
+let allAnomalies = [];
+
+// Toggle add form
+function toggleAddForm() {
+    const form = document.getElementById('add-form');
+    const deviceSelect = document.getElementById('device-select');
+    const scanForm = document.getElementById('scan-slots-form');
+    const scanResults = document.getElementById('scan-results');
+
+    if (form.classList.contains('hidden')) {
+        form.classList.remove('hidden');
+        deviceSelect.classList.add('hidden');
+        scanForm.classList.add('hidden');
+        scanResults.classList.add('hidden');
+    } else {
+        form.classList.add('hidden');
+    }
+}
+
+// Scan all slots
+function scanAllSlots() {
+    const form = document.getElementById('add-form');
+    const deviceSelect = document.getElementById('device-select');
+    const scanForm = document.getElementById('scan-slots-form');
+    const scanResults = document.getElementById('scan-results');
+
+    // Hide other forms
+    form.classList.add('hidden');
+    deviceSelect.classList.add('hidden');
+    scanResults.classList.add('hidden');
+
+    // Show scan form
+    scanForm.classList.remove('hidden');
+
+    // Focus on IP input
+    document.getElementById('scan-ip').focus();
+}
+
+// Execute scan slots
+async function executeScanSlots() {
+    const ip = document.getElementById('scan-ip').value;
+    const maxSlots = parseInt(document.getElementById('scan-max-slots').value) || 8;
+
+    if (!ip) {
+        showToast('Please enter IP address', 'error');
+        return;
+    }
+
+    if (maxSlots < 1 || maxSlots > 128) {
+        showToast('Max slots must be between 1 and 128', 'error');
+        return;
+    }
+
+    showToast(`Scanning slots 0-${maxSlots-1} for ${ip}...`, 'info');
+
+    try {
+        const result = await apiCall('/api/monitoring/scan-slots', {
+            method: 'POST',
+            body: JSON.stringify({
+                ip: ip,
+                max_racks: 1,
+                max_slots: maxSlots  // User-configured max slots
+            })
+        });
+
+        if (result.success && result.found && result.found.length > 0) {
+            // Show results
+            document.getElementById('scanned-ip').textContent = ip;
+            const resultsList = document.getElementById('scan-results-list');
+
+            resultsList.innerHTML = result.found.map(plc => {
+                const info = plc.plc_info || {};
+                return `
+                    <div class="bg-slate-700/50 rounded-lg p-4 hover:bg-slate-700 transition">
+                        <div class="flex justify-between items-start">
+                            <div class="flex-1">
+                                <div class="font-semibold text-lg mb-1">
+                                    Rack ${plc.rack}, Slot ${plc.slot}
+                                </div>
+                                ${info.module_name ? `
+                                <div class="text-sm text-slate-300">
+                                    <i class="fas fa-microchip mr-1"></i> ${info.module_name}
+                                </div>
+                                ` : ''}
+                                ${info.firmware ? `
+                                <div class="text-xs text-slate-400">
+                                    <i class="fas fa-code-branch mr-1"></i> Firmware: ${info.firmware}
+                                </div>
+                                ` : ''}
+                                ${info.serial_number ? `
+                                <div class="text-xs text-slate-400">
+                                    <i class="fas fa-tag mr-1"></i> Serial: ${info.serial_number}
+                                </div>
+                                ` : ''}
+                                ${info.cpu_state ? `
+                                <div class="text-xs text-slate-400">
+                                    <i class="fas fa-circle mr-1 ${info.cpu_state === 'RUN' ? 'text-green-500' : 'text-slate-500'}"></i> State: ${info.cpu_state}
+                                </div>
+                                ` : ''}
+                            </div>
+                            <button onclick="addPLCFromScan('${ip}', ${plc.rack}, ${plc.slot}, ${JSON.stringify(info).replace(/'/g, "\\'")})"
+                                class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded text-sm">
+                                <i class="fas fa-plus mr-1"></i> Add
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            // Show results panel
+            document.getElementById('scan-slots-form').classList.add('hidden');
+            document.getElementById('scan-results').classList.remove('hidden');
+
+            showToast(`Found ${result.count} PLC(s) at ${ip}`, 'success');
+        } else {
+            showToast(`No PLCs found at ${ip}`, 'warning');
+        }
+    } catch (error) {
+        showToast(`Scan failed: ${error.message}`, 'error');
+    }
+}
+
+// Add PLC from scan results
+async function addPLCFromScan(ip, rack, slot, plcInfo) {
+    const name = plcInfo.module_name || `${ip}-R${rack}S${slot}`;
+    await addPLCFromDevice(ip, name, {
+        protocol: 'S7',
+        rack: rack,
+        slot: slot
+    });
+}
+
+// Cancel scan slots
+function cancelScanSlots() {
+    document.getElementById('scan-slots-form').classList.add('hidden');
+    document.getElementById('scan-results').classList.add('hidden');
+    document.getElementById('scan-ip').value = '';
+}
+
+// Toggle protocol-specific fields
+function toggleProtocolFields() {
+    const protocol = document.getElementById('new-protocol').value;
+
+    // S7 fields
+    const s7Rack = document.getElementById('s7-fields-rack');
+    const s7Slot = document.getElementById('s7-fields-slot');
+
+    // Modbus fields
+    const modbusPort = document.getElementById('modbus-fields-port');
+    const modbusUnit = document.getElementById('modbus-fields-unit');
+
+    // OPC UA fields
+    const opcuaPort = document.getElementById('opcua-fields-port');
+
+    // Hide all first
+    s7Rack.classList.add('hidden');
+    s7Slot.classList.add('hidden');
+    modbusPort.classList.add('hidden');
+    modbusUnit.classList.add('hidden');
+    opcuaPort.classList.add('hidden');
+
+    // Show relevant fields
+    if (protocol === 'S7') {
+        s7Rack.classList.remove('hidden');
+        s7Slot.classList.remove('hidden');
+    } else if (protocol === 'MODBUS') {
+        modbusPort.classList.remove('hidden');
+        modbusUnit.classList.remove('hidden');
+    } else if (protocol === 'OPCUA') {
+        opcuaPort.classList.remove('hidden');
+    }
+}
+
+// Load from discovered devices
+async function loadFromDevices() {
+    try {
+        const result = await apiCall('/api/devices');
+        const devices = result.devices || [];
+
+        // Filter only PLCs
+        const plcDevices = devices.filter(d =>
+            d.device_type === 'PLC' ||
+            d.protocols?.includes('S7') ||
+            d.protocols?.includes('Modbus TCP')
+        );
+
+        if (plcDevices.length === 0) {
+            showToast('No PLCs found in discovered devices', 'warning');
+            return;
+        }
+
+        const deviceList = document.getElementById('device-list');
+        deviceList.innerHTML = plcDevices.map(device => `
+            <div class="bg-slate-700/50 rounded-lg p-4 hover:bg-slate-700 cursor-pointer transition"
+                onclick="addPLCFromDevice('${device.ip}', '${device.hostname || device.ip}', { protocol: 'S7', rack: ${device.rack || 0}, slot: ${device.slot || 1} })">
+                <div class="flex items-start gap-3">
+                    <i class="fas fa-microchip text-2xl text-indigo-400"></i>
+                    <div class="flex-1">
+                        <div class="font-semibold">${device.hostname || device.ip}</div>
+                        <div class="text-sm text-slate-400">${device.ip}</div>
+                        <div class="text-xs text-slate-500 mt-1">
+                            ${device.vendor || 'Unknown'} ${device.model || ''}
+                        </div>
+                        ${device.protocols ? `
+                        <div class="flex gap-1 mt-2">
+                            ${device.protocols.map(p => `<span class="protocol-badge protocol-${p.toLowerCase().replace(' ', '-')} text-xs">${p}</span>`).join('')}
+                        </div>
+                        ` : ''}
+                    </div>
+                    <button class="bg-green-600 hover:bg-green-700 px-3 py-1 rounded text-xs">
+                        <i class="fas fa-plus mr-1"></i> Add
+                    </button>
+                </div>
+            </div>
+        `).join('');
+
+        document.getElementById('add-form').classList.add('hidden');
+        document.getElementById('device-select').classList.remove('hidden');
+
+    } catch (error) {
+        showToast('Failed to load devices: ' + error.message, 'error');
+    }
+}
+
+// Add PLC manually
+async function addPLC() {
+    const protocol = document.getElementById('new-protocol').value;
+    const ip = document.getElementById('new-ip').value;
+    const name = document.getElementById('new-name').value || ip;
+
+    if (!ip) {
+        showToast('Please enter IP address', 'error');
+        return;
+    }
+
+    let params = { protocol };
+
+    if (protocol === 'S7') {
+        params.rack = parseInt(document.getElementById('new-rack').value);
+        params.slot = parseInt(document.getElementById('new-slot').value);
+    } else if (protocol === 'MODBUS') {
+        params.port = parseInt(document.getElementById('new-modbus-port').value);
+        params.unit_id = parseInt(document.getElementById('new-unit-id').value);
+    } else if (protocol === 'OPCUA') {
+        params.port = parseInt(document.getElementById('new-opcua-port').value);
+    }
+
+    await addPLCFromDevice(ip, name, params);
+}
+
+// Add PLC from device
+async function addPLCFromDevice(ip, name, params = {}) {
+    const plcId = `plc_${Date.now()}`;
+
+    // Default to S7 if not specified
+    if (!params.protocol) {
+        params = {
+            protocol: 'S7',
+            rack: params.rack || 0,
+            slot: params.slot || 1
+        };
+    }
+
+    // Check if already added (protocol-specific comparison)
+    const existing = Object.values(plcs).find(p => {
+        if (p.ip !== ip || p.protocol !== params.protocol) return false;
+
+        // For S7: same IP + rack + slot = duplicate
+        if (params.protocol === 'S7') {
+            return p.rack === params.rack && p.slot === params.slot;
+        }
+        // For Modbus: same IP + port + unit_id = duplicate
+        else if (params.protocol === 'MODBUS') {
+            return p.port === (params.port || 502) && p.unit_id === params.unit_id;
+        }
+        // For OPC UA: same IP + port = duplicate
+        else if (params.protocol === 'OPCUA') {
+            return p.port === (params.port || 4840);
+        }
+
+        return true; // Default: same IP + protocol = duplicate
+    });
+
+    if (existing) {
+        showToast(`Device already added: ${existing.name}`, 'warning');
+        return;
+    }
+
+    showToast(`Adding ${name}...`, 'info');
+
+    try {
+        // Connect to device
+        const connectData = {
+            ip,
+            protocol: params.protocol,
+            ...params
+        };
+
+        const result = await apiCall('/api/monitoring/connect', {
+            method: 'POST',
+            body: JSON.stringify(connectData)
+        });
+
+        if (!result.success) {
+            showToast(`Failed to connect to ${name}: ${result.error}`, 'error');
+            return;
+        }
+
+        // Add to PLCs list
+        plcs[plcId] = {
+            id: plcId,
+            ip,
+            name,
+            protocol: params.protocol || 'S7',
+            rack: params.rack,
+            slot: params.slot,
+            port: params.port,
+            unit_id: params.unit_id,
+            sessionId: result.session_id,
+            status: 'connected',
+            monitoring: false,
+            plcInfo: result.plc_info,
+            samples: 0,
+            anomalies: 0,
+            chart: null,
+            anomalyList: []
+        };
+
+        renderPLCCards();
+        updateStats();
+        updateAnomalyFilter();
+
+        showToast(`${name} connected successfully`, 'success');
+
+        // Hide forms
+        document.getElementById('add-form').classList.add('hidden');
+        document.getElementById('device-select').classList.add('hidden');
+
+        // Clear form
+        document.getElementById('new-ip').value = '';
+        document.getElementById('new-name').value = '';
+
+    } catch (error) {
+        showToast(`Failed to add ${name}: ${error.message}`, 'error');
+    }
+}
+
+// Render PLC cards
+function renderPLCCards() {
+    const grid = document.getElementById('plc-grid');
+
+    if (Object.keys(plcs).length === 0) {
+        grid.innerHTML = `
+            <div class="text-center py-12 text-slate-500 col-span-full">
+                <i class="fas fa-server text-6xl mb-4"></i>
+                <p class="text-lg">No PLCs added yet</p>
+                <p class="text-sm">Click "Add Manual" or "Load from Devices" to start monitoring</p>
+            </div>
+        `;
+        return;
+    }
+
+    grid.innerHTML = Object.values(plcs).map(plc => {
+        const statusColor = plc.status === 'connected' ? 'green' :
+                           plc.status === 'error' ? 'red' : 'slate';
+        const monitoringBadge = plc.monitoring ?
+            '<span class="bg-green-500 text-white px-2 py-1 rounded text-xs animate-pulse"><i class="fas fa-circle mr-1"></i>Monitoring</span>' :
+            '<span class="bg-slate-500 text-white px-2 py-1 rounded text-xs">Stopped</span>';
+
+        return `
+        <div class="glass rounded-lg p-6" id="plc-card-${plc.id}">
+            <!-- Header -->
+            <div class="flex justify-between items-start mb-4">
+                <div class="flex items-start gap-3">
+                    <div class="text-3xl text-indigo-400">
+                        <i class="fas fa-microchip"></i>
+                    </div>
+                    <div>
+                        <div class="flex items-center gap-2 mb-1">
+                            <div class="font-bold text-lg">${plc.name}</div>
+                            <span class="protocol-badge protocol-${plc.protocol.toLowerCase()} text-xs">${plc.protocol}</span>
+                        </div>
+                        <div class="text-sm text-slate-400 font-mono">
+                            ${plc.ip}
+                            ${plc.protocol === 'S7' ? `(R${plc.rack}/S${plc.slot})` : ''}
+                            ${plc.protocol === 'MODBUS' ? `:${plc.port || 502} Unit:${plc.unit_id}` : ''}
+                            ${plc.protocol === 'OPCUA' ? `:${plc.port || 4840}` : ''}
+                        </div>
+                        ${plc.plcInfo ? `
+                        <div class="text-xs text-slate-500 mt-1">
+                            ${plc.plcInfo.module_name || plc.plcInfo.protocol || ''} ${plc.plcInfo.firmware ? `| FW: ${plc.plcInfo.firmware}` : ''}
+                        </div>
+                        ${plc.plcInfo.cpu_state ? `
+                        <div class="text-xs text-slate-600">
+                            State: ${plc.plcInfo.cpu_state}
+                        </div>
+                        ` : ''}
+                        ` : ''}
+                    </div>
+                </div>
+                <div class="flex flex-col gap-2 items-end">
+                    <div class="flex items-center gap-2">
+                        <i class="fas fa-circle text-${statusColor}-500"></i>
+                        ${monitoringBadge}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stats -->
+            <div class="grid grid-cols-2 gap-2 mb-4">
+                <div class="bg-slate-700/50 rounded p-2">
+                    <div class="text-xs text-slate-400">Samples</div>
+                    <div class="text-lg font-bold" id="plc-samples-${plc.id}">${plc.samples}</div>
+                </div>
+                <div class="bg-slate-700/50 rounded p-2">
+                    <div class="text-xs text-slate-400">Anomalies</div>
+                    <div class="text-lg font-bold text-red-400" id="plc-anomalies-${plc.id}">${plc.anomalies}</div>
+                </div>
+            </div>
+
+            <!-- Mini Chart -->
+            <div class="mb-4">
+                <canvas id="chart-${plc.id}" height="150"></canvas>
+            </div>
+
+            <!-- Recent Anomalies -->
+            <div id="plc-recent-anomalies-${plc.id}" class="mb-4 max-h-32 overflow-y-auto">
+                <!-- Recent anomalies will be shown here -->
+            </div>
+
+            <!-- Controls -->
+            <div class="flex gap-2">
+                <button onclick="startPLCMonitoring('${plc.id}')"
+                    id="btn-start-${plc.id}"
+                    ${plc.monitoring ? 'disabled' : ''}
+                    class="flex-1 bg-green-600 hover:bg-green-700 px-3 py-2 rounded text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                    <i class="fas fa-play mr-1"></i> Start
+                </button>
+                <button onclick="stopPLCMonitoring('${plc.id}')"
+                    id="btn-stop-${plc.id}"
+                    ${!plc.monitoring ? 'disabled' : ''}
+                    class="flex-1 bg-red-600 hover:bg-red-700 px-3 py-2 rounded text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                    <i class="fas fa-stop mr-1"></i> Stop
+                </button>
+                <button onclick="removePLC('${plc.id}')" class="bg-slate-600 hover:bg-slate-700 px-3 py-2 rounded text-sm">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </div>
+        </div>
+        `;
+    }).join('');
+
+    // Initialize charts
+    Object.values(plcs).forEach(plc => {
+        if (!plc.chart) {
+            initPLCChart(plc.id);
+        }
+    });
+}
+
+// Initialize chart for a PLC
+function initPLCChart(plcId) {
+    const canvas = document.getElementById(`chart-${plcId}`);
+    if (!canvas) return;
+
+    const plc = plcs[plcId];
+    plc.chart = new Chart(canvas, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [{
+                label: 'Memory Writes',
+                data: [],
+                borderColor: '#ef4444',
+                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                tension: 0.4
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false }
+            },
+            scales: {
+                x: { display: false },
+                y: {
+                    ticks: { color: '#cbd5e1' },
+                    grid: { color: '#334155' }
+                }
+            }
+        }
+    });
+}
+
+// Start monitoring for a PLC
+async function startPLCMonitoring(plcId) {
+    const plc = plcs[plcId];
+    if (!plc) return;
+
+    try {
+        const result = await apiCall('/api/monitoring/start', {
+            method: 'POST',
+            body: JSON.stringify({
+                session_id: plc.sessionId,
+                baseline_duration: 60,
+                interval: 1.0
+            })
+        });
+
+        if (result.success) {
+            plc.monitoring = true;
+            renderPLCCards();
+            updateStats();
+            showToast(`Monitoring started for ${plc.name}`, 'success');
+        } else {
+            showToast(`Failed to start monitoring: ${result.error}`, 'error');
+        }
+    } catch (error) {
+        showToast(`Failed to start monitoring: ${error.message}`, 'error');
+    }
+}
+
+// Stop monitoring for a PLC
+async function stopPLCMonitoring(plcId) {
+    const plc = plcs[plcId];
+    if (!plc) return;
+
+    try {
+        const result = await apiCall('/api/monitoring/stop', {
+            method: 'POST',
+            body: JSON.stringify({ session_id: plc.sessionId })
+        });
+
+        if (result.success) {
+            plc.monitoring = false;
+            renderPLCCards();
+            updateStats();
+            showToast(`Monitoring stopped for ${plc.name}`, 'info');
+
+            if (result.summary) {
+                console.log(`Summary for ${plc.name}:`, result.summary);
+            }
+        }
+    } catch (error) {
+        showToast(`Failed to stop monitoring: ${error.message}`, 'error');
+    }
+}
+
+// Remove PLC
+async function removePLC(plcId) {
+    const plc = plcs[plcId];
+    if (!plc) return;
+
+    if (!confirm(`Remove ${plc.name} from monitoring?`)) return;
+
+    try {
+        // Stop if monitoring
+        if (plc.monitoring) {
+            await stopPLCMonitoring(plcId);
+        }
+
+        // Disconnect
+        await apiCall('/api/monitoring/disconnect', {
+            method: 'POST',
+            body: JSON.stringify({ session_id: plc.sessionId })
+        });
+
+        // Remove from list
+        delete plcs[plcId];
+
+        renderPLCCards();
+        updateStats();
+        updateAnomalyFilter();
+
+        showToast(`${plc.name} removed`, 'info');
+    } catch (error) {
+        showToast(`Failed to remove PLC: ${error.message}`, 'error');
+    }
+}
+
+// Start all monitoring
+async function startAllMonitoring() {
+    for (const plcId of Object.keys(plcs)) {
+        const plc = plcs[plcId];
+        if (!plc.monitoring) {
+            await startPLCMonitoring(plcId);
+            await new Promise(resolve => setTimeout(resolve, 500)); // Stagger starts
+        }
+    }
+}
+
+// Stop all monitoring
+async function stopAllMonitoring() {
+    for (const plcId of Object.keys(plcs)) {
+        const plc = plcs[plcId];
+        if (plc.monitoring) {
+            await stopPLCMonitoring(plcId);
+        }
+    }
+}
+
+// Update stats
+function updateStats() {
+    const total = Object.keys(plcs).length;
+    const monitoring = Object.values(plcs).filter(p => p.monitoring).length;
+    const totalSamples = Object.values(plcs).reduce((sum, p) => sum + p.samples, 0);
+    const totalAnomalies = Object.values(plcs).reduce((sum, p) => sum + p.anomalies, 0);
+
+    document.getElementById('stat-total-plcs').textContent = total;
+    document.getElementById('stat-monitoring').textContent = monitoring;
+    document.getElementById('stat-total-samples').textContent = totalSamples;
+    document.getElementById('stat-total-anomalies').textContent = totalAnomalies;
+}
+
+// Update chart
+function updatePLCChart(plcId, data) {
+    const plc = plcs[plcId];
+    if (!plc || !plc.chart) return;
+
+    const time = new Date(data.timestamp).toLocaleTimeString();
+    const chart = plc.chart;
+
+    chart.data.labels.push(time);
+    chart.data.datasets[0].data.push(data.memory_writes || 0);
+
+    // Keep last 60 points
+    if (chart.data.labels.length > 60) {
+        chart.data.labels.shift();
+        chart.data.datasets[0].data.shift();
+    }
+
+    chart.update('none');
+}
+
+// Add anomaly
+function addAnomaly(anomaly, plcId) {
+    const plc = plcs[plcId];
+    if (!plc) return;
+
+    plc.anomalies++;
+    plc.anomalyList.push(anomaly);
+
+    // Update PLC card
+    document.getElementById(`plc-anomalies-${plcId}`).textContent = plc.anomalies;
+
+    // Add to all anomalies
+    allAnomalies.unshift({...anomaly, plc: plc.name, plcId});
+
+    // Update displays
+    updateStats();
+    renderAllAnomalies();
+    showRecentAnomalies(plcId);
+}
+
+// Show recent anomalies for a PLC
+function showRecentAnomalies(plcId) {
+    const plc = plcs[plcId];
+    if (!plc) return;
+
+    const container = document.getElementById(`plc-recent-anomalies-${plcId}`);
+    const recent = plc.anomalyList.slice(0, 2);
+
+    if (recent.length === 0) {
+        container.innerHTML = '<div class="text-xs text-slate-500">No anomalies</div>';
+        return;
+    }
+
+    const severityColors = {
+        'CRITICAL': 'border-red-600',
+        'HIGH': 'border-orange-600',
+        'MEDIUM': 'border-yellow-600',
+        'LOW': 'border-blue-600'
+    };
+
+    container.innerHTML = recent.map(a => `
+        <div class="text-xs bg-slate-700/30 rounded p-2 border-l-2 ${severityColors[a.severity]} mb-1">
+            <div class="font-semibold">${a.type.replace(/_/g, ' ')}</div>
+            <div class="text-slate-400">${a.description}</div>
+        </div>
+    `).join('');
+}
+
+// Render all anomalies
+function renderAllAnomalies() {
+    const container = document.getElementById('all-anomalies');
+
+    if (allAnomalies.length === 0) {
+        container.innerHTML = `
+            <div class="text-center py-8 text-slate-500">
+                <i class="fas fa-check-circle text-4xl mb-2"></i>
+                <p>No anomalies detected</p>
+            </div>
+        `;
+        return;
+    }
+
+    const severityColors = {
+        'CRITICAL': 'bg-red-600',
+        'HIGH': 'bg-orange-600',
+        'MEDIUM': 'bg-yellow-600',
+        'LOW': 'bg-blue-600'
+    };
+
+    container.innerHTML = allAnomalies.slice(0, 50).map(a => `
+        <div class="bg-slate-700/50 rounded-lg p-4 border-l-4 ${severityColors[a.severity].replace('bg-', 'border-')}">
+            <div class="flex justify-between items-start mb-2">
+                <div>
+                    <span class="font-semibold text-white">${a.type.replace(/_/g, ' ')}</span>
+                    <span class="text-sm text-slate-400 ml-2">@ ${a.plc}</span>
+                </div>
+                <span class="px-2 py-1 rounded text-xs font-bold ${severityColors[a.severity]}">${a.severity}</span>
+            </div>
+            <div class="text-sm text-slate-300 mb-1">${a.description}</div>
+            <div class="text-xs text-slate-500">${new Date(a.timestamp).toLocaleString()}</div>
+        </div>
+    `).join('');
+}
+
+// Filter anomalies
+function filterAnomalies() {
+    // TODO: Implement filtering
+    renderAllAnomalies();
+}
+
+// Update anomaly filter options
+function updateAnomalyFilter() {
+    const filter = document.getElementById('anomaly-filter');
+    filter.innerHTML = '<option value="all">All PLCs</option>' +
+        Object.values(plcs).map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+}
+
+// Clear anomalies
+function clearAnomalies() {
+    if (!confirm('Clear all anomalies?')) return;
+
+    allAnomalies = [];
+    Object.values(plcs).forEach(plc => {
+        plc.anomalies = 0;
+        plc.anomalyList = [];
+    });
+
+    renderPLCCards();
+    renderAllAnomalies();
+    updateStats();
+}
+
+// Export data
+function exportData() {
+    const data = {
+        timestamp: new Date().toISOString(),
+        plcs: Object.values(plcs).map(p => ({
+            name: p.name,
+            ip: p.ip,
+            samples: p.samples,
+            anomalies: p.anomalies,
+            anomalyList: p.anomalyList
+        })),
+        totalAnomalies: allAnomalies
+    };
+
+    const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `monitoring_${new Date().toISOString()}.json`;
+    a.click();
+
+    showToast('Data exported', 'success');
+}
+
+// WebSocket handlers
+socket.on('monitoring_sample', function(data) {
+    const plc = Object.values(plcs).find(p => p.sessionId === data.session_id);
+    if (!plc) return;
+
+    plc.samples = data.sample_count || plc.samples + 1;
+    document.getElementById(`plc-samples-${plc.id}`).textContent = plc.samples;
+
+    updatePLCChart(plc.id, data);
+    updateStats();
+});
+
+socket.on('monitoring_anomaly', function(data) {
+    const plc = Object.values(plcs).find(p => p.sessionId === data.session_id);
+    if (!plc) return;
+
+    addAnomaly(data, plc.id);
+    showToast(`⚠️ ${plc.name}: ${data.type}`, 'warning');
+});
+
+socket.on('monitoring_baseline', function(data) {
+    const plc = Object.values(plcs).find(p => p.sessionId === data.session_id);
+    if (!plc) return;
+
+    if (data.complete) {
+        showToast(`Baseline established for ${plc.name}`, 'success');
+    }
+});
+
+// Initialize
+document.addEventListener('DOMContentLoaded', function() {
+    updateStats();
+
+    // Check if device parameter is in URL for auto-scan
+    const urlParams = new URLSearchParams(window.location.search);
+    const deviceIp = urlParams.get('device');
+
+    if (deviceIp) {
+        console.log('[Monitoring] Auto-starting slot scan for device:', deviceIp);
+        // Show the scan form
+        scanAllSlots();
+        // Fill in the IP
+        document.getElementById('scan-ip').value = deviceIp;
+        // Auto-start scan after a short delay
+        setTimeout(() => {
+            showToast(`Auto-starting slot scan for ${deviceIp}`, 'info');
+            executeScanSlots();
+        }, 500);
+    }
+});
+</script>
+{% endblock %}

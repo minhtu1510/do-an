@@ -1,0 +1,6 @@
+#!/home/sus/do-an/contest_submission/02_MaNguon_ThuVien/MaNguon/web_scada/backend/.venv/bin/python3
+import sys
+from asyncua.tools import uacall
+if __name__ == '__main__':
+    sys.argv[0] = sys.argv[0].removesuffix('.exe')
+    sys.exit(uacall())

@@ -1,0 +1,54 @@
+{
+    "_comment": "Testbed configuration for ICS Dataset Collection – S7Pwn",
+    "_reference": "Methodology based on CIC-IDS2017, SWaT, BATADAL datasets",
+    "target": "192.168.1.10",
+    "rack": 0,
+    "slot": 1,
+    "iface": "eth0",
+    "output": "dataset",
+    "window": 5.0,
+    "replay_file": "dataset/replay_captures/capture.s7replay",
+    "_phases_comment": "Remove phases you don't want to run",
+    "phases_to_run": [
+        "normal",
+        "scan",
+        "enum_tags",
+        "flood",
+        "rwrite",
+        "spoof_constant",
+        "replay",
+        "fuzz"
+    ],
+    "_attack_durations_comment": "Edit duration_s in collect_dataset.py ATTACK_PHASES dict",
+    "testbed_topology": {
+        "attacker_machine": "192.168.1.100",
+        "plc_target": "192.168.1.10",
+        "plc_model": "Siemens S7-1200 / S7-300",
+        "network": "192.168.1.0/24",
+        "switch": "Layer-2 unmanaged (span port if available)",
+        "capture_point": "Attacker NIC eth0 (in same subnet as PLC)"
+    },
+    "dataset_info": {
+        "format": "CSV – 32 flow features per 5-second window",
+        "labeling": "Ground-truth from attack schedule (no post-hoc labeling)",
+        "classes": [
+            "NORMAL",
+            "SCAN",
+            "ENUM_TAGS",
+            "FLOOD",
+            "RWRITE",
+            "SPOOF",
+            "REPLAY",
+            "FUZZ"
+        ],
+        "mitre_coverage": {
+            "T0846": "SCAN",
+            "T0861": "ENUM_TAGS",
+            "T0814": "FLOOD",
+            "T0836": "RWRITE + SPOOF",
+            "T0843": "REPLAY",
+            "T0816": "CPU_CONTROL",
+            "T0819": "FUZZ"
+        }
+    }
+}

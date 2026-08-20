@@ -1,0 +1,306 @@
+{% extends "base.html" %}
+{% block title %}IDS Offline (Upload PCAP){% endblock %}
+
+{% block extra_head %}
+<style>
+  .pipeline-step { transition: all 0.3s ease; }
+  .pipeline-step.active { border-color: #6366f1 !important; box-shadow: 0 0 20px rgba(99,102,241,0.3); }
+  .pipeline-step.done   { border-color: #10b981 !important; box-shadow: 0 0 12px rgba(16,185,129,0.2); }
+  .pipeline-step.error  { border-color: #ef4444 !important; box-shadow: 0 0 12px rgba(239,68,68,0.2); }
+  .label-benign    { color: #10b981; }
+  .label-malicious { color: #ef4444; }
+  .bar-fill { transition: width 0.6s ease; }
+  .flow-row { transition: background 0.2s; }
+  .flow-row:hover { background: rgba(99,102,241,0.08); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+
+  <div>
+    <h1 class="text-2xl font-bold text-white flex items-center gap-3">
+      <i class="fas fa-brain text-indigo-400"></i> IDS Offline — Upload PCAP
+    </h1>
+    <p class="text-slate-400 text-sm mt-1">
+      Dữ liệu chưa capture trực tuyến được, nên phân tích theo lô: upload file pcap →
+      trích xuất đặc trưng → mô hình AI dự đoán từng window.
+    </p>
+  </div>
+
+  <!-- Upload form -->
+  <div class="glass rounded-xl p-5 border border-slate-700">
+    <form id="analyze-form" class="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
+      <div class="md:col-span-2">
+        <label class="block text-xs text-slate-400 mb-1">File PCAP/PCAPNG</label>
+        <input type="file" id="pcap-file" accept=".pcap,.pcapng" required
+          class="w-full text-sm text-slate-300 bg-slate-800 border border-slate-600 rounded-lg p-2 file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:bg-indigo-600 file:text-white file:text-xs" />
+      </div>
+      <div>
+        <label class="block text-xs text-slate-400 mb-1">Giao thức</label>
+        <select id="protocol-select" class="w-full bg-slate-800 border border-slate-600 rounded-lg p-2 text-sm text-slate-200"></select>
+      </div>
+      <div>
+        <label class="block text-xs text-slate-400 mb-1">Window (giây)</label>
+        <input type="number" id="window-input" value="5" min="0.5" step="0.5"
+          class="w-full bg-slate-800 border border-slate-600 rounded-lg p-2 text-sm text-slate-200" />
+      </div>
+      <div>
+        <label class="block text-xs text-slate-400 mb-1">PLC IP (tùy chọn)</label>
+        <input type="text" id="plcip-input" placeholder="192.168.x.x"
+          class="w-full bg-slate-800 border border-slate-600 rounded-lg p-2 text-sm text-slate-200" />
+      </div>
+      <div class="md:col-span-5">
+        <button type="submit" id="btn-analyze"
+          class="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium flex items-center gap-2">
+          <i class="fas fa-magnifying-glass"></i> Phân tích
+        </button>
+        <span id="model-status-hint" class="text-xs text-slate-500 ml-3"></span>
+      </div>
+    </form>
+  </div>
+
+  <!-- 3-step pipeline -->
+  <div class="grid grid-cols-3 gap-3">
+    <div id="step1" class="pipeline-step glass rounded-xl p-4 border border-slate-700">
+      <div class="flex items-center gap-2 mb-2">
+        <div class="w-7 h-7 rounded-full bg-blue-600/30 flex items-center justify-center text-blue-400 font-bold text-xs">1</div>
+        <span class="text-xs font-semibold text-blue-400 uppercase tracking-wide">Upload</span>
+      </div>
+      <p class="text-sm font-semibold text-white">Nhận file PCAP</p>
+      <p id="s1-detail" class="text-xs text-slate-400 mt-1">—</p>
+    </div>
+    <div id="step2" class="pipeline-step glass rounded-xl p-4 border border-slate-700">
+      <div class="flex items-center gap-2 mb-2">
+        <div class="w-7 h-7 rounded-full bg-yellow-600/30 flex items-center justify-center text-yellow-400 font-bold text-xs">2</div>
+        <span class="text-xs font-semibold text-yellow-400 uppercase tracking-wide">Trích xuất đặc trưng</span>
+      </div>
+      <p class="text-sm font-semibold text-white">tshark → windowed CSV</p>
+      <p id="s2-detail" class="text-xs text-slate-400 mt-1">—</p>
+    </div>
+    <div id="step3" class="pipeline-step glass rounded-xl p-4 border border-slate-700">
+      <div class="flex items-center gap-2 mb-2">
+        <div class="w-7 h-7 rounded-full bg-red-600/30 flex items-center justify-center text-red-400 font-bold text-xs">3</div>
+        <span class="text-xs font-semibold text-red-400 uppercase tracking-wide">Suy luận mô hình</span>
+      </div>
+      <p class="text-sm font-semibold text-white">Model predict</p>
+      <p id="s3-detail" class="text-xs text-slate-400 mt-1">—</p>
+    </div>
+  </div>
+
+  <!-- Model unavailable notice -->
+  <div id="model-missing-banner" class="hidden glass rounded-xl p-4 border border-amber-700/50 bg-amber-900/10 text-amber-300 text-sm">
+    <i class="fas fa-triangle-exclamation mr-2"></i><span id="model-missing-text"></span>
+  </div>
+
+  <!-- Warnings -->
+  <div id="warnings-box" class="hidden glass rounded-xl p-4 border border-slate-700 text-xs text-slate-400 space-y-1"></div>
+
+  <!-- Summary -->
+  <div id="summary-section" class="hidden space-y-4">
+    <div class="grid grid-cols-3 gap-4">
+      <div class="glass rounded-xl p-4 border border-slate-700 text-center">
+        <p class="text-xs text-slate-400 uppercase">Total Windows</p>
+        <p id="stat-total" class="text-3xl font-bold text-white mt-1">0</p>
+      </div>
+      <div class="glass rounded-xl p-4 border border-slate-700 text-center">
+        <p class="text-xs text-slate-400 uppercase">Benign</p>
+        <p id="stat-benign" class="text-3xl font-bold text-emerald-400 mt-1">0</p>
+      </div>
+      <div class="glass rounded-xl p-4 border border-slate-700 text-center">
+        <p class="text-xs text-slate-400 uppercase">Malicious 🚨</p>
+        <p id="stat-malicious" class="text-3xl font-bold text-red-400 mt-1">0</p>
+      </div>
+    </div>
+    <div class="glass rounded-xl p-4 border border-slate-700">
+      <div class="flex justify-between text-xs text-slate-400 mb-2">
+        <span>Benign</span><span>Malicious</span>
+      </div>
+      <div class="w-full h-3 bg-slate-700 rounded-full overflow-hidden flex">
+        <div id="bar-benign" class="bar-fill h-full bg-emerald-500 rounded-l-full" style="width:0%"></div>
+        <div id="bar-malicious" class="bar-fill h-full bg-red-500 rounded-r-full" style="width:0%"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Results table -->
+  <div id="results-section" class="hidden glass rounded-xl border border-slate-700 overflow-hidden">
+    <div class="p-4 border-b border-slate-700 flex items-center justify-between">
+      <h3 class="text-sm font-semibold text-white flex items-center gap-2">
+        <i class="fas fa-stream text-indigo-400"></i> Kết quả theo Window
+      </h3>
+      <div class="flex gap-3 text-xs">
+        <a id="link-raw-csv" href="#" class="text-indigo-400 hover:underline"><i class="fas fa-download"></i> raw CSV</a>
+        <a id="link-mlsafe-csv" href="#" class="text-indigo-400 hover:underline"><i class="fas fa-download"></i> ml-safe CSV</a>
+      </div>
+    </div>
+    <div class="overflow-y-auto" style="max-height:420px">
+      <table class="w-full text-xs">
+        <thead class="sticky top-0 bg-slate-800">
+          <tr class="text-slate-400 uppercase tracking-wide">
+            <th class="px-3 py-2 text-left">Window start (ms)</th>
+            <th class="px-3 py-2 text-left">Window end (ms)</th>
+            <th class="px-3 py-2 text-left">Predicted</th>
+            <th class="px-3 py-2 text-right">Confidence</th>
+            <th class="px-3 py-2 text-center">Verdict</th>
+          </tr>
+        </thead>
+        <tbody id="rows-tbody">
+          <tr><td colspan="5" class="text-center text-slate-500 py-10">Chưa có kết quả</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+let PROTOCOLS = [];
+
+window.addEventListener('DOMContentLoaded', loadProtocols);
+
+async function loadProtocols() {
+  try {
+    const r = await fetch('/api/ids-offline/protocols');
+    const d = await r.json();
+    PROTOCOLS = d.protocols || [];
+    const sel = document.getElementById('protocol-select');
+    sel.innerHTML = PROTOCOLS.map(p =>
+      `<option value="${p.id}">${p.id.toUpperCase()}${p.model_available ? '' : ' (chưa có model)'}</option>`
+    ).join('');
+    updateModelHint();
+    sel.addEventListener('change', updateModelHint);
+  } catch (e) {
+    showToast('Không tải được danh sách giao thức', 'error');
+  }
+}
+
+function updateModelHint() {
+  const sel = document.getElementById('protocol-select');
+  const p = PROTOCOLS.find(x => x.id === sel.value);
+  const hint = document.getElementById('model-status-hint');
+  if (!p) { hint.textContent = ''; return; }
+  hint.textContent = p.model_available
+    ? '✓ Model đã sẵn sàng cho giao thức này'
+    : '⚠ Chưa có model — vẫn chạy được trích xuất đặc trưng, chỉ thiếu bước dự đoán';
+}
+
+function resetSteps() {
+  ['step1', 'step2', 'step3'].forEach(id => {
+    const el = document.getElementById(id);
+    el.classList.remove('active', 'done', 'error');
+  });
+  document.getElementById('s1-detail').textContent = '—';
+  document.getElementById('s2-detail').textContent = '—';
+  document.getElementById('s3-detail').textContent = '—';
+  document.getElementById('model-missing-banner').classList.add('hidden');
+  document.getElementById('warnings-box').classList.add('hidden');
+  document.getElementById('warnings-box').innerHTML = '';
+  document.getElementById('summary-section').classList.add('hidden');
+  document.getElementById('results-section').classList.add('hidden');
+}
+
+function stepState(id, state, detail) {
+  const el = document.getElementById(id);
+  el.classList.remove('active', 'done', 'error');
+  el.classList.add(state);
+  if (detail !== undefined) {
+    document.getElementById(id.replace('step', 's') + '-detail').textContent = detail;
+  }
+}
+
+document.getElementById('analyze-form').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const fileInput = document.getElementById('pcap-file');
+  if (!fileInput.files.length) { showToast('Chưa chọn file pcap', 'error'); return; }
+
+  resetSteps();
+  stepState('step1', 'active', fileInput.files[0].name);
+
+  const form = new FormData();
+  form.append('pcap', fileInput.files[0]);
+  form.append('protocol', document.getElementById('protocol-select').value);
+  form.append('window', document.getElementById('window-input').value);
+  form.append('plc_ip', document.getElementById('plcip-input').value);
+
+  const btn = document.getElementById('btn-analyze');
+  btn.disabled = true;
+  btn.classList.add('opacity-50', 'cursor-not-allowed');
+  stepState('step1', 'done');
+  stepState('step2', 'active', 'Đang chạy tshark...');
+
+  try {
+    const r = await fetch('/api/ids-offline/analyze', { method: 'POST', body: form });
+    const d = await r.json();
+
+    if (!d.success) {
+      stepState('step2', 'error', d.error || 'Lỗi trích xuất đặc trưng');
+      showToast(d.error || 'Phân tích thất bại', 'error', 6000);
+      return;
+    }
+
+    stepState('step2', 'done', `${d.extraction.window_count} window`);
+    document.getElementById('link-raw-csv').href = d.extraction.raw_csv;
+    document.getElementById('link-mlsafe-csv').href = d.extraction.ml_safe_csv;
+
+    if (!d.model_available) {
+      stepState('step3', 'error', 'Chưa có model');
+      document.getElementById('model-missing-banner').classList.remove('hidden');
+      document.getElementById('model-missing-text').textContent =
+        d.message || d.model_error || 'Model chưa sẵn sàng cho giao thức này.';
+      showToast('Trích xuất đặc trưng xong, còn thiếu model để dự đoán', 'info', 5000);
+      return;
+    }
+
+    stepState('step3', 'done', d.feature_source);
+    renderResults(d);
+    showToast('Phân tích hoàn tất', 'success');
+  } catch (e) {
+    stepState('step2', 'error', 'Lỗi kết nối');
+    showToast('Lỗi: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.classList.remove('opacity-50', 'cursor-not-allowed');
+  }
+});
+
+function renderResults(d) {
+  const s = d.summary;
+  document.getElementById('summary-section').classList.remove('hidden');
+  document.getElementById('stat-total').textContent = s.total_windows;
+  document.getElementById('stat-benign').textContent = s.benign_count;
+  document.getElementById('stat-malicious').textContent = s.malicious_count;
+  const bp = (s.total_windows ? s.benign_count / s.total_windows * 100 : 0).toFixed(1);
+  const mp = (s.total_windows ? s.malicious_count / s.total_windows * 100 : 0).toFixed(1);
+  document.getElementById('bar-benign').style.width = bp + '%';
+  document.getElementById('bar-malicious').style.width = mp + '%';
+
+  if (d.warnings && d.warnings.length) {
+    const box = document.getElementById('warnings-box');
+    box.classList.remove('hidden');
+    box.innerHTML = d.warnings.map(w => `<p><i class="fas fa-circle-info mr-1"></i>${w}</p>`).join('');
+  }
+
+  const tbody = document.getElementById('rows-tbody');
+  document.getElementById('results-section').classList.remove('hidden');
+  if (!d.rows.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-slate-500 py-10">Không có window nào</td></tr>';
+    return;
+  }
+  tbody.innerHTML = d.rows.map(row => {
+    const isM = row.is_malicious;
+    const conf = row.confidence === null || row.confidence === undefined ? '—' : (row.confidence * 100).toFixed(1) + '%';
+    return `
+      <tr class="flow-row border-b border-slate-800 ${isM ? 'bg-red-900/10' : ''}">
+        <td class="px-3 py-2 text-slate-400 font-mono">${row.window_start_ms}</td>
+        <td class="px-3 py-2 text-slate-400 font-mono">${row.window_end_ms ?? '—'}</td>
+        <td class="px-3 py-2 text-slate-300 font-mono">${row.predicted_label}</td>
+        <td class="px-3 py-2 text-right font-mono ${isM ? 'text-red-400' : 'text-emerald-400'}">${conf}</td>
+        <td class="px-3 py-2 text-center font-bold ${isM ? 'label-malicious' : 'label-benign'}">${isM ? '🚨 MAL' : '✅ BEN'}</td>
+      </tr>`;
+  }).join('');
+}
+</script>
+{% endblock %}

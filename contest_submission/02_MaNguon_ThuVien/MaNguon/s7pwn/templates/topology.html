@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Network Topology - S7Pwn v{{ version }}</title>
+
+    <!-- Vis.js for network visualization -->
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            padding: 20px 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            color: #667eea;
+            font-size: 28px;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 15px;
+        }
+
+        .nav-links a {
+            color: #667eea;
+            text-decoration: none;
+            padding: 8px 16px;
+            border-radius: 5px;
+            transition: all 0.3s;
+        }
+
+        .nav-links a:hover {
+            background: #667eea;
+            color: white;
+        }
+
+        .control-panel {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        .control-row {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+
+        .btn:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+        }
+
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-success {
+            background: #4caf50;
+        }
+
+        .btn-success:hover {
+            background: #45a049;
+        }
+
+        .btn-danger {
+            background: #f44336;
+        }
+
+        .btn-danger:hover {
+            background: #da190b;
+        }
+
+        .btn-small {
+            padding: 6px 14px;
+            font-size: 13px;
+        }
+
+        input[type="text"], input[type="number"], select {
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+
+        label {
+            font-weight: 500;
+            color: #555;
+            margin-right: 5px;
+        }
+
+        .stats-bar {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+
+        .stat-item {
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 32px;
+            font-weight: bold;
+            color: #1976d2;
+        }
+
+        .stat-label {
+            font-size: 14px;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        .topology-container {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        #networkGraph {
+            width: 100%;
+            height: 600px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            background: #fafafa;
+        }
+
+        .legend {
+            background: white;
+            padding: 15px;
+            border-radius: 5px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-top: 20px;
+        }
+
+        .legend h3 {
+            margin-bottom: 10px;
+            color: #333;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin: 5px 0;
+        }
+
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            margin-right: 10px;
+        }
+
+        .device-details {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            margin-top: 20px;
+        }
+
+        .device-details h3 {
+            color: #333;
+            margin-bottom: 15px;
+        }
+
+        .device-details table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .device-details th,
+        .device-details td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .device-details th {
+            background: #f5f5f5;
+            font-weight: 600;
+        }
+
+        .alert {
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+
+        .alert-info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .alert-warning {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeeba;
+        }
+
+        .scanning-indicator {
+            display: none;
+            background: #fff3cd;
+            color: #856404;
+            padding: 10px 15px;
+            border-radius: 5px;
+            text-align: center;
+        }
+
+        .scanning-indicator.active {
+            display: block;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Network Topology Scanner</h1>
+            <div class="nav-links">
+                <a href="/">← Back to Dashboard</a>
+            </div>
+        </div>
+
+        <div class="control-panel">
+            <div class="control-row">
+                <label>Network:</label>
+                <input type="text" id="networkInput" placeholder="Auto-detect" style="width: 200px;">
+
+                <label>
+                    <input type="checkbox" id="quickScan">
+                    Quick Scan (faster)
+                </label>
+
+                <button class="btn btn-success" onclick="startScan()">
+                    🔍 Start Scan
+                </button>
+
+                <button class="btn" id="continuousBtn" onclick="toggleContinuous()">
+                    🔄 Start Continuous
+                </button>
+
+                <button class="btn btn-danger" onclick="stopScan()">
+                    ⏹ Stop
+                </button>
+
+                <div style="flex-grow: 1;"></div>
+
+                <button class="btn btn-small" onclick="exportTopology('json')">Export JSON</button>
+                <button class="btn btn-small" onclick="exportTopology('html')">Export HTML</button>
+                <button class="btn btn-small" onclick="exportTopology('csv')">Export CSV</button>
+            </div>
+        </div>
+
+        <div class="scanning-indicator" id="scanningIndicator">
+            <strong class="pulse">⌛ Scanning network...</strong>
+        </div>
+
+        <div class="stats-bar" id="statsBar" style="display: none;">
+            <div class="stat-item">
+                <div class="stat-value" id="totalDevices">0</div>
+                <div class="stat-label">Total Devices</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="onlineDevices">0</div>
+                <div class="stat-label">Online Devices</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="gatewayIP">N/A</div>
+                <div class="stat-label">Gateway</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="localIP">N/A</div>
+                <div class="stat-label">Local IP</div>
+            </div>
+        </div>
+
+        <div class="topology-container">
+            <h2>Network Topology Visualization</h2>
+            <div id="networkGraph"></div>
+        </div>
+
+        <div class="legend">
+            <h3>Legend</h3>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #FF6B6B; clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);"></div>
+                <span>Gateway</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #4ECDC4;"></div>
+                <span>PLC / ICS Device</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #95E1D3;"></div>
+                <span>Switch / Network Device</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #A8E6CF;"></div>
+                <span>Computer / Server</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #CCCCCC;"></div>
+                <span>Unknown Device</span>
+            </div>
+        </div>
+
+        <div class="device-details" id="deviceDetails" style="display: none;">
+            <h3>Device Details</h3>
+            <div id="deviceDetailsContent"></div>
+        </div>
+    </div>
+
+    <script>
+        let network = null;
+        let continuousMode = false;
+        let updateInterval = null;
+
+        // Initialize network visualization
+        function initNetwork() {
+            const container = document.getElementById('networkGraph');
+            const data = {
+                nodes: [],
+                edges: []
+            };
+
+            const options = {
+                nodes: {
+                    shape: 'dot',
+                    size: 20,
+                    font: {
+                        size: 14,
+                        color: '#333'
+                    },
+                    borderWidth: 2,
+                    shadow: true
+                },
+                edges: {
+                    width: 2,
+                    color: {
+                        color: '#848484',
+                        highlight: '#667eea'
+                    },
+                    smooth: {
+                        type: 'continuous'
+                    },
+                    shadow: true
+                },
+                physics: {
+                    enabled: true,
+                    stabilization: {
+                        iterations: 100
+                    },
+                    barnesHut: {
+                        gravitationalConstant: -2000,
+                        centralGravity: 0.3,
+                        springLength: 150,
+                        springConstant: 0.04
+                    }
+                },
+                interaction: {
+                    hover: true,
+                    tooltipDelay: 100,
+                    navigationButtons: true,
+                    keyboard: true
+                }
+            };
+
+            network = new vis.Network(container, data, options);
+
+            // Click event
+            network.on('click', function(params) {
+                if (params.nodes.length > 0) {
+                    const nodeId = params.nodes[0];
+                    showDeviceDetails(nodeId);
+                }
+            });
+        }
+
+        async function startScan() {
+            const networkInput = document.getElementById('networkInput').value;
+            const quickScan = document.getElementById('quickScan').checked;
+
+            document.getElementById('scanningIndicator').classList.add('active');
+
+            try {
+                const response = await fetch('/api/topology/scan', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        network: networkInput || null,
+                        quick: quickScan
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    // Start polling for updates
+                    startPolling();
+                } else {
+                    alert('Scan failed: ' + data.error);
+                    document.getElementById('scanningIndicator').classList.remove('active');
+                }
+            } catch (error) {
+                alert('Scan failed: ' + error.message);
+                document.getElementById('scanningIndicator').classList.remove('active');
+            }
+        }
+
+        function startPolling() {
+            if (updateInterval) {
+                clearInterval(updateInterval);
+            }
+
+            updateInterval = setInterval(updateTopology, 2000);
+            updateTopology(); // Initial update
+        }
+
+        function stopPolling() {
+            if (updateInterval) {
+                clearInterval(updateInterval);
+                updateInterval = null;
+            }
+        }
+
+        async function updateTopology() {
+            try {
+                const response = await fetch('/api/topology/data');
+                const data = await response.json();
+
+                if (data.success) {
+                    const topology = data.topology;
+
+                    // Update stats
+                    updateStats(topology.stats);
+
+                    // Update network graph
+                    if (network && topology.nodes.length > 0) {
+                        network.setData({
+                            nodes: topology.nodes,
+                            edges: topology.edges
+                        });
+
+                        document.getElementById('scanningIndicator').classList.remove('active');
+                        document.getElementById('statsBar').style.display = 'grid';
+                    }
+                }
+            } catch (error) {
+                console.error('Update error:', error);
+            }
+        }
+
+        function updateStats(stats) {
+            document.getElementById('totalDevices').textContent = stats.total_devices || 0;
+            document.getElementById('onlineDevices').textContent = stats.online_devices || 0;
+            document.getElementById('gatewayIP').textContent = stats.gateway || 'N/A';
+            document.getElementById('localIP').textContent = stats.local_ip || 'N/A';
+        }
+
+        async function toggleContinuous() {
+            const btn = document.getElementById('continuousBtn');
+
+            if (!continuousMode) {
+                // Start continuous
+                try {
+                    const response = await fetch('/api/topology/continuous', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'start', interval: 30 })
+                    });
+
+                    const data = await response.json();
+
+                    if (data.success) {
+                        continuousMode = true;
+                        btn.textContent = '⏸ Stop Continuous';
+                        btn.classList.remove('btn');
+                        btn.classList.add('btn-danger');
+                        startPolling();
+                    }
+                } catch (error) {
+                    alert('Failed to start continuous scan: ' + error.message);
+                }
+            } else {
+                // Stop continuous
+                try {
+                    const response = await fetch('/api/topology/continuous', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'stop' })
+                    });
+
+                    const data = await response.json();
+
+                    if (data.success) {
+                        continuousMode = false;
+                        btn.textContent = '🔄 Start Continuous';
+                        btn.classList.remove('btn-danger');
+                        btn.classList.add('btn');
+                        stopPolling();
+                    }
+                } catch (error) {
+                    alert('Failed to stop continuous scan: ' + error.message);
+                }
+            }
+        }
+
+        function stopScan() {
+            toggleContinuous();
+            stopPolling();
+            document.getElementById('scanningIndicator').classList.remove('active');
+        }
+
+        async function exportTopology(format) {
+            try {
+                const response = await fetch('/api/topology/export', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ format })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    alert(`Topology exported successfully to:\n${data.filepath}`);
+                } else {
+                    alert('Export failed: ' + data.error);
+                }
+            } catch (error) {
+                alert('Export failed: ' + error.message);
+            }
+        }
+
+        function showDeviceDetails(ip) {
+            // Fetch device details from topology data
+            fetch('/api/topology/data')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        const node = data.topology.nodes.find(n => n.id === ip);
+                        if (node) {
+                            const detailsDiv = document.getElementById('deviceDetails');
+                            const contentDiv = document.getElementById('deviceDetailsContent');
+
+                            contentDiv.innerHTML = `
+                                <table>
+                                    <tr><th>Property</th><th>Value</th></tr>
+                                    <tr><td>IP Address</td><td>${ip}</td></tr>
+                                    <tr><td>Device Type</td><td>${node.group}</td></tr>
+                                    <tr><td>Response Time</td><td>${node.response_time.toFixed(2)} ms</td></tr>
+                                    <tr><td>Status</td><td>${node.online ? '🟢 Online' : '🔴 Offline'}</td></tr>
+                                </table>
+                            `;
+
+                            detailsDiv.style.display = 'block';
+                            detailsDiv.scrollIntoView({ behavior: 'smooth' });
+                        }
+                    }
+                });
+        }
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            initNetwork();
+
+            // Check if there's existing topology data
+            updateTopology();
+        });
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', function() {
+            stopPolling();
+        });
+    </script>
+</body>
+</html>

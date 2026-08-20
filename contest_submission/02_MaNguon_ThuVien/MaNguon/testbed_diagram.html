@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ICS/OT Testbed — S7Comm Dataset Collection</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #fff;
+    font-family: 'Times New Roman', serif;
+    display: flex;
+    justify-content: center;
+    padding: 20px;
+  }
+  svg {
+    border: 1px solid #999;
+    background: #fff;
+  }
+  /* Legend table */
+  .legend {
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+  }
+</style>
+</head>
+<body>
+<svg width="950" height="680" xmlns="http://www.w3.org/2000/svg">
+
+  <!-- TITLE -->
+  <text x="475" y="28" text-anchor="middle" font-family="Times New Roman" font-size="16" font-weight="bold">ICS/OT Testbed — S7Comm Dataset Collection</text>
+  <text x="475" y="46" text-anchor="middle" font-family="Times New Roman" font-size="12">Subnet: 192.168.210.0/24 &nbsp;|&nbsp; Windows Environment</text>
+
+  <!-- ====================== SWITCH (center) ====================== -->
+  <rect x="380" y="270" width="190" height="60" rx="6" ry="6" fill="#e8e8e8" stroke="#333" stroke-width="1.5"/>
+  <text x="475" y="296" text-anchor="middle" font-family="Times New Roman" font-size="13" font-weight="bold">Layer-2 Switch</text>
+  <text x="475" y="315" text-anchor="middle" font-family="Times New Roman" font-size="11">(SPAN port enabled)</text>
+
+  <!-- ====================== PLC (top center) ====================== -->
+  <rect x="340" y="70" width="270" height="72" rx="6" ry="6" fill="#f0f0f0" stroke="#333" stroke-width="1.5"/>
+  <text x="475" y="94" text-anchor="middle" font-family="Times New Roman" font-size="13" font-weight="bold">Siemens S7-1200 PLC</text>
+  <text x="475" y="112" text-anchor="middle" font-family="Times New Roman" font-size="11">IP: 192.168.210.211</text>
+  <text x="475" y="130" text-anchor="middle" font-family="Times New Roman" font-size="11">Rack: 0 | Slot: 1 | Port: TCP/102</text>
+
+  <!-- ====================== ENGINEERING WS (left) ====================== -->
+  <rect x="40" y="240" width="250" height="85" rx="6" ry="6" fill="#f0f0f0" stroke="#333" stroke-width="1.5"/>
+  <text x="165" y="263" text-anchor="middle" font-family="Times New Roman" font-size="12" font-weight="bold">Engineering Workstation</text>
+  <text x="165" y="280" text-anchor="middle" font-family="Times New Roman" font-size="11">TIA Portal + WinCC HMI</text>
+  <text x="165" y="297" text-anchor="middle" font-family="Times New Roman" font-size="11">IP: 192.168.210.31</text>
+  <text x="165" y="314" text-anchor="middle" font-family="Times New Roman" font-size="10">(Windows PC)</text>
+
+  <!-- ====================== ATTACKER (right) ====================== -->
+  <rect x="660" y="220" width="250" height="120" rx="6" ry="6" fill="#f0f0f0" stroke="#333" stroke-width="1.5"/>
+  <text x="785" y="244" text-anchor="middle" font-family="Times New Roman" font-size="12" font-weight="bold">Attacker Machine</text>
+  <text x="785" y="261" text-anchor="middle" font-family="Times New Roman" font-size="11">s7pwn attack framework</text>
+  <text x="785" y="278" text-anchor="middle" font-family="Times New Roman" font-size="11">collect_dataset.py (tcpdump)</text>
+  <text x="785" y="295" text-anchor="middle" font-family="Times New Roman" font-size="11">label_logger.py</text>
+  <text x="785" y="312" text-anchor="middle" font-family="Times New Roman" font-size="11">IP: 192.168.210.32</text>
+  <text x="785" y="329" text-anchor="middle" font-family="Times New Roman" font-size="10">(Windows PC)</text>
+
+  <!-- ====================== DATASET OUTPUT (bottom right) ====================== -->
+  <rect x="660" y="430" width="250" height="65" rx="6" ry="6" fill="#e8e8e8" stroke="#333" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="785" y="455" text-anchor="middle" font-family="Times New Roman" font-size="12" font-weight="bold">Dataset Output</text>
+  <text x="785" y="473" text-anchor="middle" font-family="Times New Roman" font-size="11">raw_pcap/ + flows_csv/</text>
+  <text x="785" y="489" text-anchor="middle" font-family="Times New Roman" font-size="11">labeled_dataset.csv</text>
+
+  <!-- =================================================================
+       ARROWS
+  ================================================================= -->
+
+  <!-- ARROW 1: Eng WS <-> Switch (bidirectional, S7CommPlus) -->
+  <line x1="290" y1="280" x2="380" y2="290" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)" marker-start="url(#arrow-start)"/>
+  <text x="320" y="268" text-anchor="middle" font-family="Times New Roman" font-size="10" fill="#000">S7CommPlus</text>
+  <text x="320" y="281" text-anchor="middle" font-family="Times New Roman" font-size="10" fill="#000">TCP/102 (↔)</text>
+
+  <!-- ARROW 2: Switch <-> PLC (S7CommPlus from Eng WS) -->
+  <line x1="440" y1="270" x2="440" y2="142" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)" marker-start="url(#arrow-start)"/>
+
+  <!-- ARROW 3: Attacker -> Switch (S7Comm attack, solid red) -->
+  <line x1="660" y1="285" x2="570" y2="290" stroke="#000" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="618" y="273" text-anchor="middle" font-family="Times New Roman" font-size="10">S7Comm / TCP 102</text>
+  <text x="618" y="285" text-anchor="middle" font-family="Times New Roman" font-size="10">[ATTACK →]</text>
+
+  <!-- ARROW 4: Switch -> PLC (attack traffic from attacker) -->
+  <line x1="510" y1="270" x2="510" y2="142" stroke="#000" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- ARROW 5: Attacker -> PLC direct dashed (Profinet DCP - Layer 2 broadcast) -->
+  <!-- Profinet DCP is L2 broadcast so goes through switch -->
+  <line x1="670" y1="255" x2="580" y2="255" stroke="#555" stroke-width="1.5" stroke-dasharray="6,3" marker-end="url(#arrow-dash)"/>
+  <text x="622" y="243" text-anchor="middle" font-family="Times New Roman" font-size="10">Profinet DCP</text>
+  <text x="622" y="255" text-anchor="middle" font-family="Times New Roman" font-size="10">Ethernet L2 [SCAN→]</text>
+
+  <!-- ARROW 6: Switch -> PLC for Profinet -->
+  <line x1="475" y1="270" x2="475" y2="142" stroke="#555" stroke-width="1.5" stroke-dasharray="6,3" marker-end="url(#arrow-dash)"/>
+
+  <!-- ARROW 7: Switch SPAN -> Attacker (dashed, passive capture) -->
+  <line x1="570" y1="310" x2="660" y2="310" stroke="#555" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arrow-dash)"/>
+  <text x="612" y="325" text-anchor="middle" font-family="Times New Roman" font-size="10">SPAN mirror</text>
+  <text x="612" y="337" text-anchor="middle" font-family="Times New Roman" font-size="10">(passive tcpdump)</text>
+
+  <!-- ARROW 8: Attacker -> Dataset Output -->
+  <line x1="785" y1="340" x2="785" y2="430" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="835" y="388" text-anchor="middle" font-family="Times New Roman" font-size="10">collect_dataset.py</text>
+  <text x="835" y="400" text-anchor="middle" font-family="Times New Roman" font-size="10">label_logger.py</text>
+
+  <!-- =================================================================
+       ATTACK FLOW ANNOTATION BOX (bottom left)
+  ================================================================= -->
+  <rect x="40" y="430" width="560" height="200" rx="4" ry="4" fill="#fafafa" stroke="#555" stroke-width="1"/>
+  <text x="320" y="452" text-anchor="middle" font-family="Times New Roman" font-size="12" font-weight="bold">Attack Phases — MITRE ATT&amp;CK ICS</text>
+
+  <!-- Table header -->
+  <line x1="50" y1="460" x2="590" y2="460" stroke="#555" stroke-width="0.8"/>
+  <text x="110" y="475" text-anchor="middle" font-family="Courier New" font-size="11" font-weight="bold">Phase</text>
+  <text x="310" y="475" text-anchor="middle" font-family="Courier New" font-size="11" font-weight="bold">Protocol</text>
+  <text x="530" y="475" text-anchor="middle" font-family="Courier New" font-size="11" font-weight="bold">MITRE ID</text>
+  <line x1="50" y1="480" x2="590" y2="480" stroke="#555" stroke-width="0.8"/>
+
+  <!-- Table rows -->
+  <text x="110" y="495" text-anchor="middle" font-family="Courier New" font-size="11">SCAN</text>
+  <text x="310" y="495" text-anchor="middle" font-family="Courier New" font-size="11">Profinet DCP / Ethernet L2</text>
+  <text x="530" y="495" text-anchor="middle" font-family="Courier New" font-size="11">T0846</text>
+
+  <text x="110" y="511" text-anchor="middle" font-family="Courier New" font-size="11">ENUM_TAGS</text>
+  <text x="310" y="511" text-anchor="middle" font-family="Courier New" font-size="11">S7Comm / TCP 102</text>
+  <text x="530" y="511" text-anchor="middle" font-family="Courier New" font-size="11">T0861</text>
+
+  <text x="110" y="527" text-anchor="middle" font-family="Courier New" font-size="11">FLOOD (DoS)</text>
+  <text x="310" y="527" text-anchor="middle" font-family="Courier New" font-size="11">S7Comm / TCP 102</text>
+  <text x="530" y="527" text-anchor="middle" font-family="Courier New" font-size="11">T0814</text>
+
+  <text x="110" y="543" text-anchor="middle" font-family="Courier New" font-size="11">RWRITE</text>
+  <text x="310" y="543" text-anchor="middle" font-family="Courier New" font-size="11">S7Comm / TCP 102</text>
+  <text x="530" y="543" text-anchor="middle" font-family="Courier New" font-size="11">T0836</text>
+
+  <text x="110" y="559" text-anchor="middle" font-family="Courier New" font-size="11">SPOOF</text>
+  <text x="310" y="559" text-anchor="middle" font-family="Courier New" font-size="11">S7Comm / TCP 102</text>
+  <text x="530" y="559" text-anchor="middle" font-family="Courier New" font-size="11">T0836</text>
+
+  <text x="110" y="575" text-anchor="middle" font-family="Courier New" font-size="11">REPLAY</text>
+  <text x="310" y="575" text-anchor="middle" font-family="Courier New" font-size="11">S7Comm / TCP 102</text>
+  <text x="530" y="575" text-anchor="middle" font-family="Courier New" font-size="11">T0843</text>
+
+  <text x="110" y="591" text-anchor="middle" font-family="Courier New" font-size="11">CPU_CONTROL</text>
+  <text x="310" y="591" text-anchor="middle" font-family="Courier New" font-size="11">S7Comm / TCP 102</text>
+  <text x="530" y="591" text-anchor="middle" font-family="Courier New" font-size="11">T0816</text>
+
+  <text x="110" y="607" text-anchor="middle" font-family="Courier New" font-size="11">FUZZ</text>
+  <text x="310" y="607" text-anchor="middle" font-family="Courier New" font-size="11">S7Comm / TCP 102 (malformed PDU)</text>
+  <text x="530" y="607" text-anchor="middle" font-family="Courier New" font-size="11">T0819</text>
+
+  <line x1="50" y1="615" x2="590" y2="615" stroke="#555" stroke-width="0.8"/>
+  <text x="320" y="625" text-anchor="middle" font-family="Times New Roman" font-size="10" font-style="italic">All attacks initiated from Attacker (192.168.210.32) → Switch → PLC (192.168.210.211)</text>
+
+  <!-- =================================================================
+       ARROW MARKER DEFINITIONS
+  ================================================================= -->
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#333"/>
+    </marker>
+    <marker id="arrow-start" markerWidth="8" markerHeight="8" refX="2" refY="3" orient="auto-start-reverse">
+      <path d="M0,0 L0,6 L8,3 z" fill="#333"/>
+    </marker>
+    <marker id="arrow-dash" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#555"/>
+    </marker>
+  </defs>
+
+  <!-- VERTICAL DIVIDER between left and right of switch area for clarity -->
+  <!-- Attack label annotation near arrow 3&4 -->
+  <rect x="470" y="170" width="155" height="48" rx="3" ry="3" fill="#fff" stroke="#aaa" stroke-width="0.8" stroke-dasharray="3,2"/>
+  <text x="548" y="187" text-anchor="middle" font-family="Times New Roman" font-size="9" font-style="italic">Attacker → PLC</text>
+  <text x="548" y="200" text-anchor="middle" font-family="Times New Roman" font-size="9">S7Comm TCP/102:</text>
+  <text x="548" y="212" text-anchor="middle" font-family="Times New Roman" font-size="9">FLOOD/RWRITE/FUZZ/SPOOF</text>
+
+  <!-- Eng WS -> PLC label annotation -->
+  <rect x="330" y="170" width="135" height="36" rx="3" ry="3" fill="#fff" stroke="#aaa" stroke-width="0.8" stroke-dasharray="3,2"/>
+  <text x="397" y="187" text-anchor="middle" font-family="Times New Roman" font-size="9" font-style="italic">WinCC/TIA → PLC</text>
+  <text x="397" y="200" text-anchor="middle" font-family="Times New Roman" font-size="9">S7CommPlus TCP/102</text>
+
+</svg>
+</body>
+</html>
