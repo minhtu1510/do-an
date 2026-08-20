@@ -6,13 +6,32 @@ handling a subscription flood aimed at the PLC, the gateway still has to
 process every notification it receives).
 """
 
+import time
+
 import psutil
+
+_last_net = {"t": None, "sent": 0, "recv": 0}
 
 
 def sample() -> dict:
+    disk = psutil.disk_usage("/")
+    net = psutil.net_io_counters()
+    now = time.monotonic()
+
+    sent_rate = recv_rate = 0.0
+    if _last_net["t"] is not None:
+        dt = now - _last_net["t"]
+        if dt > 0:
+            sent_rate = max(0.0, (net.bytes_sent - _last_net["sent"]) / dt)
+            recv_rate = max(0.0, (net.bytes_recv - _last_net["recv"]) / dt)
+    _last_net.update(t=now, sent=net.bytes_sent, recv=net.bytes_recv)
+
     return {
         "cpu_percent": psutil.cpu_percent(interval=None),
         "memory_percent": psutil.virtual_memory().percent,
+        "disk_percent": disk.percent,
+        "net_sent_bytes_per_sec": round(sent_rate, 1),
+        "net_recv_bytes_per_sec": round(recv_rate, 1),
     }
 
 

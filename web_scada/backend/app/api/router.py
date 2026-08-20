@@ -48,9 +48,16 @@ async def plc_status(_user=Depends(require_role("viewer"))):
 
 @api_router.get("/system/resources")
 async def system_resources(_user=Depends(require_role("viewer"))):
-    """CPU/RAM of the machine running this backend (the gateway host) — not the
-    PLC, which has no general-purpose OS to sample. See app/system/service.py."""
-    return {**sample_system_resources(), "timestamp": datetime.now(TZ).isoformat()}
+    """CPU/RAM/disk/network of the machine running this backend (the gateway
+    host) — not the PLC, which has no general-purpose OS to sample.
+    See app/system/service.py."""
+    from ..websocket.manager import ws_manager
+
+    return {
+        **sample_system_resources(),
+        "ws_connections": ws_manager.count,
+        "timestamp": datetime.now(TZ).isoformat(),
+    }
 
 
 @api_router.get("/tags")

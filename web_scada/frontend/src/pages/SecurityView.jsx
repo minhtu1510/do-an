@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  ShieldCheck, ExternalLink, Radio, Play, AlertTriangle, Activity,
+  ShieldCheck, ExternalLink, Radio, AlertTriangle, Activity,
   Radar, Terminal, LockKeyhole, RefreshCw, Database, Clock3,
-  CircleDot, CheckCircle2, XCircle, FileWarning, Network,
+  CircleDot, CheckCircle2, XCircle, FileWarning, Network, ChevronDown,
 } from "lucide-react";
 import { fetchSecurityStatus, fetchScenarioResults, fetchEvents, fetchSecurityModeComparator } from "../services/api";
 import { connectWebSocket } from "../services/websocket";
 import PageHeader from "../components/PageHeader";
 import ExportCsvButton from "../components/ExportCsvButton";
+import NotConfiguredNotice from "../components/NotConfiguredNotice";
 
 function isSecurityEvent(event) {
   return event.event_type?.startsWith("ATTACK_") || event.severity === "ERROR";
@@ -317,17 +318,34 @@ function TelemetryRow({ icon: Icon, label, value, tone }) {
 }
 
 function ScenarioConsole({ results, executed, total }) {
+  const hasData = results.length > 0;
+  const [open, setOpen] = useState(hasData);
+  useEffect(() => {
+    if (hasData) setOpen(true);
+  }, [hasData]);
+
   return (
     <section className="ids-card overflow-hidden">
       <PanelHeader
         icon={Terminal}
         title="Attack scenario evidence"
         subtitle="Live scenario outcomes with MITRE ATT&CK mapping and captured evidence"
-        right={<span className="ids-badge border-cyan-400/15 bg-cyan-400/[0.07] font-mono text-cyan-300">{executed}/{total} executed</span>}
+        right={
+          <div className="flex items-center gap-2">
+            <span className="ids-badge border-cyan-400/15 bg-cyan-400/[0.07] font-mono text-cyan-300">{executed}/{total} executed</span>
+            <CollapseToggle open={open} onClick={() => setOpen((v) => !v)} />
+          </div>
+        }
       />
 
-      {results.length === 0 ? (
-        <EmptyState icon={Play} title="No scenario runs received" text="Run tests/day8/run_day8.py --execute while the backend is available to populate this console." />
+      {open && (results.length === 0 ? (
+        <div className="p-5">
+          <NotConfiguredNotice
+            title="Chưa nhận được kịch bản tấn công nào"
+            message="Chạy bộ kịch bản Day 8 trong lúc backend đang bật để console này có dữ liệu thật."
+            detail="Lệnh chạy: python tests/day8/run_day8.py --execute (chạy trong lúc backend đang bật để kết quả tự đẩy vào đây qua API)."
+          />
+        </div>
       ) : (
         <div className="overflow-x-auto">
           <div className="min-w-[880px]">
@@ -339,8 +357,20 @@ function ScenarioConsole({ results, executed, total }) {
             </div>
           </div>
         </div>
-      )}
+      ))}
     </section>
+  );
+}
+
+function CollapseToggle({ open, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-slate-800 bg-slate-950/50 text-slate-500 transition-colors hover:border-slate-700 hover:text-slate-300"
+      title={open ? "Thu gọn" : "Mở rộng"}
+    >
+      <ChevronDown size={13} className={`transition-transform ${open ? "" : "-rotate-90"}`} />
+    </button>
   );
 }
 
@@ -392,21 +422,33 @@ function SecurityModeComparator({ comparator }) {
     return recorded;
   }, [rows, modes]);
 
+  const hasData = rows.length > 0;
+  const [open, setOpen] = useState(hasData);
+  useEffect(() => {
+    if (hasData) setOpen(true);
+  }, [hasData]);
+
   return (
     <section className="ids-card overflow-hidden">
       <PanelHeader
         icon={LockKeyhole}
         title="OPC UA security-mode comparator"
         subtitle="Real scenario outcomes grouped by the operator-provided OPCUA_SECURITY_MODE tag"
-        right={<span className="ids-badge border-slate-700 bg-slate-950/50 text-slate-400">{summary} recorded outcome{summary === 1 ? "" : "s"}</span>}
+        right={
+          <div className="flex items-center gap-2">
+            <span className="ids-badge border-slate-700 bg-slate-950/50 text-slate-400">{summary} recorded outcome{summary === 1 ? "" : "s"}</span>
+            <CollapseToggle open={open} onClick={() => setOpen((v) => !v)} />
+          </div>
+        }
       />
 
-      {rows.length === 0 ? (
+      {!open ? null : rows.length === 0 ? (
         <div className="p-5">
-          <div className="rounded-xl border border-amber-400/10 bg-amber-400/[0.04] p-4 text-xs leading-relaxed text-slate-500">
-            <div className="mb-2 flex items-center gap-2 font-medium text-amber-300"><AlertTriangle size={13} />No tagged security-mode runs yet</div>
-            Run OPC UA scenarios once per configured mode. Example: <code className="rounded bg-slate-950 px-1.5 py-0.5 font-mono text-slate-300">OPCUA_SECURITY_MODE=Anonymous python tests/day8/run_day8.py --group opcua --execute --allow-gated</code>. Reconfigure the server and repeat for Basic256Sha256 to compare real outcomes.
-          </div>
+          <NotConfiguredNotice
+            title="Chưa có dữ liệu so sánh theo security mode"
+            message="Chạy cùng bộ kịch bản OPC UA ở từng chế độ bảo mật, gắn nhãn mode tương ứng, để bảng này so sánh được kết quả thật."
+            detail={"Ví dụ chạy mode Anonymous:\nOPCUA_SECURITY_MODE=Anonymous python tests/day8/run_day8.py --group opcua --execute --allow-gated\n\nSau đó cấu hình lại server sang Basic256Sha256 và chạy lại với OPCUA_SECURITY_MODE=Basic256Sha256 để có dữ liệu đối chiếu."}
+          />
         </div>
       ) : (
         <div className="overflow-x-auto">

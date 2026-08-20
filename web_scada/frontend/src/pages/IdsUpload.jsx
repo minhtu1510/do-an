@@ -1,17 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Bar, BarChart, CartesianGrid, Cell, ComposedChart, Legend, Line,
+  Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ComposedChart, Legend, Line,
   ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis,
 } from "recharts";
 import { jsPDF } from "jspdf";
 import html2canvas from "html2canvas";
 import {
-  UploadCloud, Play, Pause, RotateCcw, FileDown, Loader2, AlertTriangle,
+  UploadCloud, Play, Pause, RotateCcw, FileDown, Loader2, AlertTriangle, X,
 } from "lucide-react";
 import PageHeader from "../components/PageHeader";
 import Gauge from "../components/Gauge";
 import Sparkline from "../components/Sparkline";
+import NotConfiguredNotice from "../components/NotConfiguredNotice";
 import { analyzeIdsPcap, fetchIdsStatus, fetchProcessHistory } from "../services/api";
+import { idsUploadStore } from "./idsUploadPersist";
 
 // Same validated categorical order used in Trends.jsx — fixed, never cycled.
 const CATEGORICAL = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"];
@@ -21,9 +23,9 @@ const ORANGE = "#d95926";
 const AQUA = "#199e70";
 const ATTACK_RED = "#e66767";
 const GOOD_GREEN = "#0ca30c";
-const GRID = "#2c2c2a";
-const AXIS = "#383835";
-const MUTED = "#898781";
+const GRID = "#1e293b";
+const AXIS = "#475569";
+const MUTED = "#64748b";
 
 function colorFor(label, colorMap) {
   if (label === "BENIGN") return BENIGN_COLOR;
@@ -49,6 +51,29 @@ function bucketTimeline(timeline, bucketCount = 16) {
     if (p.prediction !== "BENIGN") buckets[idx].attack += 1;
   });
   return buckets.map((b) => ({ value: b.count, attackRatio: b.count > 0 ? (b.attack / b.count) * 100 : 0 }));
+}
+
+// Same idea as bucketTimeline, but keyed by real wall-clock time (not bucket
+// index) so it can share an x-axis with the Fusion Chart — a genuine
+// "attack density over time" panel, the kind of threat-activity trend line
+// real ICS IDS products lead with, built only from timestamps already returned.
+function bucketTimelineByTime(timeline, tMin, tMax, bucketCount = 24) {
+  if (!timeline || timeline.length === 0 || tMax <= tMin) return [];
+  const span = tMax - tMin;
+  const bucketMs = span / bucketCount;
+  const buckets = Array.from({ length: bucketCount }, (_, i) => ({
+    t: tMin + (i + 0.5) * bucketMs,
+    count: 0,
+    attack: 0,
+  }));
+  timeline.forEach((p) => {
+    const idx = Math.min(bucketCount - 1, Math.floor((p.timestamp_ms - tMin) / bucketMs));
+    if (idx >= 0) {
+      buckets[idx].count += 1;
+      if (p.prediction !== "BENIGN") buckets[idx].attack += 1;
+    }
+  });
+  return buckets.map((b) => ({ t: b.t, attackRatio: b.count > 0 ? (b.attack / b.count) * 100 : 0, count: b.count }));
 }
 
 // Recomputes the same aggregates the backend returns (prediction_counts,
@@ -120,14 +145,23 @@ function beep(ctx) {
 }
 
 export default function IdsUpload() {
-  const [status, setStatus] = useState(null);
-  const [file, setFile] = useState(null);
-  const [plcIp, setPlcIp] = useState("192.168.210.211");
-  const [windowS, setWindowS] = useState(2.0);
+  // file/result/etc are seeded from — and written back to — a module-level
+  // store so switching pages and coming back doesn't lose the pcap you
+  // picked or the analysis you already ran (see idsUploadPersist.js).
+  const [status, setStatusState] = useState(idsUploadStore.status);
+  const setStatus = (v) => { idsUploadStore.status = v; setStatusState(v); };
+  const [file, setFileState] = useState(idsUploadStore.file);
+  const setFile = (v) => { idsUploadStore.file = v; setFileState(v); };
+  const [plcIp, setPlcIpState] = useState(idsUploadStore.plcIp);
+  const setPlcIp = (v) => { idsUploadStore.plcIp = v; setPlcIpState(v); };
+  const [windowS, setWindowSState] = useState(idsUploadStore.windowS);
+  const setWindowS = (v) => { idsUploadStore.windowS = v; setWindowSState(v); };
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
-  const [result, setResult] = useState(null);
-  const [historian, setHistorian] = useState(null);
+  const [result, setResultState] = useState(idsUploadStore.result);
+  const setResult = (v) => { idsUploadStore.result = v; setResultState(v); };
+  const [historian, setHistorianState] = useState(idsUploadStore.historian);
+  const setHistorian = (v) => { idsUploadStore.historian = v; setHistorianState(v); };
 
   // --- Playback engine state ---
   const [virtualMs, setVirtualMs] = useState(0);
@@ -242,6 +276,7 @@ export default function IdsUpload() {
   const live = useMemo(() => aggregateFromPoints(revealedTimeline), [revealedTimeline]);
   const colorMap = useMemo(() => new Map(), [result]);
   const buckets = useMemo(() => bucketTimeline(result?.timeline), [result]);
+  const densitySeries = useMemo(() => bucketTimelineByTime(revealedTimeline, tMin, tMax), [revealedTimeline, tMin, tMax]);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -258,6 +293,15 @@ export default function IdsUpload() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function handleClearAll() {
+    setFile(null);
+    setResult(null);
+    setHistorian(null);
+    setError(null);
+    setPlcIp("192.168.210.211");
+    setWindowS(2.0);
   }
 
   const predictionRows = Object.entries(live.prediction_counts).sort((a, b) => (a[0] === "BENIGN" ? -1 : b[0] === "BENIGN" ? 1 : b[1] - a[1]));
@@ -293,50 +337,57 @@ export default function IdsUpload() {
 
   return (
     <div className="p-6 space-y-6">
-      <PageHeader
-        icon={UploadCloud}
-        title="IDS — Upload Pcap"
-        subtitle="Trích xuất đặc trưng (extract_s7_features.py) rồi chấm điểm qua IDS 3 lớp (train_eval.py) — chỉ hiện kết quả thật từ model đã train."
-      />
+      <PageHeader icon={UploadCloud} title="IDS — Upload Pcap" />
 
       {status && !status.configured && (
-        <div className="flex items-start gap-2 rounded-lg border border-yellow-900/50 bg-yellow-950/20 px-4 py-3 text-xs text-yellow-500">
-          <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-          <span>
-            Chưa có model đã train tại <code className="rounded bg-gray-900 px-1">{status.model_dir}</code>. Chạy{" "}
-            <code className="rounded bg-gray-900 px-1">python train_eval.py --dataset &lt;day1_6_labeled.csv&gt; --mode train --output {status.model_dir}</code>{" "}
-            trên dữ liệu Day 1-6 thật trước.
-          </span>
-        </div>
+        <NotConfiguredNotice
+          title="Model AI chưa được huấn luyện"
+          message="Cần train trên dữ liệu Day 1-6 thật trước khi phân tích pcap ở đây."
+          detail={`Thư mục model: ${status.model_dir}\n\nLệnh train:\npython train_eval.py --dataset <day1_6_labeled.csv> --mode train --output "${status.model_dir}"`}
+        />
       )}
 
-      <form onSubmit={handleSubmit} className="flex flex-wrap items-end gap-3 rounded-lg border border-gray-700 bg-gray-800 p-4 shadow-sm shadow-black/20">
-        <label className="flex flex-col gap-1">
-          <span className="text-xs uppercase text-gray-500">File pcap/pcapng</span>
-          <input
-            type="file"
-            accept=".pcap,.pcapng"
-            onChange={(e) => setFile(e.target.files?.[0] || null)}
-            className="text-xs text-gray-300 file:mr-2 file:rounded file:border-0 file:bg-gray-900 file:px-3 file:py-1.5 file:text-xs file:text-gray-300 file:transition-colors file:hover:bg-gray-800"
-          />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-xs uppercase text-gray-500">PLC IP</span>
-          <input value={plcIp} onChange={(e) => setPlcIp(e.target.value)} className="rounded border border-gray-700 bg-gray-950 px-3 py-1.5 text-sm text-gray-200 outline-none transition-colors focus:border-blue-600" />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-xs uppercase text-gray-500">Window (s)</span>
-          <input type="number" step="0.5" value={windowS} onChange={(e) => setWindowS(e.target.value)} className="w-24 rounded border border-gray-700 bg-gray-950 px-3 py-1.5 text-sm text-gray-200 outline-none transition-colors focus:border-blue-600" />
-          <span className="text-[10px] text-gray-600">Model hiện tại train trên cửa sổ 2s — đổi giá trị này sẽ lệch phân bố đặc trưng.</span>
-        </label>
-        <button
-          type="submit"
-          disabled={busy || !file}
-          className="flex items-center gap-1.5 rounded bg-blue-600 px-4 py-1.5 text-sm font-semibold text-white shadow-sm shadow-blue-950 transition-colors hover:bg-blue-500 disabled:opacity-50"
-        >
-          {busy && <Loader2 size={14} className="animate-spin" />}
-          {busy ? "Đang phân tích..." : "Phân tích"}
-        </button>
+      <form onSubmit={handleSubmit} className="rounded-lg border border-slate-700 bg-slate-800 p-4 shadow-sm shadow-black/20">
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="flex flex-col gap-1">
+            <span className="text-xs uppercase text-slate-500">File pcap/pcapng</span>
+            <input
+              type="file"
+              accept=".pcap,.pcapng"
+              onChange={(e) => setFile(e.target.files?.[0] || null)}
+              className="text-xs text-slate-300 file:mr-2 file:rounded file:border-0 file:bg-slate-900 file:px-3 file:py-1.5 file:text-xs file:text-slate-300 file:transition-colors file:hover:bg-slate-800"
+            />
+            {file && <span className="text-[10px] text-cyan-400">Đang giữ: {file.name}</span>}
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs uppercase text-slate-500">PLC IP</span>
+            <input value={plcIp} onChange={(e) => setPlcIp(e.target.value)} className="rounded border border-slate-700 bg-slate-950 px-3 py-1.5 text-sm text-slate-200 outline-none transition-colors focus:border-blue-600" />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs uppercase text-slate-500">Window (s)</span>
+            <input type="number" step="0.5" value={windowS} onChange={(e) => setWindowS(e.target.value)} className="w-24 rounded border border-slate-700 bg-slate-950 px-3 py-1.5 text-sm text-slate-200 outline-none transition-colors focus:border-blue-600" />
+          </label>
+          <button
+            type="submit"
+            disabled={busy || !file}
+            className="flex items-center gap-1.5 rounded bg-blue-600 px-4 py-1.5 text-sm font-semibold text-white shadow-sm shadow-blue-950 transition-colors hover:bg-blue-500 disabled:opacity-50"
+          >
+            {busy && <Loader2 size={14} className="animate-spin" />}
+            {busy ? "Đang phân tích..." : "Phân tích"}
+          </button>
+          {(file || result) && (
+            <button
+              type="button"
+              onClick={handleClearAll}
+              disabled={busy}
+              className="flex items-center gap-1.5 rounded border border-slate-700 px-3 py-1.5 text-xs text-slate-400 transition-colors hover:border-red-500/50 hover:text-red-300 disabled:opacity-50"
+            >
+              <X size={12} />
+              Xoá / Reset
+            </button>
+          )}
+        </div>
+        <div className="mt-2 text-[10px] text-slate-600">Model hiện tại train trên cửa sổ 2s — đổi giá trị này sẽ lệch phân bố đặc trưng.</div>
       </form>
 
       {error && (
@@ -352,7 +403,7 @@ export default function IdsUpload() {
             <button
               onClick={handleExportPdf}
               disabled={exportingPdf}
-              className="flex items-center gap-1.5 rounded border border-gray-700 bg-gray-800 px-3 py-1.5 text-xs font-semibold text-gray-300 transition-colors hover:border-blue-600 hover:text-blue-300 disabled:opacity-50"
+              className="flex items-center gap-1.5 rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-300 transition-colors hover:border-blue-600 hover:text-blue-300 disabled:opacity-50"
             >
               {exportingPdf ? <Loader2 size={13} className="animate-spin" /> : <FileDown size={13} />}
               {exportingPdf ? "Đang xuất..." : "Xuất báo cáo PDF"}
@@ -360,7 +411,7 @@ export default function IdsUpload() {
           </div>
 
           {canPlay && (
-            <div className="flex flex-wrap items-center gap-3 rounded-lg border border-gray-700 bg-gray-800 p-4 shadow-sm shadow-black/20 animate-fade-in">
+            <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-700 bg-slate-800 p-4 shadow-sm shadow-black/20 animate-fade-in">
               <button
                 onClick={playing ? handlePause : handlePlay}
                 className="flex items-center gap-1.5 rounded bg-blue-600 px-4 py-1.5 text-sm font-semibold text-white shadow-sm shadow-blue-950 transition-colors hover:bg-blue-500"
@@ -368,14 +419,14 @@ export default function IdsUpload() {
                 {playing ? <Pause size={14} /> : <Play size={14} />}
                 {playing ? "Tạm dừng" : "Phát lại"}
               </button>
-              <button onClick={handleReset} className="flex items-center gap-1.5 rounded border border-gray-700 px-3 py-1.5 text-xs text-gray-400 transition-colors hover:border-gray-600 hover:text-gray-200">
+              <button onClick={handleReset} className="flex items-center gap-1.5 rounded border border-slate-700 px-3 py-1.5 text-xs text-slate-400 transition-colors hover:border-slate-600 hover:text-slate-200">
                 <RotateCcw size={12} />
                 Về đầu
               </button>
               <select
                 value={speed}
                 onChange={(e) => setSpeed(Number(e.target.value))}
-                className="rounded border border-gray-700 bg-gray-950 px-2 py-1.5 text-xs text-gray-300 transition-colors hover:border-gray-600"
+                className="rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-300 transition-colors hover:border-slate-600"
               >
                 <option value={1}>x1</option>
                 <option value={5}>x5</option>
@@ -390,13 +441,13 @@ export default function IdsUpload() {
                 onChange={handleSeek}
                 className="h-1.5 flex-1 accent-blue-500"
               />
-              <div className="w-36 shrink-0 text-right font-mono text-xs text-gray-400">
+              <div className="w-36 shrink-0 text-right font-mono text-xs text-slate-400">
                 {formatTime(currentAbsoluteMs)} / {formatTime(tMax)}
               </div>
             </div>
           )}
 
-          <div ref={reportRef} className="space-y-6 bg-gray-950 p-1">
+          <div ref={reportRef} className="space-y-6 bg-slate-950 p-1">
           {/* Z-pattern: most important numbers top-left, gauges top-right */}
           <div className="grid gap-4 lg:grid-cols-[1fr_1fr_auto_auto]">
             <StatTile label="Tổng số flow" value={live.total_flows} accent={CATEGORICAL[0]}>
@@ -405,10 +456,10 @@ export default function IdsUpload() {
             <StatTile label="Flow bị gắn nhãn tấn công" value={live.attack_flows} color={live.attack_flows > 0 ? "text-red-400" : "text-green-400"} accent={attackColor}>
               <Sparkline data={buckets} dataKey="attackRatio" color={attackColor} />
             </StatTile>
-            <div className="flex items-center justify-center rounded-lg border border-gray-700 bg-gray-800 p-4 shadow-sm shadow-black/20">
+            <div className="flex items-center justify-center rounded-lg border border-slate-700 bg-slate-800 p-4 shadow-sm shadow-black/20">
               <Gauge value={attackPct} color={attackColor} label="Tỷ lệ tấn công" />
             </div>
-            <div className="flex flex-col items-center justify-center rounded-lg border border-gray-700 bg-gray-800 p-4 shadow-sm shadow-black/20">
+            <div className="flex flex-col items-center justify-center rounded-lg border border-slate-700 bg-slate-800 p-4 shadow-sm shadow-black/20">
               <Gauge value={currentFlow ? currentFlow.confidence * 100 : 0} color={currentColor} label="Confidence hiện tại" />
               {currentFlow && (
                 <span className="mt-1 rounded px-2 py-0.5 text-[10px] font-bold" style={{ backgroundColor: `${colorFor(currentFlow.prediction, colorMap)}33`, color: colorFor(currentFlow.prediction, colorMap) }}>
@@ -425,7 +476,7 @@ export default function IdsUpload() {
                 <XAxis dataKey="t" type="number" domain={fusionSeries.domain} tickFormatter={formatTime} stroke={AXIS} tick={{ fill: MUTED, fontSize: 11 }} />
                 <YAxis yAxisId="left" stroke={AXIS} tick={{ fill: MUTED, fontSize: 11 }} label={{ value: "ms", angle: -90, position: "insideLeft", fill: MUTED, fontSize: 11 }} />
                 <YAxis yAxisId="right" orientation="right" domain={[0, 100]} stroke={AXIS} tick={{ fill: MUTED, fontSize: 11 }} label={{ value: "%", angle: 90, position: "insideRight", fill: MUTED, fontSize: 11 }} />
-                <Tooltip contentStyle={{ background: "#111827", border: "1px solid #374151", fontSize: 12 }} labelFormatter={formatTime} />
+                <Tooltip contentStyle={{ background: "#0f172a", border: "1px solid #334155", fontSize: 12 }} labelFormatter={formatTime} />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
                 <Line yAxisId="left" type="stepAfter" dataKey="cd1" name="CD1 (ms)" stroke={BLUE} strokeWidth={2} dot={false} connectNulls />
                 <Line yAxisId="left" type="stepAfter" dataKey="cd2" name="CD2 (ms)" stroke={ORANGE} strokeWidth={2} dot={false} connectNulls />
@@ -435,9 +486,27 @@ export default function IdsUpload() {
             </ChartPanel>
           )}
           {historian && !fusionSeries?.hasOverlap && (
-            <div className="rounded-lg border border-gray-700 bg-gray-800 p-4 text-xs text-gray-500 shadow-sm shadow-black/20">
+            <div className="rounded-lg border border-slate-700 bg-slate-800 p-4 text-xs text-slate-500 shadow-sm shadow-black/20">
               Không có dữ liệu historian trùng khung thời gian với file pcap này — Fusion Chart chỉ vẽ khi Trends historian thật sự đang ghi trong lúc pcap được thu (không suy diễn/nội suy).
             </div>
+          )}
+
+          {densitySeries.length > 0 && (
+            <ChartPanel title="Mật độ tấn công theo thời gian" subtitle="Tỷ lệ % flow bị gắn nhãn tấn công trong từng lát thời gian — nơi đường càng cao, tấn công càng dồn dập lúc đó.">
+              <AreaChart data={densitySeries} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="densityFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={ATTACK_RED} stopOpacity={0.35} />
+                    <stop offset="100%" stopColor={ATTACK_RED} stopOpacity={0.02} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="t" type="number" domain={[tMin, tMax]} tickFormatter={formatTime} stroke={AXIS} tick={{ fill: MUTED, fontSize: 11 }} />
+                <YAxis domain={[0, 100]} stroke={AXIS} tick={{ fill: MUTED, fontSize: 11 }} label={{ value: "%", angle: -90, position: "insideLeft", fill: MUTED, fontSize: 11 }} />
+                <Tooltip contentStyle={{ background: "#0f172a", border: "1px solid #334155", fontSize: 12 }} labelFormatter={formatTime} formatter={(v) => [`${v.toFixed(1)}%`, "Tỷ lệ tấn công"]} />
+                <Area type="monotone" dataKey="attackRatio" stroke={ATTACK_RED} strokeWidth={2} fill="url(#densityFill)" />
+              </AreaChart>
+            </ChartPanel>
           )}
 
           <div className="grid gap-4 lg:grid-cols-2">
@@ -446,7 +515,7 @@ export default function IdsUpload() {
                 <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="label" stroke={AXIS} tick={{ fill: MUTED, fontSize: 11 }} />
                 <YAxis stroke={AXIS} tick={{ fill: MUTED, fontSize: 11 }} allowDecimals={false} />
-                <Tooltip contentStyle={{ background: "#111827", border: "1px solid #374151", fontSize: 12 }} />
+                <Tooltip contentStyle={{ background: "#0f172a", border: "1px solid #334155", fontSize: 12 }} />
                 <Bar dataKey="count">
                   {predictionRows.map(([label], i) => <Cell key={i} fill={colorFor(label, colorMap)} />)}
                 </Bar>
@@ -458,7 +527,7 @@ export default function IdsUpload() {
                 <CartesianGrid stroke={GRID} strokeDasharray="3 3" horizontal={false} />
                 <XAxis type="number" stroke={AXIS} tick={{ fill: MUTED, fontSize: 11 }} allowDecimals={false} />
                 <YAxis type="category" dataKey="layer" stroke={AXIS} tick={{ fill: MUTED, fontSize: 11 }} width={160} />
-                <Tooltip contentStyle={{ background: "#111827", border: "1px solid #374151", fontSize: 12 }} />
+                <Tooltip contentStyle={{ background: "#0f172a", border: "1px solid #334155", fontSize: 12 }} />
                 <Bar dataKey="count" fill={CATEGORICAL[0]} />
               </BarChart>
             </ChartPanel>
@@ -470,21 +539,21 @@ export default function IdsUpload() {
                 <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="range" stroke={AXIS} tick={{ fill: MUTED, fontSize: 10 }} />
                 <YAxis stroke={AXIS} tick={{ fill: MUTED, fontSize: 11 }} allowDecimals={false} />
-                <Tooltip contentStyle={{ background: "#111827", border: "1px solid #374151", fontSize: 12 }} />
+                <Tooltip contentStyle={{ background: "#0f172a", border: "1px solid #334155", fontSize: 12 }} />
                 <Bar dataKey="count" fill={CATEGORICAL[0]} />
               </BarChart>
             </ChartPanel>
 
             <ChartPanel title="Timeline cảnh báo (swimlane)" subtitle="Mỗi hàng là 1 loại nhãn — chỉ hiện flow không phải BENIGN, theo đúng thời điểm">
               {timelineAlerts.length === 0 ? (
-                <div className="flex h-full items-center justify-center text-sm text-gray-500">Chưa có cảnh báo nào trong đoạn đang phát.</div>
+                <div className="flex h-full items-center justify-center text-sm text-slate-500">Chưa có cảnh báo nào trong đoạn đang phát.</div>
               ) : (
                 <ScatterChart margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
                   <CartesianGrid stroke={GRID} strokeDasharray="3 3" />
                   <XAxis dataKey="timestamp_ms" type="number" domain={[tMin, tMax]} tickFormatter={formatTime} stroke={AXIS} tick={{ fill: MUTED, fontSize: 11 }} />
                   <YAxis type="category" dataKey="prediction" allowDuplicatedCategory={false} stroke={AXIS} tick={{ fill: MUTED, fontSize: 11 }} width={90} />
                   <Tooltip
-                    contentStyle={{ background: "#111827", border: "1px solid #374151", fontSize: 12 }}
+                    contentStyle={{ background: "#0f172a", border: "1px solid #334155", fontSize: 12 }}
                     labelFormatter={formatTime}
                     formatter={(value, name, props) => [`${(props.payload.confidence * 100).toFixed(1)}%`, props.payload.prediction]}
                   />
@@ -496,31 +565,31 @@ export default function IdsUpload() {
             </ChartPanel>
           </div>
 
-          <div className="overflow-hidden rounded-lg border border-gray-700 bg-gray-800 shadow-sm shadow-black/20">
-            <div className="border-b border-gray-700 px-4 py-3 text-sm font-semibold text-gray-200">
+          <div className="overflow-hidden rounded-lg border border-slate-700 bg-slate-800 shadow-sm shadow-black/20">
+            <div className="border-b border-slate-700 px-4 py-3 text-sm font-semibold text-slate-200">
               Chi tiết flow không phải BENIGN ({feedRows.length})
             </div>
             {feedRows.length === 0 ? (
-              <div className="p-6 text-sm text-gray-500">Không có flow bất thường nào trong đoạn đang phát.</div>
+              <div className="p-6 text-sm text-slate-500">Không có flow bất thường nào trong đoạn đang phát.</div>
             ) : (
               <>
-                <div className="grid grid-cols-[140px_140px_80px_100px_1fr] gap-3 border-b border-gray-700 px-4 py-2 text-xs uppercase text-gray-500">
+                <div className="grid grid-cols-[140px_140px_80px_100px_1fr] gap-3 border-b border-slate-700 px-4 py-2 text-xs uppercase text-slate-500">
                   <div>Thời điểm</div>
                   <div>Nhãn</div>
                   <div>Layer</div>
                   <div>Confidence</div>
                   <div>Flow</div>
                 </div>
-                <div className="max-h-96 overflow-y-auto divide-y divide-gray-700">
+                <div className="max-h-96 overflow-y-auto divide-y divide-slate-700">
                   {feedRows.map((row, i) => (
-                    <div key={i} className="grid grid-cols-[140px_140px_80px_100px_1fr] items-center gap-3 px-4 py-2 text-xs hover:bg-gray-900/40">
-                      <div className="text-gray-500">{row.window_start_ms ? new Date(row.window_start_ms).toLocaleTimeString() : "—"}</div>
+                    <div key={i} className="grid grid-cols-[140px_140px_80px_100px_1fr] items-center gap-3 px-4 py-2 text-xs hover:bg-slate-900/40">
+                      <div className="text-slate-500">{row.window_start_ms ? new Date(row.window_start_ms).toLocaleTimeString() : "—"}</div>
                       <span className="w-fit rounded px-2 py-1 text-[10px] font-bold" style={{ backgroundColor: `${colorFor(row.prediction, colorMap)}33`, color: colorFor(row.prediction, colorMap) }}>
                         {row.prediction}
                       </span>
-                      <div className="text-gray-400">L{row.layer_used}</div>
-                      <div className="text-gray-400">{(row.confidence * 100).toFixed(1)}%</div>
-                      <div className="text-gray-600 truncate">
+                      <div className="text-slate-400">L{row.layer_used}</div>
+                      <div className="text-slate-400">{(row.confidence * 100).toFixed(1)}%</div>
+                      <div className="text-slate-600 truncate">
                         {row.src_ip ? `${row.src_ip} -> ${row.dst_ip}` : "—"}
                       </div>
                     </div>
@@ -538,10 +607,10 @@ export default function IdsUpload() {
 
 function StatTile({ label, value, color = "text-white", accent, children }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-gray-700 bg-gray-800 shadow-sm shadow-black/20 transition-colors hover:border-gray-600">
+    <div className="overflow-hidden rounded-lg border border-slate-700 bg-slate-800 shadow-sm shadow-black/20 transition-colors hover:border-slate-600">
       {accent && <div className="h-1" style={{ backgroundColor: accent }} />}
       <div className="p-4">
-        <div className="text-xs uppercase text-gray-500">{label}</div>
+        <div className="text-xs uppercase text-slate-500">{label}</div>
         <div className={`mt-1 font-mono text-2xl font-bold ${color}`}>{value}</div>
         {children}
       </div>
@@ -551,10 +620,10 @@ function StatTile({ label, value, color = "text-white", accent, children }) {
 
 function ChartPanel({ title, subtitle, children }) {
   return (
-    <div className="rounded-lg border border-gray-700 bg-gray-800 p-4 shadow-sm shadow-black/20">
+    <div className="rounded-lg border border-slate-700 bg-slate-800 p-4 shadow-sm shadow-black/20">
       <div className="mb-3">
-        <div className="text-sm font-semibold text-gray-200">{title}</div>
-        {subtitle && <div className="text-xs text-gray-500">{subtitle}</div>}
+        <div className="text-sm font-semibold text-slate-200">{title}</div>
+        {subtitle && <div className="text-xs text-slate-500">{subtitle}</div>}
       </div>
       <ResponsiveContainer width="100%" height={260}>
         {children}

@@ -46,12 +46,23 @@ class MLResultsService:
         if not path.is_file():
             return None
 
-        df = pd.read_csv(path, header=[0, 1], index_col=[0, 1, 2, 3])
+        # Line 3 names however many index columns this run produced. Newer
+        # train_ml.py runs add levels (feature_profile, binary_threshold_mode)
+        # beyond the original experiment/validation_type/task/model, so read
+        # the count from the file itself instead of assuming exactly 4.
+        with path.open() as f:
+            f.readline()
+            f.readline()
+            label_row = f.readline().strip().split(",")
+        index_names = [n for n in label_row if n]
+
+        df = pd.read_csv(path, header=[0, 1], index_col=list(range(len(index_names))))
+        df.index.names = index_names
         rows: list[dict] = []
         metric_names = sorted({metric for metric, _ in df.columns})
 
         for index, row in df.iterrows():
-            experiment, validation_type, task, model = index
+            index_values = dict(zip(index_names, index if isinstance(index, tuple) else (index,)))
             metrics = {}
             for metric in metric_names:
                 if (metric, "mean") not in row or (metric, "std") not in row:
@@ -61,10 +72,10 @@ class MLResultsService:
                     "std": _safe_float(row[(metric, "std")]),
                 }
             rows.append({
-                "experiment": experiment,
-                "validation_type": validation_type,
-                "task": task,
-                "model": model,
+                "experiment": index_values.get("experiment"),
+                "validation_type": index_values.get("validation_type"),
+                "task": index_values.get("task"),
+                "model": index_values.get("model"),
                 "metrics": metrics,
             })
 

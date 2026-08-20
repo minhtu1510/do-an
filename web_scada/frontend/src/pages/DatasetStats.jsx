@@ -6,9 +6,10 @@ import {
   fetchMlConfusionMatrix,
   fetchMlFeatureImportance,
 } from "../services/api";
-import { BarChart3, FolderX, AlertTriangle } from "lucide-react";
+import { BarChart3, AlertTriangle } from "lucide-react";
 import PageHeader from "../components/PageHeader";
 import Gauge from "../components/Gauge";
+import NotConfiguredNotice from "../components/NotConfiguredNotice";
 
 const BLUE = "#3987e5";
 const AQUA = "#199e70";
@@ -84,21 +85,11 @@ export default function DatasetStats() {
       />
 
       {!configured ? (
-        <div className="flex items-start gap-4 rounded-lg border border-gray-700 bg-gray-800 p-6 shadow-sm shadow-black/20">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-yellow-950/40 text-yellow-500">
-            <FolderX size={18} />
-          </div>
-          <div>
-            <div className="text-sm font-semibold text-gray-200">ML results directory</div>
-            <div className="mt-1 text-2xl font-bold text-yellow-400">Not configured</div>
-            <div className="mt-2 text-sm leading-relaxed text-gray-500">
-              No directory found at <code className="rounded bg-gray-900 px-1.5 py-0.5 text-gray-300">{status?.results_dir || "ml_results/"}</code>.
-              Run <code className="rounded bg-gray-900 px-1.5 py-0.5 text-gray-300">python train_ml.py --output-dir ml_results</code> at
-              the repo root (on a machine with the real dataset), then copy the output directory here — or set{" "}
-              <code className="rounded bg-gray-900 px-1.5 py-0.5 text-gray-300">ML_RESULTS_DIR</code> to wherever it was copied — and reload this page.
-            </div>
-          </div>
-        </div>
+        <NotConfiguredNotice
+          title="Chưa có kết quả huấn luyện ML"
+          message="Chạy train_ml.py trên máy có dữ liệu thật, rồi trỏ thư mục kết quả vào đây."
+          detail={`Thư mục kỳ vọng: ${status?.results_dir || "ml_results/"}\n\nLệnh train (thay đường dẫn CSV bằng dataset thật):\npython train_ml.py --network-data <duong_dan/network.csv> --output-dir ml_results\n\nSau đó copy thư mục output vào đây, hoặc set biến môi trường ML_RESULTS_DIR trỏ tới nơi đã copy, rồi tải lại trang.`}
+        />
       ) : (
         <>
           {/* Z-pattern hero row — best result at a glance before the detail tables */}

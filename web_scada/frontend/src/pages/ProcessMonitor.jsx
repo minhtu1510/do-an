@@ -3,6 +3,7 @@ import { Workflow, ChevronDown, AlertTriangle, Play, Square, Send } from "lucide
 import { connectWebSocket } from "../services/websocket";
 import { fetchAllTags, writeTag } from "../services/api";
 import { useAuth } from "../stores/authStore";
+import { useConfirm } from "../components/ConfirmDialog";
 import TagCard from "../components/TagCard";
 import PageHeader from "../components/PageHeader";
 
@@ -70,6 +71,12 @@ export default function ProcessMonitor() {
             </div>
           )}
 
+          <div className="mb-3 text-xs text-slate-600">
+            Stage 1–3 báo vị trí vật đang nằm ở công đoạn nào (cảm biến hiện diện) — không phải trạng thái động
+            cơ. Băng tải dừng thì vật vẫn nằm nguyên chỗ, nên 1 stage vẫn có thể ACTIVE dù conveyor STOPPED — đó
+            là bình thường. Chỉ đáng ngờ khi &gt; 1 stage cùng active một lúc.
+          </div>
+
           <div className="flex flex-col items-center gap-3">
             <FlowNode label="Motor / Conveyor" tag={bangTai} active={isRunning} offline={offline} value={conveyorLabel} />
             <Arrow />
@@ -121,6 +128,7 @@ export default function ProcessMonitor() {
 }
 
 function ControlPanel({ bangTai, isRunning, offline, nhap }) {
+  const confirm = useConfirm();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [target, setTarget] = useState("");
@@ -128,7 +136,12 @@ function ControlPanel({ bangTai, isRunning, offline, nhap }) {
   async function handleConveyorToggle() {
     const nextValue = !isRunning;
     const verb = nextValue ? "CHẠY (RUN)" : "DỪNG (STOP)";
-    if (!window.confirm(`Gửi lệnh ${verb} băng tải xuống PLC thật? Hành động này có tác động vật lý ngay lập tức.`)) return;
+    const ok = await confirm({
+      title: `${verb} băng tải?`,
+      message: "Lệnh này gửi trực tiếp xuống PLC thật và có tác động vật lý ngay lập tức.",
+      confirmLabel: verb,
+    });
+    if (!ok) return;
     setError(null);
     setBusy(true);
     try {
@@ -144,7 +157,12 @@ function ControlPanel({ bangTai, isRunning, offline, nhap }) {
     e.preventDefault();
     const value = Number(target);
     if (!Number.isFinite(value)) return;
-    if (!window.confirm(`Gửi số lượng sản phẩm mục tiêu = ${value} xuống PLC thật?`)) return;
+    const ok = await confirm({
+      title: "Đặt số lượng mục tiêu",
+      message: `Gửi số lượng sản phẩm mục tiêu = ${value} xuống PLC thật?`,
+      confirmLabel: "Gửi lệnh",
+    });
+    if (!ok) return;
     setError(null);
     setBusy(true);
     try {

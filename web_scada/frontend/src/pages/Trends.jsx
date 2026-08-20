@@ -2,11 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Area, AreaChart, CartesianGrid, Legend, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { TrendingUp, AlertTriangle, History } from "lucide-react";
+import { TrendingUp, History } from "lucide-react";
 import { fetchAttackEvents, fetchProcessHistory } from "../services/api";
 import PageHeader from "../components/PageHeader";
 import Gauge from "../components/Gauge";
 import Sparkline from "../components/Sparkline";
+import NotConfiguredNotice from "../components/NotConfiguredNotice";
 
 // Validated categorical slots (dark mode) — fixed order, never cycled per series identity.
 const BLUE = "#3987e5";
@@ -133,12 +134,11 @@ export default function Trends() {
       />
 
       {!attackEvents.configured && (
-        <div className="flex items-start gap-2 rounded-lg border border-yellow-900/50 bg-yellow-950/20 px-4 py-3 text-xs text-yellow-500">
-          <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-          <span>
-            Chưa cấu hình <code className="rounded bg-gray-900 px-1">ATTACK_EVENT_FILE</code> — không có mốc tấn công nào được overlay lên biểu đồ. Copy file CSV từ máy attack (attack_event_logger.py) sang máy chạy backend này và set biến môi trường đó để bật overlay.
-          </span>
-        </div>
+        <NotConfiguredNotice
+          title="Chưa bật overlay mốc tấn công"
+          message="Biểu đồ vẫn hiển thị dữ liệu historian bình thường, chỉ thiếu các mốc đánh dấu thời điểm tấn công thật."
+          detail="Copy file CSV log tấn công từ máy attack (do attack_event_logger.py tạo ra) sang máy chạy backend này, rồi set biến môi trường ATTACK_EVENT_FILE trỏ tới file đó."
+        />
       )}
 
       {!hasAnyData ? (

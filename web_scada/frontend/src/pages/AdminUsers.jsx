@@ -3,11 +3,15 @@ import { Users as UsersIcon, UserPlus, Trash2, AlertTriangle } from "lucide-reac
 import PageHeader from "../components/PageHeader";
 import { changeUserRole, createUser, deleteUser, fetchUsers } from "../services/api";
 import { useAuth } from "../stores/authStore";
+import { useConfirm } from "../components/ConfirmDialog";
+import { useToast } from "../components/Toast";
 
 const ROLES = ["viewer", "operator", "controller", "admin"];
 
 export default function AdminUsers() {
   const { session } = useAuth();
+  const confirm = useConfirm();
+  const toast = useToast();
   const [users, setUsers] = useState([]);
   const [error, setError] = useState(null);
   const [form, setForm] = useState({ username: "", password: "", role: "viewer" });
@@ -21,6 +25,10 @@ export default function AdminUsers() {
 
   async function handleCreate(e) {
     e.preventDefault();
+    if (form.password.length < 8) {
+      toast("Password cần tối thiểu 8 ký tự.", { tone: "error" });
+      return;
+    }
     setError(null);
     setBusy(true);
     try {
@@ -45,7 +53,7 @@ export default function AdminUsers() {
   }
 
   async function handleDelete(userId) {
-    if (!window.confirm("Xoá user này?")) return;
+    if (!(await confirm({ title: "Xoá user", message: "Xoá user này? Không thể hoàn tác.", confirmLabel: "Xoá" }))) return;
     setError(null);
     try {
       await deleteUser(userId);
@@ -98,7 +106,7 @@ export default function AdminUsers() {
         </label>
         <button
           type="submit"
-          disabled={busy || !form.username || form.password.length < 8}
+          disabled={busy || !form.username || !form.password}
           className="flex items-center gap-1.5 rounded bg-blue-600 px-4 py-1.5 text-sm font-semibold text-white shadow-sm shadow-blue-950 transition-colors hover:bg-blue-500 disabled:opacity-50"
         >
           <UserPlus size={14} />

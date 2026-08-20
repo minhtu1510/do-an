@@ -16,6 +16,8 @@ import IdsUpload from "./pages/IdsUpload";
 import Login from "./pages/Login";
 import AdminUsers from "./pages/AdminUsers";
 import { AuthProvider, useAuth } from "./stores/authStore";
+import { ConfirmProvider } from "./components/ConfirmDialog";
+import { ToastProvider } from "./components/Toast";
 
 const NAV_GROUPS = [
   {
@@ -206,7 +208,11 @@ function Routed() {
 export default function App() {
   return (
     <AuthProvider>
-      <Routed />
+      <ConfirmProvider>
+        <ToastProvider>
+          <Routed />
+        </ToastProvider>
+      </ConfirmProvider>
     </AuthProvider>
   );
 }

@@ -88,7 +88,10 @@ async def lifespan(app: FastAPI):
         while True:
             await asyncio.sleep(2)
             try:
-                await ws_manager.broadcast_system_resources(sample_system_resources())
+                await ws_manager.broadcast_system_resources({
+                    **sample_system_resources(),
+                    "ws_connections": ws_manager.count,
+                })
             except Exception:
                 pass
 
