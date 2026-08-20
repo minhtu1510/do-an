@@ -5,6 +5,7 @@ import { connectWebSocket } from "../services/websocket";
 import PageHeader from "../components/PageHeader";
 import ExportCsvButton from "../components/ExportCsvButton";
 import { useAuth } from "../stores/authStore";
+import { COMMAND_EVENT_TYPES } from "../constants/events";
 
 export default function AlarmEvents() {
   const [events, setEvents] = useState([]);
@@ -13,13 +14,13 @@ export default function AlarmEvents() {
 
   useEffect(() => {
     fetchEvents().then((data) => {
-      setEvents(data.events || []);
+      setEvents((data.events || []).filter((e) => !COMMAND_EVENT_TYPES.includes(e.event_type)));
       setActiveCount(data.active_count || 0);
       setLastUpdate(data.timestamp || null);
     });
 
     const unsub = connectWebSocket((data) => {
-      if (data.type === "event" && data.event) {
+      if (data.type === "event" && data.event && !COMMAND_EVENT_TYPES.includes(data.event.event_type)) {
         setEvents((prev) => {
           const existingIndex = prev.findIndex((e) => e.id === data.event.id);
           if (existingIndex !== -1) {
@@ -55,8 +56,8 @@ export default function AlarmEvents() {
       <PageHeader
         icon={Bell}
         title="Alarms & Events"
-        subtitle="In-memory events generated from live OPC UA tag and connection changes."
-        right={<ExportCsvButton />}
+        subtitle="Cảnh báo hệ thống từ trạng thái tag/kết nối OPC UA thật — lệnh điều khiển PLC xem ở trang Audit Log riêng."
+        right={<ExportCsvButton excludeEventTypes={COMMAND_EVENT_TYPES} />}
       />
 
       <div className="grid gap-4 sm:grid-cols-3">

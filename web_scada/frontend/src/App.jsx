@@ -2,12 +2,13 @@ import { Routes, Route, Navigate, NavLink, useLocation } from "react-router-dom"
 import {
   LayoutDashboard, Workflow, Bell, TrendingUp, ShieldCheck,
   BarChart3, UploadCloud, ServerCog, Users as UsersIcon, ChevronRight,
-  Activity, Database, Settings2,
+  Activity, Database, Settings2, ClipboardList,
 } from "lucide-react";
 import StatusBar from "./components/StatusBar";
 import Overview from "./pages/Overview";
 import ProcessMonitor from "./pages/ProcessMonitor";
 import AlarmEvents from "./pages/AlarmEvents";
+import AuditLog from "./pages/AuditLog";
 import Trends from "./pages/Trends";
 import SecurityView from "./pages/SecurityView";
 import SystemStatus from "./pages/SystemStatus";
@@ -27,6 +28,7 @@ const NAV_GROUPS = [
       { to: "/", label: "Overview", icon: LayoutDashboard, end: true, minRole: "viewer" },
       { to: "/process", label: "Process Monitor", icon: Workflow, end: false, minRole: "viewer" },
       { to: "/alarms", label: "Alarms & Events", icon: Bell, end: false, minRole: "viewer" },
+      { to: "/audit", label: "Audit Log", icon: ClipboardList, end: false, minRole: "operator" },
       { to: "/trends", label: "Trends & History", icon: TrendingUp, end: false, minRole: "viewer" },
     ],
   },
@@ -180,6 +182,7 @@ function Shell() {
               <Route path="/" element={<RequireRole minRole="viewer"><Overview /></RequireRole>} />
               <Route path="/process" element={<RequireRole minRole="viewer"><ProcessMonitor /></RequireRole>} />
               <Route path="/alarms" element={<RequireRole minRole="viewer"><AlarmEvents /></RequireRole>} />
+              <Route path="/audit" element={<RequireRole minRole="operator"><AuditLog /></RequireRole>} />
               <Route path="/trends" element={<RequireRole minRole="viewer"><Trends /></RequireRole>} />
               <Route path="/security" element={<RequireRole minRole="operator"><SecurityView /></RequireRole>} />
               <Route path="/dataset" element={<RequireRole minRole="operator"><DatasetStats /></RequireRole>} />

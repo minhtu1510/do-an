@@ -2,13 +2,15 @@ import { useState } from "react";
 import { Download, Loader2 } from "lucide-react";
 import { apiFetch } from "../services/api";
 
-export default function ExportCsvButton({ severity, status, label = "Export CSV" }) {
+export default function ExportCsvButton({ severity, status, eventTypes, excludeEventTypes, label = "Export CSV" }) {
   const [busy, setBusy] = useState(false);
 
   async function handleClick() {
     const params = new URLSearchParams();
     if (severity) params.set("severity", severity);
     if (status) params.set("status", status);
+    if (eventTypes) params.set("event_types", eventTypes.join(","));
+    if (excludeEventTypes) params.set("exclude_event_types", excludeEventTypes.join(","));
     const query = params.toString();
 
     setBusy(true);

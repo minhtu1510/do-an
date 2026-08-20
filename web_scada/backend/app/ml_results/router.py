@@ -2,7 +2,7 @@
 fabricated: everything 404s/501s explicitly until the real files exist."""
 
 from fastapi import APIRouter, Depends
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from ..auth import require_role
 from .service import ml_results_service
@@ -60,3 +60,14 @@ async def ml_feature_importance(experiment: str, run: str, _user=Depends(require
             content={"error": "not_found", "experiment": experiment, "run": run},
         )
     return {"experiment": experiment, "run": run, "features": data}
+
+
+@ml_results_router.get("/experiments/{experiment}/runs/{run}/pr-curve.png")
+async def ml_pr_curve(experiment: str, run: str, _user=Depends(require_role("operator"))):
+    path = ml_results_service.pr_curve_path(experiment, run)
+    if path is None:
+        return JSONResponse(
+            status_code=404,
+            content={"error": "not_found", "experiment": experiment, "run": run},
+        )
+    return FileResponse(path, media_type="image/png")

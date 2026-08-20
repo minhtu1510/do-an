@@ -111,6 +111,17 @@ export async function fetchMlFeatureImportance(experiment, run) {
   return res.json();
 }
 
+// Returns an object URL (or null if not found) — the endpoint is
+// role-gated, so a plain <img src> can't hit it directly (no Authorization
+// header on image requests); fetch the bytes ourselves and hand the <img> a
+// blob: URL instead.
+export async function fetchMlPrCurveUrl(experiment, run) {
+  const res = await apiFetch(`/ml/experiments/${encodeURIComponent(experiment)}/runs/${encodeURIComponent(run)}/pr-curve.png`);
+  if (!res.ok) return null;
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
+
 export async function fetchUsers() {
   const res = await apiFetch("/auth/users");
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Failed to load users");

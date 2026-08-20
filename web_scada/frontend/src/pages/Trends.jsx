@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Area, AreaChart, CartesianGrid, Legend, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { TrendingUp, History } from "lucide-react";
+import { TrendingUp, History, FileDown, Loader2, Download } from "lucide-react";
+import { jsPDF } from "jspdf";
+import html2canvas from "html2canvas";
 import { fetchAttackEvents, fetchProcessHistory } from "../services/api";
 import PageHeader from "../components/PageHeader";
 import Gauge from "../components/Gauge";
@@ -96,11 +98,67 @@ function GradientDefs({ id, color }) {
 export default function Trends() {
   const [tags, setTags] = useState(null);
   const [attackEvents, setAttackEvents] = useState({ configured: false, events: [] });
+  const reportRef = useRef(null);
+  const [exportingPdf, setExportingPdf] = useState(false);
 
   useEffect(() => {
     fetchProcessHistory().then((data) => setTags(data.tags || {}));
     fetchAttackEvents().then(setAttackEvents);
   }, []);
+
+  function handleExportCsv() {
+    const rows = [["tag_key", "timestamp", "value"]];
+    Object.entries(tags || {}).forEach(([key, points]) => {
+      (points || []).forEach((p) => rows.push([key, p.timestamp, p.value]));
+    });
+    const csv = rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `trends_historian_${Date.now()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function handleExportPdf() {
+    if (!reportRef.current) return;
+    setExportingPdf(true);
+    try {
+      const canvas = await html2canvas(reportRef.current, { backgroundColor: "#030712", scale: 2 });
+      const imgData = canvas.toDataURL("image/png");
+
+      const pdf = new jsPDF({ orientation: "p", unit: "pt", format: "a4" });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+
+      pdf.setFontSize(16);
+      pdf.text("Trends & History — Bao cao lich su tag", 40, 50);
+      pdf.setFontSize(10);
+      pdf.text(`Thoi gian xuat: ${new Date().toLocaleString()}`, 40, 75);
+      pdf.text(`Tong diem du lieu: ${totalPoints}  |  Moc tan cong overlay: ${attackEvents.events.length}`, 40, 90);
+      pdf.text("Du lieu historian that (SQLite/Postgres) — khong noi suy so lieu gia.", 40, 110);
+
+      const imgWidth = pageWidth;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      let heightLeft = imgHeight;
+      let position = 0;
+
+      pdf.addPage();
+      pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+      heightLeft -= pageHeight;
+      while (heightLeft > 0) {
+        position = heightLeft - imgHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+        heightLeft -= pageHeight;
+      }
+
+      pdf.save(`trends_report_${Date.now()}.pdf`);
+    } finally {
+      setExportingPdf(false);
+    }
+  }
 
   const timerData = useMemo(() => {
     if (!tags) return [];
@@ -131,6 +189,27 @@ export default function Trends() {
         icon={TrendingUp}
         title="Trends & History"
         subtitle="Lịch sử tag thật (SQLite/Postgres historian) — chỉ ghi khi giá trị thay đổi, không nội suy số liệu giả."
+        right={
+          hasAnyData && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleExportCsv}
+                className="flex items-center gap-1.5 rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-300 transition-colors hover:border-blue-600 hover:text-blue-300"
+              >
+                <Download size={13} />
+                Xuất CSV
+              </button>
+              <button
+                onClick={handleExportPdf}
+                disabled={exportingPdf}
+                className="flex items-center gap-1.5 rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-300 transition-colors hover:border-blue-600 hover:text-blue-300 disabled:opacity-50"
+              >
+                {exportingPdf ? <Loader2 size={13} className="animate-spin" /> : <FileDown size={13} />}
+                {exportingPdf ? "Đang xuất..." : "Xuất PDF"}
+              </button>
+            </div>
+          )
+        }
       />
 
       {!attackEvents.configured && (
@@ -147,7 +226,7 @@ export default function Trends() {
           Chưa có dữ liệu lịch sử — historian chỉ ghi khi tag đổi giá trị thật. Chờ băng chuyền hoạt động hoặc chạy kịch bản tấn công để có dữ liệu.
         </div>
       ) : (
-        <>
+        <div ref={reportRef} className="space-y-6 bg-slate-950 p-1">
           {/* Z-pattern hero row — the numbers that matter most, top-left to top-right */}
           <div className="grid gap-4 lg:grid-cols-[1fr_1fr_auto]">
             <div className="overflow-hidden rounded-lg border border-gray-700 bg-gray-800 shadow-sm shadow-black/20 transition-colors hover:border-gray-600">
@@ -230,7 +309,7 @@ export default function Trends() {
               </AreaChart>
             </ChartPanel>
           </div>
-        </>
+        </div>
       )}
     </div>
   );

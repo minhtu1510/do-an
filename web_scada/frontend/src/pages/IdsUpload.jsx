@@ -27,6 +27,28 @@ const GRID = "#1e293b";
 const AXIS = "#475569";
 const MUTED = "#64748b";
 
+// MITRE ATT&CK for ICS mapping per real attack label — sourced from
+// SemanticAware-S7comm-Dataset/docs/ATTACK_DESCRIPTION.md (verified live
+// against attack.mitre.org, same technique IDs already used in
+// tests/day8/scenarios.yaml). Not shown for BENIGN or ANOMALY — ANOMALY
+// means Layer 2 flagged the window as statistically off but Layer 3 could
+// not classify it as a specific known attack type, so no technique applies.
+const MITRE_BY_LABEL = {
+  SCAN: { id: "T0846", name: "Remote System Discovery" },
+  ENUMERATION: { id: "T0888", name: "Remote System Information Discovery" },
+  RWRITE: { id: "T0855", name: "Unauthorized Command Message" },
+  SPOOF: { id: "T0856", name: "Spoof Reporting Message" },
+  STEALTHY: { id: "T0836", name: "Modify Parameter" },
+  FLOOD: { id: "T0814", name: "Denial of Service" },
+  FUZZ: { id: "T0814", name: "Denial of Service" },
+  CPU_CONTROL: { id: "T0816", name: "Device Restart/Shutdown" },
+};
+
+function mitreUrl(techniqueId) {
+  const [base, sub] = techniqueId.split(".");
+  return sub ? `https://attack.mitre.org/techniques/${base}/${sub}/` : `https://attack.mitre.org/techniques/${base}/`;
+}
+
 function colorFor(label, colorMap) {
   if (label === "BENIGN") return BENIGN_COLOR;
   if (!colorMap.has(label)) colorMap.set(label, CATEGORICAL[colorMap.size % CATEGORICAL.length]);
@@ -466,6 +488,17 @@ export default function IdsUpload() {
                   {currentFlow.prediction}
                 </span>
               )}
+              {currentFlow && MITRE_BY_LABEL[currentFlow.prediction] && (
+                <a
+                  href={mitreUrl(MITRE_BY_LABEL[currentFlow.prediction].id)}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={MITRE_BY_LABEL[currentFlow.prediction].name}
+                  className="mt-1 rounded border border-violet-400/20 bg-violet-400/[0.07] px-1.5 py-0.5 font-mono text-[9px] text-violet-300 transition hover:border-violet-400/40 hover:bg-violet-400/10"
+                >
+                  ATT&CK {MITRE_BY_LABEL[currentFlow.prediction].id}
+                </a>
+              )}
             </div>
           </div>
 
@@ -573,27 +606,44 @@ export default function IdsUpload() {
               <div className="p-6 text-sm text-slate-500">Không có flow bất thường nào trong đoạn đang phát.</div>
             ) : (
               <>
-                <div className="grid grid-cols-[140px_140px_80px_100px_1fr] gap-3 border-b border-slate-700 px-4 py-2 text-xs uppercase text-slate-500">
+                <div className="grid grid-cols-[140px_140px_110px_80px_100px_1fr] gap-3 border-b border-slate-700 px-4 py-2 text-xs uppercase text-slate-500">
                   <div>Thời điểm</div>
                   <div>Nhãn</div>
+                  <div>MITRE ATT&CK</div>
                   <div>Layer</div>
                   <div>Confidence</div>
                   <div>Flow</div>
                 </div>
                 <div className="max-h-96 overflow-y-auto divide-y divide-slate-700">
-                  {feedRows.map((row, i) => (
-                    <div key={i} className="grid grid-cols-[140px_140px_80px_100px_1fr] items-center gap-3 px-4 py-2 text-xs hover:bg-slate-900/40">
+                  {feedRows.map((row, i) => {
+                    const mitre = MITRE_BY_LABEL[row.prediction];
+                    return (
+                    <div key={i} className="grid grid-cols-[140px_140px_110px_80px_100px_1fr] items-center gap-3 px-4 py-2 text-xs hover:bg-slate-900/40">
                       <div className="text-slate-500">{row.window_start_ms ? new Date(row.window_start_ms).toLocaleTimeString() : "—"}</div>
                       <span className="w-fit rounded px-2 py-1 text-[10px] font-bold" style={{ backgroundColor: `${colorFor(row.prediction, colorMap)}33`, color: colorFor(row.prediction, colorMap) }}>
                         {row.prediction}
                       </span>
+                      {mitre ? (
+                        <a
+                          href={mitreUrl(mitre.id)}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={mitre.name}
+                          className="w-fit rounded border border-violet-400/20 bg-violet-400/[0.07] px-1.5 py-0.5 font-mono text-[9px] text-violet-300 transition hover:border-violet-400/40 hover:bg-violet-400/10"
+                        >
+                          {mitre.id}
+                        </a>
+                      ) : (
+                        <span className="text-slate-700">—</span>
+                      )}
                       <div className="text-slate-400">L{row.layer_used}</div>
                       <div className="text-slate-400">{(row.confidence * 100).toFixed(1)}%</div>
                       <div className="text-slate-600 truncate">
                         {row.src_ip ? `${row.src_ip} -> ${row.dst_ip}` : "—"}
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </>
             )}

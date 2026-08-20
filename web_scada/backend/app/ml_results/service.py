@@ -112,6 +112,12 @@ class MLResultsService:
             for feature, value in series.items()
         ]
 
+    def pr_curve_path(self, experiment: str, run: str) -> Path | None:
+        path = self._safe_run_path(experiment, f"{run}_pr_curve.png")
+        if path is None or not path.is_file():
+            return None
+        return path
+
     def _safe_run_path(self, experiment: str, filename: str) -> Path | None:
         exp_dir = (self.results_dir / experiment).resolve()
         if not exp_dir.is_dir() or exp_dir.parent != self.results_dir.resolve():

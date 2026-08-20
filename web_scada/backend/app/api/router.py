@@ -175,12 +175,25 @@ async def ack_event(event_id: str, user=Depends(require_role("operator"))):
 
 
 @api_router.get("/events/export/csv")
-async def export_events_csv(limit: int = 1000, severity: str | None = None, status: str | None = None, _user=Depends(require_role("viewer"))):
+async def export_events_csv(
+    limit: int = 1000,
+    severity: str | None = None,
+    status: str | None = None,
+    event_types: str | None = None,
+    exclude_event_types: str | None = None,
+    _user=Depends(require_role("viewer")),
+):
     events = event_service.list(limit)
     if severity:
         events = [e for e in events if e["severity"] == severity.upper()]
     if status:
         events = [e for e in events if e["status"] == status.upper()]
+    if event_types:
+        allowed = {t.strip().upper() for t in event_types.split(",") if t.strip()}
+        events = [e for e in events if e["event_type"] in allowed]
+    if exclude_event_types:
+        excluded = {t.strip().upper() for t in exclude_event_types.split(",") if t.strip()}
+        events = [e for e in events if e["event_type"] not in excluded]
 
     fieldnames = ["timestamp", "severity", "event_type", "message", "tag_key", "old_value", "new_value", "status", "acked_by", "acked_at"]
     output = io.StringIO()

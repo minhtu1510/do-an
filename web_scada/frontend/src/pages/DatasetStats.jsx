@@ -5,6 +5,7 @@ import {
   fetchMlRuns,
   fetchMlConfusionMatrix,
   fetchMlFeatureImportance,
+  fetchMlPrCurveUrl,
 } from "../services/api";
 import { BarChart3, AlertTriangle } from "lucide-react";
 import PageHeader from "../components/PageHeader";
@@ -37,6 +38,7 @@ export default function DatasetStats() {
   const [selectedRun, setSelectedRun] = useState("");
   const [confusion, setConfusion] = useState(null);
   const [featureImportance, setFeatureImportance] = useState(null);
+  const [prCurveUrl, setPrCurveUrl] = useState(null);
 
   useEffect(() => {
     fetchMlStatus().then((data) => {
@@ -58,6 +60,7 @@ export default function DatasetStats() {
     if (!selectedExperiment || !selectedRun) {
       setConfusion(null);
       setFeatureImportance(null);
+      setPrCurveUrl(null);
       return;
     }
     fetchMlConfusionMatrix(selectedExperiment, selectedRun).then((data) =>
@@ -66,6 +69,20 @@ export default function DatasetStats() {
     fetchMlFeatureImportance(selectedExperiment, selectedRun).then((data) =>
       setFeatureImportance(data.features || null)
     );
+    let cancelled = false;
+    let objectUrl = null;
+    fetchMlPrCurveUrl(selectedExperiment, selectedRun).then((url) => {
+      if (cancelled) {
+        if (url) URL.revokeObjectURL(url);
+        return;
+      }
+      objectUrl = url;
+      setPrCurveUrl(url);
+    });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
   }, [selectedExperiment, selectedRun]);
 
   const configured = Boolean(status?.configured);
@@ -184,6 +201,18 @@ export default function DatasetStats() {
                   <FeatureImportanceBars features={featureImportance} />
                 ) : (
                   <EmptyNote text="No feature-importance CSV for this run." />
+                )}
+              </div>
+
+              <div className="space-y-2 rounded-lg border border-gray-700 bg-gray-800 p-4 shadow-sm shadow-black/20 lg:col-span-2">
+                <div>
+                  <div className="text-sm font-semibold text-gray-200">Precision–Recall curve</div>
+                  <div className="text-xs text-gray-500">Đánh đổi thật giữa bắt đúng tấn công (recall) và báo nhầm (precision) khi đổi ngưỡng quyết định — dựng từ chính lần train này.</div>
+                </div>
+                {prCurveUrl ? (
+                  <img src={prCurveUrl} alt="Precision-Recall curve" className="mx-auto max-h-96 rounded bg-white p-2" />
+                ) : (
+                  <EmptyNote text="No PR-curve image for this run." />
                 )}
               </div>
             </div>
