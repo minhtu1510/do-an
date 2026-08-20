@@ -79,3 +79,6 @@ web_scada/backend/data/
 
 # Portable Windows tool bundle (exe + DLLs, ~700 files) — not source, don't commit
 /ICSScout_Portable/
+
+
+/contest_submission/
