@@ -83,25 +83,25 @@ export default function Overview() {
     <div className="p-6 space-y-6">
       <PageHeader
         icon={LayoutDashboard}
-        title="Production Overview"
-        subtitle="Live summary from OPC UA tags. Internal stage bits are not treated as physical sensors."
+        title="Tổng quan sản xuất"
+        subtitle="Tổng hợp trực tiếp từ tag OPC UA. Các bit trạng thái công đoạn nội bộ không được coi là cảm biến vật lý."
       />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
-        <KPICard label="Conveyor status" value={conveyorStatus} color={statusColor(conveyorStatus)} />
-        <KPICard label="Target quantity" value={formatCount(targetQuantity, tags.nhap)} />
-        <KPICard label="Completed quantity" value={formatCount(producedQuantity, tags.hien_thi)} />
-        <KPICard label="Progress" value={`${progress.toFixed(0)}%`} color="text-blue-300" />
-        <KPICard label="Current runtime" value={formatRuntime(runtimeSeconds)} color={isRunning ? "text-green-300" : "text-gray-300"} />
-        <KPICard label="Active alarms" value={activeAlarms} color={activeAlarms > 0 ? "text-red-400" : "text-green-400"} />
+        <KPICard label="Trạng thái băng tải" value={conveyorStatus} color={statusColor(conveyorStatus)} />
+        <KPICard label="Sản lượng mục tiêu" value={formatCount(targetQuantity, tags.nhap)} />
+        <KPICard label="Sản lượng hoàn thành" value={formatCount(producedQuantity, tags.hien_thi)} />
+        <KPICard label="Tiến độ" value={`${progress.toFixed(0)}%`} color="text-blue-300" />
+        <KPICard label="Thời gian chạy hiện tại" value={formatRuntime(runtimeSeconds)} color={isRunning ? "text-green-300" : "text-gray-300"} />
+        <KPICard label="Cảnh báo đang hoạt động" value={activeAlarms} color={activeAlarms > 0 ? "text-red-400" : "text-green-400"} />
       </div>
 
       <div className="rounded-lg border border-gray-700 bg-gray-800 p-6 shadow-sm shadow-black/20">
         <div className="flex items-center justify-between mb-3">
           <div>
-            <div className="text-sm font-semibold text-gray-200">Production progress</div>
+            <div className="text-sm font-semibold text-gray-200">Tiến độ sản xuất</div>
             <div className="text-xs text-gray-500">
-              {formatCount(producedQuantity, tags.hien_thi)} / {formatCount(targetQuantity, tags.nhap)} products
+              {formatCount(producedQuantity, tags.hien_thi)} / {formatCount(targetQuantity, tags.nhap)} sản phẩm
             </div>
           </div>
           <div className={`text-sm font-bold ${statusColor(conveyorStatus)}`}>{conveyorStatus}</div>

@@ -4,7 +4,7 @@
 tags:
   - key: vat_1
     node_id: 'ns=3;s="Vat 1"'
-    display_name: "Stage 1 status"
+    display_name: "Trạng thái công đoạn 1"
     description: "Internal status bit for production stage 1"
     data_type: Boolean
     group: process_steps
@@ -14,7 +14,7 @@ tags:
 
   - key: vat_2
     node_id: 'ns=3;s="Vat 2"'
-    display_name: "Stage 2 status"
+    display_name: "Trạng thái công đoạn 2"
     description: "Internal status bit for production stage 2"
     data_type: Boolean
     group: process_steps
@@ -24,7 +24,7 @@ tags:
 
   - key: vat_3
     node_id: 'ns=3;s="Vat 3"'
-    display_name: "Stage 3 status"
+    display_name: "Trạng thái công đoạn 3"
     description: "Internal status bit for production stage 3"
     data_type: Boolean
     group: process_steps
@@ -34,7 +34,7 @@ tags:
 
   - key: bang_tai
     node_id: 'ns=3;s="BangTai"'
-    display_name: "Conveyor status"
+    display_name: "Trạng thái băng tải"
     description: "RUN/STOP state of the conveyor"
     data_type: Boolean
     group: equipment
@@ -44,7 +44,7 @@ tags:
 
   - key: nhap
     node_id: 'ns=3;s="Nhap"'
-    display_name: "Target production quantity"
+    display_name: "Sản lượng mục tiêu"
     description: "Number of products to be processed"
     data_type: Int16
     group: production
@@ -60,7 +60,7 @@ tags:
 
   - key: hien_thi
     node_id: 'ns=3;s="HienThi"'
-    display_name: "Completed production quantity"
+    display_name: "Sản lượng hoàn thành"
     description: "Number of products completed by the process"
     data_type: Int16
     group: production
@@ -70,7 +70,7 @@ tags:
 
   - key: cd1
     node_id: 'ns=3;s="CD1"'
-    display_name: "Stage 1 timer"
+    display_name: "Timer công đoạn 1"
     description: "Timer value for production stage 1"
     unit: ms
     data_type: Int32
@@ -83,7 +83,7 @@ tags:
 
   - key: cd2
     node_id: 'ns=3;s="CD2"'
-    display_name: "Stage 2 timer"
+    display_name: "Timer công đoạn 2"
     description: "Timer value for production stage 2"
     unit: ms
     data_type: Int32
@@ -96,7 +96,7 @@ tags:
 
   - key: cd3
     node_id: 'ns=3;s="CD3"'
-    display_name: "Stage 3 timer"
+    display_name: "Timer công đoạn 3"
     description: "Timer value for production stage 3"
     unit: ms
     data_type: Int32

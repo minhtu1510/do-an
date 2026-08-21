@@ -39,9 +39,9 @@ export default function AuditLog() {
     <div className="p-6 space-y-6">
       <PageHeader
         icon={ClipboardList}
-        title="Audit Log"
+        title="Nhật ký điều khiển"
         subtitle="Mọi lệnh ghi xuống PLC thật — thành công, bị từ chối, hoặc lỗi — tách riêng khỏi cảnh báo hệ thống."
-        right={<ExportCsvButton eventTypes={COMMAND_EVENT_TYPES} label="Export audit CSV" />}
+        right={<ExportCsvButton eventTypes={COMMAND_EVENT_TYPES} label="Xuất nhật ký CSV" />}
       />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -87,11 +87,11 @@ function SummaryCard({ label, value, color, icon: Icon }) {
 }
 
 const TYPE_STYLE = {
-  COMMAND_WRITE: { label: "WRITE", color: "text-green-300 bg-green-950/40" },
-  COMMAND_REJECTED: { label: "REJECTED", color: "text-yellow-300 bg-yellow-950/40" },
-  COMMAND_FAILED: { label: "FAILED", color: "text-red-300 bg-red-950/40" },
-  COMMAND_RATE_LIMITED: { label: "RATE LIMITED", color: "text-orange-300 bg-orange-950/40" },
-  ACCESS_DENIED: { label: "ACCESS DENIED", color: "text-orange-300 bg-orange-950/40" },
+  COMMAND_WRITE: { label: "ĐÃ GHI", color: "text-green-300 bg-green-950/40" },
+  COMMAND_REJECTED: { label: "TỪ CHỐI", color: "text-yellow-300 bg-yellow-950/40" },
+  COMMAND_FAILED: { label: "LỖI", color: "text-red-300 bg-red-950/40" },
+  COMMAND_RATE_LIMITED: { label: "BỊ CHẶN TỐC ĐỘ", color: "text-orange-300 bg-orange-950/40" },
+  ACCESS_DENIED: { label: "TỪ CHỐI TRUY CẬP", color: "text-orange-300 bg-orange-950/40" },
 };
 
 function AuditRow({ event }) {

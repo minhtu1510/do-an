@@ -469,7 +469,7 @@ export default function IdsUpload() {
 
   return (
     <div className="p-6 space-y-6">
-      <PageHeader icon={UploadCloud} title="IDS — Upload Pcap" />
+      <PageHeader icon={UploadCloud} title="Tải PCAP phân tích" />
 
       {status && !status.configured && (
         <NotConfiguredNotice
@@ -640,7 +640,7 @@ export default function IdsUpload() {
           </div>
 
           {fusionSeries?.hasOverlap && (
-            <ChartPanel title="Fusion Chart — Process (CD1-3) vs Anomaly Score" subtitle="Trục trái: timer thật từ historian. Trục phải: confidence tấn công thật từ model. Chỉ vẽ trong khoảng thời gian 2 nguồn dữ liệu thật sự trùng nhau.">
+            <ChartPanel title="Biểu đồ kết hợp — Tiến trình (CD1-3) và Điểm bất thường" subtitle="Trục trái: timer thật từ historian. Trục phải: confidence tấn công thật từ model. Chỉ vẽ trong khoảng thời gian 2 nguồn dữ liệu thật sự trùng nhau.">
               <ComposedChart data={fusionSeries.data} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
                 <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="t" type="number" domain={fusionSeries.domain} tickFormatter={formatTime} stroke={AXIS} tick={{ fill: MUTED, fontSize: 11 }} />
@@ -651,7 +651,7 @@ export default function IdsUpload() {
                 <Line yAxisId="left" type="stepAfter" dataKey="cd1" name="CD1 (ms)" stroke={BLUE} strokeWidth={2} dot={false} connectNulls />
                 <Line yAxisId="left" type="stepAfter" dataKey="cd2" name="CD2 (ms)" stroke={ORANGE} strokeWidth={2} dot={false} connectNulls />
                 <Line yAxisId="left" type="stepAfter" dataKey="cd3" name="CD3 (ms)" stroke={AQUA} strokeWidth={2} dot={false} connectNulls />
-                <Scatter yAxisId="right" data={fusionAnomalyPoints} dataKey="anomalyScore" name="Anomaly score (%)" fill={ATTACK_RED} />
+                <Scatter yAxisId="right" data={fusionAnomalyPoints} dataKey="anomalyScore" name="Điểm bất thường (%)" fill={ATTACK_RED} />
               </ComposedChart>
             </ChartPanel>
           )}

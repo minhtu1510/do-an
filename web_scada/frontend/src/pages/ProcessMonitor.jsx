@@ -45,8 +45,8 @@ export default function ProcessMonitor() {
     <div className="p-6 space-y-6">
       <PageHeader
         icon={Workflow}
-        title="Process Monitor"
-        subtitle="Motor/conveyor, internal stage bits, counters, and stage timers from live OPC UA tags."
+        title="Giám sát tiến trình"
+        subtitle="Động cơ/băng tải, bit trạng thái công đoạn, bộ đếm, và timer công đoạn — đọc trực tiếp từ tag OPC UA."
       />
 
       <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
@@ -86,7 +86,7 @@ export default function ProcessMonitor() {
             <Arrow />
             <FlowNode label="Stage 3" tag={tags.vat_3} active={!tags.vat_3?.stale && tags.vat_3?.value === true} value={stageValue(tags.vat_3)} danger={sensorSpoofSuspected} />
             <Arrow />
-            <FlowNode label="Product counter" tag={tags.hien_thi} active={!tags.hien_thi?.stale} value={counterValue(tags.hien_thi)} />
+            <FlowNode label="Bộ đếm sản phẩm" tag={tags.hien_thi} active={!tags.hien_thi?.stale} value={counterValue(tags.hien_thi)} />
           </div>
 
           {hasRole("controller") && (
@@ -96,8 +96,8 @@ export default function ProcessMonitor() {
 
         <div className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-2">
-            <TagCard label={tags.nhap?.display_name || "Target production quantity"} sublabel="nhap" value={tags.nhap?.value} quality={tags.nhap?.quality} stale={tags.nhap?.stale} />
-            <TagCard label={tags.hien_thi?.display_name || "Completed production quantity"} sublabel="hien_thi" value={tags.hien_thi?.value} quality={tags.hien_thi?.quality} stale={tags.hien_thi?.stale} />
+            <TagCard label={tags.nhap?.display_name || "Sản lượng mục tiêu"} sublabel="nhap" value={tags.nhap?.value} quality={tags.nhap?.quality} stale={tags.nhap?.stale} />
+            <TagCard label={tags.hien_thi?.display_name || "Sản lượng hoàn thành"} sublabel="hien_thi" value={tags.hien_thi?.value} quality={tags.hien_thi?.quality} stale={tags.hien_thi?.stale} />
           </div>
 
           <div className="rounded-lg border border-gray-700 bg-gray-800 p-4 shadow-sm shadow-black/20">

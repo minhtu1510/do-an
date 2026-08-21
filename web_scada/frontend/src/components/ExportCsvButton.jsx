@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Download, Loader2 } from "lucide-react";
 import { apiFetch } from "../services/api";
 
-export default function ExportCsvButton({ severity, status, eventTypes, excludeEventTypes, label = "Export CSV" }) {
+export default function ExportCsvButton({ severity, status, eventTypes, excludeEventTypes, label = "Xuất CSV" }) {
   const [busy, setBusy] = useState(false);
 
   async function handleClick() {

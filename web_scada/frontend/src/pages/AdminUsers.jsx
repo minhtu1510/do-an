@@ -65,7 +65,7 @@ export default function AdminUsers() {
 
   return (
     <div className="p-6 space-y-6">
-      <PageHeader icon={UsersIcon} title="Users" subtitle="Quản lý tài khoản và phân quyền (admin only)." />
+      <PageHeader icon={UsersIcon} title="Người dùng" subtitle="Quản lý tài khoản và phân quyền (chỉ admin)." />
 
       {error && (
         <div className="flex items-center gap-2 rounded-lg border border-red-900/50 bg-red-950/30 px-3 py-2 text-sm text-red-400 animate-fade-in">

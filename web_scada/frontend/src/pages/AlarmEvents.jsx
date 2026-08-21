@@ -55,15 +55,15 @@ export default function AlarmEvents() {
     <div className="p-6 space-y-6">
       <PageHeader
         icon={Bell}
-        title="Alarms & Events"
-        subtitle="Cảnh báo hệ thống từ trạng thái tag/kết nối OPC UA thật — lệnh điều khiển PLC xem ở trang Audit Log riêng."
+        title="Cảnh báo & Sự kiện"
+        subtitle="Cảnh báo hệ thống từ trạng thái tag/kết nối OPC UA thật — lệnh điều khiển PLC xem ở trang Nhật ký điều khiển riêng."
         right={<ExportCsvButton excludeEventTypes={COMMAND_EVENT_TYPES} />}
       />
 
       <div className="grid gap-4 sm:grid-cols-3">
-        <SummaryCard label="Active alarms" value={activeCount} color={activeCount > 0 ? "text-red-400" : "text-green-400"} icon={Bell} />
-        <SummaryCard label="Stored events" value={events.length} icon={Inbox} />
-        <SummaryCard label="Persistence" value="In memory" color="text-yellow-400" icon={Database} />
+        <SummaryCard label="Cảnh báo đang hoạt động" value={activeCount} color={activeCount > 0 ? "text-red-400" : "text-green-400"} icon={Bell} />
+        <SummaryCard label="Sự kiện đã lưu" value={events.length} icon={Inbox} />
+        <SummaryCard label="Lưu trữ" value="Cơ sở dữ liệu (SQLite)" color="text-green-400" icon={Database} />
       </div>
 
       <div className="overflow-hidden rounded-lg border border-gray-700 bg-gray-800 shadow-sm shadow-black/20">

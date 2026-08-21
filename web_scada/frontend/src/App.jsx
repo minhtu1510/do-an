@@ -32,30 +32,30 @@ const NAV_GROUPS = [
     label: "Giám sát & điều khiển PLC",
     icon: Workflow,
     items: [
-      { to: "/process", label: "Process Monitor", icon: Workflow, end: false, minRole: "viewer" },
+      { to: "/process", label: "Giám sát tiến trình", icon: Workflow, end: false, minRole: "viewer" },
     ],
   },
   {
     label: "Cảnh báo bất thường",
     icon: Bell,
     items: [
-      { to: "/alarms", label: "Alarms & Events", icon: Bell, end: false, minRole: "viewer" },
+      { to: "/alarms", label: "Cảnh báo & Sự kiện", icon: Bell, end: false, minRole: "viewer" },
     ],
   },
   {
     label: "Phân tích PCAP",
     icon: UploadCloud,
     items: [
-      { to: "/ids-upload", label: "IDS Upload", icon: UploadCloud, end: false, minRole: "operator" },
-      { to: "/dataset", label: "Dataset & Model", icon: BarChart3, end: false, minRole: "operator" },
+      { to: "/ids-upload", label: "Tải PCAP phân tích", icon: UploadCloud, end: false, minRole: "operator" },
+      { to: "/dataset", label: "Thống kê mô hình AI", icon: BarChart3, end: false, minRole: "operator" },
     ],
   },
   {
     label: "Lịch sử & báo cáo",
     icon: TrendingUp,
     items: [
-      { to: "/trends", label: "Trends & History", icon: TrendingUp, end: false, minRole: "viewer" },
-      { to: "/audit", label: "Audit Log", icon: ClipboardList, end: false, minRole: "operator" },
+      { to: "/trends", label: "Xu hướng & Lịch sử", icon: TrendingUp, end: false, minRole: "viewer" },
+      { to: "/audit", label: "Nhật ký điều khiển", icon: ClipboardList, end: false, minRole: "operator" },
       { to: "/security", label: "Lịch sử kịch bản tấn công", icon: ShieldCheck, end: false, minRole: "operator" },
     ],
   },
@@ -63,8 +63,8 @@ const NAV_GROUPS = [
     label: "Quản trị hệ thống",
     icon: Settings2,
     items: [
-      { to: "/system", label: "System Status", icon: ServerCog, end: false, minRole: "viewer" },
-      { to: "/admin/users", label: "Users", icon: UsersIcon, end: false, minRole: "admin" },
+      { to: "/system", label: "Trạng thái hệ thống", icon: ServerCog, end: false, minRole: "viewer" },
+      { to: "/admin/users", label: "Người dùng", icon: UsersIcon, end: false, minRole: "admin" },
     ],
   },
 ];

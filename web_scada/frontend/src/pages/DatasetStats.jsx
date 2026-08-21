@@ -97,8 +97,8 @@ export default function DatasetStats() {
     <div className="p-6 space-y-6">
       <PageHeader
         icon={BarChart3}
-        title="Dataset & Model Stats"
-        subtitle="Read directly from train_ml.py output on disk. No number here is synthesized — this page is empty until real results exist."
+        title="Thống kê Dataset & Model"
+        subtitle="Đọc trực tiếp từ kết quả train_ml.py trên đĩa. Không số liệu nào ở đây được tự sinh — trang này để trống cho tới khi có kết quả thật."
       />
 
       {!configured ? (

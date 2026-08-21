@@ -126,7 +126,7 @@ export default function SystemStatus() {
 
   return (
     <div className="p-6 space-y-6">
-      <PageHeader icon={ServerCog} title="System Status" subtitle="Backend, OPC UA gateway and websocket health at a glance." />
+      <PageHeader icon={ServerCog} title="Trạng thái hệ thống" subtitle="Tình trạng backend, gateway OPC UA và websocket — nhìn nhanh một chỗ." />
 
       <div className="grid gap-4 sm:grid-cols-3">
         <ResourcePanel
@@ -156,7 +156,7 @@ export default function SystemStatus() {
         <StatTile
           icon={ArrowUp}
           iconColor={BLUE}
-          label="Network out"
+          label="Mạng ra"
           value={formatBytesPerSec(resources?.net_sent_bytes_per_sec)}
           history={history.netSent}
           sparkColor={BLUE}
@@ -164,7 +164,7 @@ export default function SystemStatus() {
         <StatTile
           icon={ArrowDown}
           iconColor={AQUA}
-          label="Network in"
+          label="Mạng vào"
           value={formatBytesPerSec(resources?.net_recv_bytes_per_sec)}
           history={history.netRecv}
           sparkColor={AQUA}
@@ -172,7 +172,7 @@ export default function SystemStatus() {
         <StatTile
           icon={Radio}
           iconColor={GOOD_GREEN}
-          label="WebSocket connections"
+          label="Kết nối WebSocket"
           value={resources?.ws_connections ?? "—"}
           note="Số client (tab trình duyệt) đang mở dashboard, nhận cập nhật real-time."
         />
@@ -191,18 +191,17 @@ export default function SystemStatus() {
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <InfoRow label="PLC IP" value="192.168.210.211" />
-        <InfoRow label="OPC UA" value={status?.endpoint || "opc.tcp://192.168.210.211:4840"} />
-        <InfoRow label="State" value={status?.connected ? "CONNECTED" : "DISCONNECTED"} color={status?.connected ? "text-green-400" : "text-red-400"} />
-        <InfoRow label="Reconnect count" value={status?.reconnect_count ?? 0} />
-        <InfoRow label="Tags Total" value={totalTags} />
-        <InfoRow label="Tags Good" value={goodTags} color="text-green-400" />
-        <InfoRow label="Tags Stale" value={staleTags} color={staleTags > 0 ? "text-red-400" : "text-gray-400"} />
-        <InfoRow label="Backend uptime" value={formatUptime(status?.uptime_seconds)} />
-        <InfoRow label="Backend started" value={status?.backend_started_at ? new Date(status.backend_started_at).toLocaleTimeString() : "—"} />
+        <InfoRow label="Địa chỉ IP PLC/OPC UA" value={status?.endpoint || "opc.tcp://192.168.210.211:4840"} />
+        <InfoRow label="Trạng thái kết nối" value={status?.connected ? "CONNECTED" : "DISCONNECTED"} color={status?.connected ? "text-green-400" : "text-red-400"} />
+        <InfoRow label="Số lần kết nối lại" value={status?.reconnect_count ?? 0} />
+        <InfoRow label="Tổng số tag" value={totalTags} />
+        <InfoRow label="Tag tốt" value={goodTags} color="text-green-400" />
+        <InfoRow label="Tag cũ (stale)" value={staleTags} color={staleTags > 0 ? "text-red-400" : "text-gray-400"} />
+        <InfoRow label="Thời gian hoạt động backend" value={formatUptime(status?.uptime_seconds)} />
+        <InfoRow label="Backend khởi động lúc" value={status?.backend_started_at ? new Date(status.backend_started_at).toLocaleTimeString() : "—"} />
         <InfoRow label="WebSocket" value="ONLINE" color="text-green-400" />
-        <InfoRow label="Last connected" value={status?.last_connected_at ? new Date(status.last_connected_at).toLocaleTimeString() : "—"} />
-        <InfoRow label="Last data" value={status?.last_data_at ? new Date(status.last_data_at).toLocaleTimeString() : "—"} />
+        <InfoRow label="Kết nối lần cuối" value={status?.last_connected_at ? new Date(status.last_connected_at).toLocaleTimeString() : "—"} />
+        <InfoRow label="Dữ liệu lần cuối" value={status?.last_data_at ? new Date(status.last_data_at).toLocaleTimeString() : "—"} />
       </div>
     </div>
   );

@@ -231,7 +231,7 @@ export default function Trends() {
     <div className="p-6 space-y-6">
       <PageHeader
         icon={TrendingUp}
-        title="Trends & History"
+        title="Xu hướng & Lịch sử"
         subtitle="Lịch sử tag thật (SQLite/Postgres historian) — chỉ ghi khi giá trị thay đổi, không nội suy số liệu giả."
         right={
           hasAnyData && (
@@ -302,7 +302,7 @@ export default function Trends() {
             </div>
           )}
 
-          <ChartPanel title="Stage timers — CD1 / CD2 / CD3 (ms)" subtitle="Vùng an toàn 500–10000ms. SETPOINT_ATTACK sẽ đẩy giá trị vọt ra ngoài vùng này.">
+          <ChartPanel title="Timer công đoạn — CD1 / CD2 / CD3 (ms)" subtitle="Vùng an toàn 500–10000ms. SETPOINT_ATTACK sẽ đẩy giá trị vọt ra ngoài vùng này.">
             <AreaChart data={timerChartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
               <GradientDefs id="gradCd1" color={BLUE} />
               <GradientDefs id="gradCd2" color={ORANGE} />
@@ -326,14 +326,14 @@ export default function Trends() {
           </ChartPanel>
 
           <div className="grid gap-4 lg:grid-cols-2">
-            <ChartPanel title="Conveyor RUN/STOP (bang_tai)" subtitle="0 = STOPPED, 1 = RUNNING. RWRITE_BURST sẽ làm đường này giật liên tục.">
+            <ChartPanel title="Băng tải CHẠY/DỪNG (bang_tai)" subtitle="0 = DỪNG, 1 = CHẠY. RWRITE_BURST sẽ làm đường này giật liên tục.">
               <AreaChart data={runChartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
                 <GradientDefs id="gradRun" color={VIOLET} />
                 <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="t" type="number" domain={["dataMin", "dataMax"]} tickFormatter={formatTime} stroke={AXIS} tick={{ fill: MUTED, fontSize: 11 }} />
                 <YAxis stroke={AXIS} tick={{ fill: MUTED, fontSize: 11 }} domain={[0, 1]} ticks={[0, 1]} />
                 <Tooltip contentStyle={{ background: "#111827", border: "1px solid #374151", fontSize: 12 }} labelFormatter={formatTime} />
-                <Area type="stepAfter" dataKey="bang_tai" name="Conveyor (RUN=1)" stroke={VIOLET} strokeWidth={2} fill="url(#gradRun)" dot={false} connectNulls />
+                <Area type="stepAfter" dataKey="bang_tai" name="Băng tải (CHẠY=1)" stroke={VIOLET} strokeWidth={2} fill="url(#gradRun)" dot={false} connectNulls />
                 {attackEvents.events.map((ev, i) => (
                   <ReferenceLine key={i} x={toEpoch(ev.timestamp)} stroke={ATTACK_RED} strokeWidth={2}
                     label={{ value: ev.scenario_label, position: "top", fill: ATTACK_RED, fontSize: 10 }} />
@@ -341,7 +341,7 @@ export default function Trends() {
               </AreaChart>
             </ChartPanel>
 
-            <ChartPanel title="Production — Target vs Completed (nhap / hien_thi)">
+            <ChartPanel title="Sản lượng — Mục tiêu và Hoàn thành (nhap / hien_thi)">
               <AreaChart data={productionChartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
                 <GradientDefs id="gradNhap" color={BLUE} />
                 <GradientDefs id="gradHienThi" color={ORANGE} />
@@ -350,8 +350,8 @@ export default function Trends() {
                 <YAxis stroke={AXIS} tick={{ fill: MUTED, fontSize: 11 }} />
                 <Tooltip contentStyle={{ background: "#111827", border: "1px solid #374151", fontSize: 12 }} labelFormatter={formatTime} />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Area type="stepAfter" dataKey="nhap" name="Target quantity" stroke={BLUE} strokeWidth={2} fill="url(#gradNhap)" dot={false} connectNulls />
-                <Area type="stepAfter" dataKey="hien_thi" name="Completed quantity" stroke={ORANGE} strokeWidth={2} fill="url(#gradHienThi)" dot={false} connectNulls />
+                <Area type="stepAfter" dataKey="nhap" name="Sản lượng mục tiêu" stroke={BLUE} strokeWidth={2} fill="url(#gradNhap)" dot={false} connectNulls />
+                <Area type="stepAfter" dataKey="hien_thi" name="Sản lượng hoàn thành" stroke={ORANGE} strokeWidth={2} fill="url(#gradHienThi)" dot={false} connectNulls />
                 {attackEvents.events.map((ev, i) => (
                   <ReferenceLine key={i} x={toEpoch(ev.timestamp)} stroke={ATTACK_RED} strokeWidth={2}
                     label={{ value: ev.scenario_label, position: "top", fill: ATTACK_RED, fontSize: 10 }} />

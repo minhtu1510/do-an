@@ -70,12 +70,12 @@ function ScenarioConsole({ results, executed, total, runProgress }) {
     <section className="ids-card overflow-hidden">
       <PanelHeader
         icon={Terminal}
-        title="Attack scenario evidence"
-        subtitle="Live scenario outcomes with MITRE ATT&CK mapping and captured evidence"
+        title="Bằng chứng kịch bản tấn công"
+        subtitle="Kết quả kịch bản tấn công thời gian thực, gắn kỹ thuật MITRE ATT&CK và bằng chứng thu thập được"
         right={
           <div className="flex items-center gap-2">
             <span className="ids-badge border-cyan-400/15 bg-cyan-400/[0.07] font-mono text-cyan-300">
-              {executed}/{total} executed{total > 0 ? ` (${runProgress}%)` : ""}
+              {executed}/{total} đã chạy{total > 0 ? ` (${runProgress}%)` : ""}
             </span>
             <CollapseToggle open={open} onClick={() => setOpen((v) => !v)} />
           </div>
@@ -94,7 +94,7 @@ function ScenarioConsole({ results, executed, total, runProgress }) {
         <div className="overflow-x-auto">
           <div className="min-w-[880px]">
             <div className="grid grid-cols-[82px_1.25fr_.65fr_.65fr_1.35fr] gap-3 border-b border-slate-800/70 bg-slate-950/30 px-4 py-2.5 ids-label">
-              <div>Time</div><div>Scenario / ATT&CK</div><div>Group</div><div>Status</div><div>Evidence / notes</div>
+              <div>Thời gian</div><div>Kịch bản / ATT&CK</div><div>Nhóm</div><div>Trạng thái</div><div>Bằng chứng / ghi chú</div>
             </div>
             <div className="max-h-[520px] divide-y divide-slate-800/70 overflow-y-auto">
               {results.map((result) => <ScenarioRow key={result.id} result={result} />)}
@@ -149,7 +149,7 @@ function ScenarioRow({ result }) {
       <div className="pt-0.5 text-slate-500">{result.group || "—"}</div>
       <div><span className={`ids-badge ${badge}`}>{result.status || "UNKNOWN"}</span></div>
       <div className="min-w-0 text-slate-500">
-        <div className="flex items-center gap-1.5 text-slate-400"><FileWarning size={11} className="text-slate-600" />{evidenceCount ? `${evidenceCount} evidence item${evidenceCount === 1 ? "" : "s"}` : "No evidence item"}</div>
+        <div className="flex items-center gap-1.5 text-slate-400"><FileWarning size={11} className="text-slate-600" />{evidenceCount ? `${evidenceCount} bằng chứng` : "Chưa có bằng chứng"}</div>
         {result.notes?.length > 0 && <div className="mt-1 truncate text-[10px] text-slate-600" title={result.notes[0]}>{result.notes[0]}</div>}
       </div>
     </div>
@@ -176,11 +176,11 @@ function SecurityModeComparator({ comparator }) {
     <section className="ids-card overflow-hidden">
       <PanelHeader
         icon={LockKeyhole}
-        title="OPC UA security-mode comparator"
-        subtitle="Real scenario outcomes grouped by the operator-provided OPCUA_SECURITY_MODE tag"
+        title="So sánh chế độ bảo mật OPC UA"
+        subtitle="Kết quả kịch bản thật, nhóm theo tag OPCUA_SECURITY_MODE do người vận hành khai báo"
         right={
           <div className="flex items-center gap-2">
-            <span className="ids-badge border-slate-700 bg-slate-950/50 text-slate-400">{summary} recorded outcome{summary === 1 ? "" : "s"}</span>
+            <span className="ids-badge border-slate-700 bg-slate-950/50 text-slate-400">{summary} kết quả đã ghi nhận</span>
             <CollapseToggle open={open} onClick={() => setOpen((v) => !v)} />
           </div>
         }
@@ -199,7 +199,7 @@ function SecurityModeComparator({ comparator }) {
           <table className="w-full min-w-[680px] text-left text-xs">
             <thead className="border-b border-slate-800/70 bg-slate-950/30 ids-label">
               <tr>
-                <th className="px-4 py-3">Scenario</th>
+                <th className="px-4 py-3">Kịch bản</th>
                 {modes.map((mode) => <th key={mode} className="px-4 py-3">{mode}</th>)}
               </tr>
             </thead>
@@ -219,7 +219,7 @@ function SecurityModeComparator({ comparator }) {
 }
 
 function ComparatorCell({ result }) {
-  if (!result) return <span className="text-[10px] text-slate-700">NOT RUN</span>;
+  if (!result) return <span className="text-[10px] text-slate-700">CHƯA CHẠY</span>;
   const badge = STATUS_STYLE[result.status] || "border-slate-700 bg-slate-800/70 text-slate-300";
   return (
     <div>
