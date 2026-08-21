@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   ShieldCheck, ExternalLink, Radio, AlertTriangle, Activity,
-  Radar, Terminal, LockKeyhole, RefreshCw, Database, Clock3,
+  Radar, Terminal, LockKeyhole, RefreshCw, Clock3,
   CircleDot, CheckCircle2, XCircle, FileWarning, Network, ChevronDown,
 } from "lucide-react";
 import { fetchSecurityStatus, fetchScenarioResults, fetchEvents, fetchSecurityModeComparator } from "../services/api";
@@ -288,9 +288,7 @@ function TelemetryPanel({ status }) {
   const items = [
     { icon: RefreshCw, label: "Stale events", value: status?.stale_event_count ?? "N/A", tone: "neutral" },
     { icon: XCircle, label: "Rejected ops", value: status?.rejected_operation_count ?? "N/A", tone: "neutral" },
-    { icon: Activity, label: "Capture status", value: status?.capture_status || "Not configured", tone: status?.capture_status ? "info" : "warn" },
-    { icon: Database, label: "Dataset session", value: status?.dataset_session_id || "No active collection", tone: status?.dataset_session_id ? "info" : "warn" },
-    { icon: LockKeyhole, label: "IDS module", value: status?.ids_module || "IDS module unavailable", tone: status?.ids_module ? "info" : "warn" },
+    { icon: LockKeyhole, label: "IDS module", value: status?.ids_module || "Loading", tone: status?.ids_module === "Model loaded" ? "good" : "warn" },
     { icon: Radio, label: "OPC UA", value: status?.opcua_connection || "Loading", tone: status?.opcua_connection === "CONNECTED" ? "good" : "danger" },
   ];
 

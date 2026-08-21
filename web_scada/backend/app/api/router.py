@@ -16,6 +16,7 @@ from ..alarms import alarm_engine
 from ..auth import require_role
 from ..events import event_service
 from ..events.models import EventRecord
+from ..ids_upload.service import model_configured as ids_model_configured
 from ..opcua.gateway import TagWriteError
 from ..scenarios import scenario_catalog, scenario_store
 from ..scenarios.models import ScenarioResult
@@ -257,11 +258,9 @@ async def security_status(_user=Depends(require_role("operator"))):
         "active_alarm_count": metrics["active_alarm_count"],
         "stale_event_count": metrics["stale_event_count"],
         "rejected_operation_count": metrics["rejected_operation_count"],
-        "capture_status": "Not configured",
-        "dataset_session_id": "No active collection",
         "scenario_id": scenario_summary["latest_scenario_id"] or "Not configured",
         "current_label": scenario_summary["latest_status"] or "Not configured",
-        "ids_module": "IDS module unavailable",
+        "ids_module": "Model loaded" if ids_model_configured() else "Model not trained",
         "scenario_runs_total": scenario_summary["total_runs"],
         "scenario_runs_executed": scenario_summary["executed_count"],
         "timestamp": datetime.now(TZ).isoformat(),

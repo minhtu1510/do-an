@@ -1,5 +1,4 @@
-import { useState } from "react";
-import { ChevronDown, Info } from "lucide-react";
+import { Info } from "lucide-react";
 import { useAuth } from "../stores/authStore";
 
 // Honest "not configured" state, without leaking a local absolute filesystem
@@ -7,9 +6,11 @@ import { useAuth } from "../stores/authStore";
 // short and presentable; the actual remediation detail (path, command) is
 // only shown to admin — the one role that would actually run setup commands
 // — so a regular viewer/operator never sees internal paths or scripts.
+// Shown directly (no expand/collapse click) once role allows it — an admin
+// looking at this is already mid-setup, an extra click to reveal the exact
+// command they need was just friction, not information hiding.
 export default function NotConfiguredNotice({ title, message, detail, tone = "warn" }) {
   const { hasRole } = useAuth();
-  const [open, setOpen] = useState(false);
   const canSeeDetail = hasRole("admin");
   const toneCls =
     tone === "warn"
@@ -26,20 +27,9 @@ export default function NotConfiguredNotice({ title, message, detail, tone = "wa
         </div>
       </div>
       {detail && canSeeDetail && (
-        <div className="mt-2 pl-[26px]">
-          <button
-            onClick={() => setOpen((v) => !v)}
-            className="flex items-center gap-1 text-[11px] font-medium opacity-70 transition-opacity hover:opacity-100"
-          >
-            <ChevronDown size={12} className={`transition-transform ${open ? "rotate-180" : ""}`} />
-            {open ? "Ẩn chi tiết kỹ thuật" : "Xem chi tiết kỹ thuật"}
-          </button>
-          {open && (
-            <pre className="mt-2 whitespace-pre-wrap break-all rounded-lg border border-black/20 bg-black/20 px-3 py-2 font-mono text-[11px] leading-relaxed opacity-90">
-              {detail}
-            </pre>
-          )}
-        </div>
+        <pre className="mt-2 ml-[26px] whitespace-pre-wrap break-all rounded-lg border border-black/20 bg-black/20 px-3 py-2 font-mono text-[11px] leading-relaxed opacity-90">
+          {detail}
+        </pre>
       )}
     </div>
   );
