@@ -328,9 +328,26 @@ def collect(args) -> int:
             print(f"\n[Cycle {cycle}] scenario = {scenario}  tier = {tier}  attack<={cycle_attack}s")
 
             # 1. Warmup (benign baseline -- de web_scada tu giao tiep).
+            #    Ghi RIENG 1 dong BENIGN_NORMAL vao timeline cho khoang nay --
+            #    truoc day khoang warmup/cooldown khong duoc ghi vao timeline
+            #    o tat ca, nen extract_opcua_features.py roi vao nhanh
+            #    "khong trung interval nao -> default --label" (thuong la
+            #    "unknown" vi 04_day8_opcua.sh khong truyen --label), khien
+            #    dataset Day 8 KHONG CO dong BENIGN nao (0/112 dong quan sat
+            #    thuc te). Ghi tuong minh giong BENIGN_NORMAL cua Day 1-6
+            #    (run_day_bangtruyen.sh) de is_benign_label() ("BENIGN",
+            #    "BENIGN_NORMAL", "NORMAL", ...) nhan dung.
             print(f"  [>] warmup {args.warmup}s (baseline benign)...")
+            t_warmup_start = now_epoch()
             if not _sleep_interruptible(args.warmup):
                 break
+            t_warmup_end = now_epoch()
+            warmup_episode_id = f"day8_{session_tag}_{host_id}_c{cycle:03d}_BENIGN_warmup"
+            writer.writerow([
+                f"{t_warmup_start:.3f}", f"{t_warmup_end:.3f}", "BENIGN_NORMAL", warmup_episode_id,
+                human(t_warmup_start), human(t_warmup_end), cycle, "benign_warmup", host_id, session_tag, "fixed",
+            ])
+            f.flush()
 
             # 2. Attack.
             t_start = now_epoch()
@@ -352,9 +369,18 @@ def collect(args) -> int:
             f.flush()
 
             # 4. Cooldown (bat canh TCP reconnect/retransmission cua web_scada).
+            #    Cung ghi BENIGN_NORMAL rieng, ly do nhu warmup o tren.
             print(f"  [>] cooldown {args.cooldown}s (phuc hoi)...")
+            t_cooldown_start = now_epoch()
             if not _sleep_interruptible(args.cooldown):
                 break
+            t_cooldown_end = now_epoch()
+            cooldown_episode_id = f"day8_{session_tag}_{host_id}_c{cycle:03d}_BENIGN_cooldown"
+            writer.writerow([
+                f"{t_cooldown_start:.3f}", f"{t_cooldown_end:.3f}", "BENIGN_NORMAL", cooldown_episode_id,
+                human(t_cooldown_start), human(t_cooldown_end), cycle, "benign_cooldown", host_id, session_tag, "fixed",
+            ])
+            f.flush()
 
     elapsed = time.time() - start_wall
     print(f"\n[*] Xong: {cycle} cycle trong {elapsed:.0f}s. Timeline: {timeline_path}")

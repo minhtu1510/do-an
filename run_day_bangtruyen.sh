@@ -836,12 +836,17 @@ elif profile == "extended_300k":
     sleep_range = (0.5, 3.0)
     pulse_s = random.uniform(0.12, 0.35)
 elif profile == "diverse_mix":
-    # Trai deu toc do tren toan pho standard->day6_robust trong cung 1 lan
-    # thu. Ngoai ra ~35% chu ky chi toggle 1 bit (chi STOP hoac chi START)
+    # Chot theo rate tier (chon 1 lan/rep o tang orchestrator, xem
+    # rate_tier_for_rep() trong bash) thay vi trai deu ca pho toc do MOI VONG
+    # LAP -- lam the se hoi tu ve cung 1 toc do trung binh cho moi rep (luat
+    # so lon), khien du lieu KHONG co su khac biet giua cac rep du "profile"
+    # trong co ve da dang. Gio moi rep giu NGUYEN 1 khoang toc do suot rep.
+    # Ngoai ra van giu ~35% chu ky chi toggle 1 bit (chi STOP hoac chi START)
     # thay vi luon swap ca 2 -- van dung DUY NHAT M5.0/M5.1 (khong doi dia
     # chi, an toan), chi da dang hoa PATTERN ghi de model hoc "burst-write
     # vao Merker" thay vi hoc thuoc dung 1 khuon swap co dinh.
-    sleep_range = (0.15, 25.0)
+    rate_tier = os.environ.get("ATTACK_RATE_TIER", "normal")
+    sleep_range = {"slow": (8.0, 25.0), "normal": (1.5, 8.0), "fast": (0.15, 1.5)}.get(rate_tier, (0.15, 25.0))
     pulse_s = random.uniform(0.12, 0.35)
 else:
     sleep_range = (0.15, 0.45)
@@ -921,12 +926,15 @@ if profile == "day6_robust":
 elif profile == "extended_300k":
     sleep_range = (2.0, 10.0)
 elif profile == "diverse_mix":
-    # Trai deu toc do standard->day6_robust. Ngoai ra moi chu ky chi ghi 1
-    # SO trong 4 offset (54/58/62/50, van la 4 dia chi da dung an toan tu
-    # truoc), khong luon ghi ca 4 -- day la khac biet lon nhat voi ban goc:
-    # ban goc CHUA TUNG de model thay SETPOINT_ATTACK voi < 4 target/chu ky,
-    # nen model de hoc nham "phai du ca 4 thi moi la SETPOINT".
-    sleep_range = (0.4, 60.0)
+    # Chot theo rate tier (1 lan/rep, xem rate_tier_for_rep() trong bash)
+    # thay vi random lai sleep moi vong lap -- ly do xem comment RWRITE_BURST
+    # o tren. Ngoai ra moi chu ky chi ghi 1 SO trong 4 offset (54/58/62/50,
+    # van la 4 dia chi da dung an toan tu truoc), khong luon ghi ca 4 -- day
+    # la khac biet lon nhat voi ban goc: ban goc CHUA TUNG de model thay
+    # SETPOINT_ATTACK voi < 4 target/chu ky, nen model de hoc nham "phai du
+    # ca 4 thi moi la SETPOINT".
+    rate_tier = os.environ.get("ATTACK_RATE_TIER", "normal")
+    sleep_range = {"slow": (20.0, 60.0), "normal": (4.0, 20.0), "fast": (0.4, 4.0)}.get(rate_tier, (0.4, 60.0))
 else:
     sleep_range = (0.4, 1.2)
 c = snap7.client.Client()
@@ -996,11 +1004,12 @@ if profile == "day6_robust":
 elif profile == "extended_300k":
     sleep_range = (2.0, 8.0)
 elif profile == "diverse_mix":
-    # Trai deu toc do standard->day6_robust. Ngoai ra random DOC LAP tung
-    # bit thay vi chon tu danh sach pattern co san -- van CHI 3 dia chi cu
-    # (M5.4/M5.6/M6.0), nhung them ca to hop 1-bit/0-bit ma pattern list
-    # goc chua bao gio co (vd chi Vat_1 bat, hoac ca 3 tat).
-    sleep_range = (0.4, 45.0)
+    # Chot theo rate tier (1 lan/rep). Ngoai ra random DOC LAP tung bit thay
+    # vi chon tu danh sach pattern co san -- van CHI 3 dia chi cu (M5.4/
+    # M5.6/M6.0), nhung them ca to hop 1-bit/0-bit ma pattern list goc chua
+    # bao gio co (vd chi Vat_1 bat, hoac ca 3 tat).
+    rate_tier = os.environ.get("ATTACK_RATE_TIER", "normal")
+    sleep_range = {"slow": (15.0, 45.0), "normal": (3.0, 15.0), "fast": (0.4, 3.0)}.get(rate_tier, (0.4, 45.0))
 else:
     sleep_range = (0.4, 1.5)
 c = snap7.client.Client()
@@ -1075,7 +1084,9 @@ if profile == "day6_robust":
 elif profile == "extended_300k":
     sleep_range = (5.0, 20.0)
 elif profile == "diverse_mix":
-    sleep_range = (1.5, 60.0)
+    # Chot theo rate tier (1 lan/rep) thay vi random lai moi vong lap.
+    rate_tier = os.environ.get("ATTACK_RATE_TIER", "normal")
+    sleep_range = {"slow": (20.0, 60.0), "normal": (5.0, 20.0), "fast": (1.5, 5.0)}.get(rate_tier, (1.5, 60.0))
 else:
     sleep_range = (1.5, 3.0)
 c = snap7.client.Client()
@@ -1137,10 +1148,12 @@ if profile == "day6_robust":
 elif profile == "extended_300k":
     threads_n = max(1, min(threads_n, 4))
 elif profile == "diverse_mix":
-    # So thread ngau nhien tu 1 den muc cau hinh moi lan chay (moi episode
-    # la 1 tien trinh moi) -- cho tap train co ca vi du it thread/nhe lan
-    # nhieu thread/nang, khong chi co 1 muc cuong do co dinh.
-    threads_n = random.randint(1, max(1, threads_n))
+    # Chot so thread theo rate tier (1 lan/rep, xem rate_tier_for_rep() o
+    # bash) thay vi random.randint moi lan chay -- truoc day random tu 1..N
+    # nen tinh co (khong dam bao) moi rep khac cuong do; gio dam bao ro rang
+    # rep slow/normal/fast co so thread khac nhau co chu dich.
+    rate_tier = os.environ.get("ATTACK_RATE_TIER", "normal")
+    threads_n = {"slow": 1, "normal": max(1, threads_n // 2), "fast": max(1, threads_n)}.get(rate_tier, random.randint(1, max(1, threads_n)))
 lock = threading.Lock()
 ok = 0
 fail = 0
@@ -1208,7 +1221,8 @@ if profile == "day6_robust":
 elif profile == "extended_300k":
     threads_n = max(1, min(threads_n, 6))
 elif profile == "diverse_mix":
-    threads_n = random.randint(1, max(1, threads_n))
+    rate_tier = os.environ.get("ATTACK_RATE_TIER", "normal")
+    threads_n = {"slow": 1, "normal": max(1, threads_n // 2), "fast": max(1, threads_n)}.get(rate_tier, random.randint(1, max(1, threads_n)))
 def one_connect():
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -1263,7 +1277,8 @@ if profile == "day6_robust":
 elif profile == "extended_300k":
     sleep_range = (1.0, 5.0)
 elif profile == "diverse_mix":
-    sleep_range = (0.05, 20.0)
+    rate_tier = os.environ.get("ATTACK_RATE_TIER", "normal")
+    sleep_range = {"slow": (5.0, 20.0), "normal": (0.5, 5.0), "fast": (0.05, 0.5)}.get(rate_tier, (0.05, 20.0))
 else:
     sleep_range = (0.05, 0.25)
 n = 0
@@ -1348,12 +1363,30 @@ needs_restore() {
     esac
 }
 
+rate_tier_for_rep() {
+    # Chot 1 tier toc do CO DINH cho ca rep (khong doi trong suot rep), xoay
+    # vong slow->normal->fast theo so thu tu rep -- giong cach bt_s1 (bo cu)
+    # dat ten rate_slow/rate_normal/rate_fast, de trung binh toc do MOI REP
+    # khac nhau ro ret thay vi hoi tu ve cung 1 gia tri do random lai moi
+    # vong lap (xem ghi chu trong tung block python ben duoi).
+    local rep="$1"
+    case $(( (rep - 1) % 3 )) in
+        0) echo "slow" ;;
+        1) echo "normal" ;;
+        2) echo "fast" ;;
+    esac
+}
+
 run_attack_episode() {
     local scenario="$1"
     local duration_s="$2"
     local rep="$3"
     local episode_id="${SESSION_ID}:day${DAY}:${scenario}:r${rep}"
-    local note="rep=${rep};duration_s=${duration_s};host=${HOST_ID};profile=${ATTACK_PROFILE}"
+    local rate_tier="normal"
+    if [[ "$ATTACK_PROFILE" == "diverse_mix" ]]; then
+        rate_tier="$(rate_tier_for_rep "$rep")"
+    fi
+    local note="rep=${rep};duration_s=${duration_s};host=${HOST_ID};profile=${ATTACK_PROFILE};rate=${rate_tier}"
     local pid
 
     if [[ "$ATTACK_EVENT_LOG_ENABLED" == "1" ]]; then
@@ -1362,6 +1395,7 @@ run_attack_episode() {
     else
         export ATTACK_EVENT_FILE=""
     fi
+    export ATTACK_RATE_TIER="$rate_tier"
     export ATTACK_EPISODE_ID="$episode_id" ATTACK_SCENARIO="$scenario" ATTACK_DAY="$DAY" SESSION_ID HOST_ID ATTACK_PROFILE
 
     label "$scenario" "START" "$episode_id" "$note"
