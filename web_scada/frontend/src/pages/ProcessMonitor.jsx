@@ -35,7 +35,7 @@ export default function ProcessMonitor() {
   const bangTai = tags.bang_tai;
   const isRunning = !bangTai?.stale && bangTai?.value === true;
   const offline = !bangTai || bangTai.stale;
-  const conveyorLabel = offline ? "OFFLINE" : isRunning ? "RUNNING" : "STOPPED";
+  const conveyorLabel = offline ? "MẤT KẾT NỐI" : isRunning ? "ĐANG CHẠY" : "ĐÃ DỪNG";
 
   const stageTagsFresh = ["vat_1", "vat_2", "vat_3"].every((k) => tags[k] && !tags[k].stale);
   const sensorSpoofSuspected =
@@ -53,8 +53,8 @@ export default function ProcessMonitor() {
         <div className="rounded-lg border border-gray-700 bg-gray-800 p-6 shadow-sm shadow-black/20">
           <div className="mb-6 flex items-center justify-between">
             <div>
-              <div className="text-sm font-semibold text-gray-200">Line flow</div>
-              <div className="text-xs text-gray-500">No physical sensor is drawn unless a subscribed tag exists.</div>
+              <div className="text-sm font-semibold text-gray-200">Sơ đồ dây chuyền</div>
+              <div className="text-xs text-gray-500">Chỉ vẽ cảm biến/thiết bị khi có tag OPC UA thật đã subscribe.</div>
             </div>
             <span className={`rounded px-2 py-1 text-xs font-bold ${offline ? "bg-red-950 text-red-400" : isRunning ? "bg-green-950 text-green-400" : "bg-yellow-950 text-yellow-400"}`}>
               {conveyorLabel}
@@ -65,26 +65,26 @@ export default function ProcessMonitor() {
             <div className="mb-4 flex items-start gap-2 rounded-lg border border-red-600 bg-red-950/40 px-4 py-3 text-sm font-semibold text-red-300 animate-fade-in">
               <AlertTriangle size={16} className="mt-0.5 shrink-0" />
               <span>
-                Sensor spoof suspected — vat_1, vat_2 and vat_3 are all active at the same time,
-                which is not physically possible on a single-lane conveyor.
+                Nghi ngờ giả mạo cảm biến — vat_1, vat_2 và vat_3 cùng lúc báo hoạt động,
+                điều không thể xảy ra thật trên một băng tải một làn.
               </span>
             </div>
           )}
 
           <div className="mb-3 text-xs text-slate-600">
-            Stage 1–3 báo vị trí vật đang nằm ở công đoạn nào (cảm biến hiện diện) — không phải trạng thái động
-            cơ. Băng tải dừng thì vật vẫn nằm nguyên chỗ, nên 1 stage vẫn có thể ACTIVE dù conveyor STOPPED — đó
-            là bình thường. Chỉ đáng ngờ khi &gt; 1 stage cùng active một lúc.
+            Công đoạn 1–3 báo vị trí vật đang nằm ở đâu (cảm biến hiện diện) — không phải trạng thái động
+            cơ. Băng tải dừng thì vật vẫn nằm nguyên chỗ, nên 1 công đoạn vẫn có thể HOẠT ĐỘNG dù băng tải ĐÃ DỪNG
+            — đó là bình thường. Chỉ đáng ngờ khi &gt; 1 công đoạn cùng hoạt động một lúc.
           </div>
 
           <div className="flex flex-col items-center gap-3">
-            <FlowNode label="Motor / Conveyor" tag={bangTai} active={isRunning} offline={offline} value={conveyorLabel} />
+            <FlowNode label="Động cơ / Băng tải" tag={bangTai} active={isRunning} offline={offline} value={conveyorLabel} />
             <Arrow />
-            <FlowNode label="Stage 1" tag={tags.vat_1} active={!tags.vat_1?.stale && tags.vat_1?.value === true} value={stageValue(tags.vat_1)} danger={sensorSpoofSuspected} />
+            <FlowNode label="Công đoạn 1" tag={tags.vat_1} active={!tags.vat_1?.stale && tags.vat_1?.value === true} value={stageValue(tags.vat_1)} danger={sensorSpoofSuspected} />
             <Arrow />
-            <FlowNode label="Stage 2" tag={tags.vat_2} active={!tags.vat_2?.stale && tags.vat_2?.value === true} value={stageValue(tags.vat_2)} danger={sensorSpoofSuspected} />
+            <FlowNode label="Công đoạn 2" tag={tags.vat_2} active={!tags.vat_2?.stale && tags.vat_2?.value === true} value={stageValue(tags.vat_2)} danger={sensorSpoofSuspected} />
             <Arrow />
-            <FlowNode label="Stage 3" tag={tags.vat_3} active={!tags.vat_3?.stale && tags.vat_3?.value === true} value={stageValue(tags.vat_3)} danger={sensorSpoofSuspected} />
+            <FlowNode label="Công đoạn 3" tag={tags.vat_3} active={!tags.vat_3?.stale && tags.vat_3?.value === true} value={stageValue(tags.vat_3)} danger={sensorSpoofSuspected} />
             <Arrow />
             <FlowNode label="Bộ đếm sản phẩm" tag={tags.hien_thi} active={!tags.hien_thi?.stale} value={counterValue(tags.hien_thi)} />
           </div>
@@ -101,7 +101,7 @@ export default function ProcessMonitor() {
           </div>
 
           <div className="rounded-lg border border-gray-700 bg-gray-800 p-4 shadow-sm shadow-black/20">
-            <div className="mb-3 text-sm font-semibold text-gray-200">Stage timers</div>
+            <div className="mb-3 text-sm font-semibold text-gray-200">Timer công đoạn</div>
             <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
               {["cd1", "cd2", "cd3"].map((key) => {
                 const t = tags[key];
@@ -113,7 +113,7 @@ export default function ProcessMonitor() {
           </div>
 
           <div className="rounded-lg border border-gray-700 bg-gray-800 p-4 shadow-sm shadow-black/20">
-            <div className="mb-3 text-sm font-semibold text-gray-200">Subscribed process tags</div>
+            <div className="mb-3 text-sm font-semibold text-gray-200">Tag tiến trình đã subscribe</div>
             <div className="space-y-2">
               {["bang_tai", "vat_1", "vat_2", "vat_3", "nhap", "hien_thi", "cd1", "cd2", "cd3"].map((key) => {
                 const t = tags[key];
@@ -195,9 +195,9 @@ function FlowNode({ label, tag, active, offline, value, danger }) {
       <div className="flex items-center justify-between gap-4">
         <div>
           <div className="font-semibold text-gray-100">{label}</div>
-          <div className="text-[10px] text-gray-600">{tag?.key || "not subscribed"}</div>
+          <div className="text-[10px] text-gray-600">{tag?.key || "chưa subscribe"}</div>
         </div>
-        <div className={`font-mono text-sm font-bold ${text}`}>{stale ? "UNKNOWN" : value}</div>
+        <div className={`font-mono text-sm font-bold ${text}`}>{stale ? "CHƯA RÕ" : value}</div>
       </div>
     </div>
   );
@@ -216,7 +216,7 @@ function TagRow({ tag, fallbackKey }) {
         <div className="text-[10px] text-gray-600">{tag?.key || fallbackKey}</div>
       </div>
       <div className="text-right">
-        <div className={`font-mono text-sm font-bold ${stale ? "text-gray-600" : "text-green-300"}`}>{stale ? "STALE" : formatValue(tag.value)}</div>
+        <div className={`font-mono text-sm font-bold ${stale ? "text-gray-600" : "text-green-300"}`}>{stale ? "CŨ" : formatValue(tag.value)}</div>
         <div className="text-[10px] text-gray-600">{tag?.quality || "—"}</div>
       </div>
     </div>
@@ -224,12 +224,12 @@ function TagRow({ tag, fallbackKey }) {
 }
 
 function stageValue(tag) {
-  if (!tag || tag.stale) return "UNKNOWN";
-  return tag.value ? "ACTIVE" : "INACTIVE";
+  if (!tag || tag.stale) return "CHƯA RÕ";
+  return tag.value ? "HOẠT ĐỘNG" : "KHÔNG HOẠT ĐỘNG";
 }
 
 function counterValue(tag) {
-  if (!tag || tag.stale) return "UNKNOWN";
+  if (!tag || tag.stale) return "CHƯA RÕ";
   return String(tag.value ?? "—");
 }
 

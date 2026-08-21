@@ -64,14 +64,14 @@ export default function Overview() {
   const plcConnected = plcStatus?.connected !== false;
   const noData = !bangTai || Object.keys(tags).length === 0;
   const conveyorStatus = noData
-    ? "LOADING"
+    ? "ĐANG TẢI"
     : !plcConnected || bangTai.stale
-      ? "OFFLINE"
+      ? "MẤT KẾT NỐI"
       : bangTai.value
-        ? "RUNNING"
-        : "STOPPED";
-  const isRunning = conveyorStatus === "RUNNING";
-  const offline = conveyorStatus === "OFFLINE";
+        ? "ĐANG CHẠY"
+        : "ĐÃ DỪNG";
+  const isRunning = conveyorStatus === "ĐANG CHẠY";
+  const offline = conveyorStatus === "MẤT KẾT NỐI";
 
   const targetQuantity = readNumber(tags.nhap);
   const producedQuantity = readNumber(tags.hien_thi);
@@ -121,7 +121,7 @@ export default function Overview() {
 
       <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
         <div className="rounded-lg border border-gray-700 bg-gray-800 p-5 shadow-sm shadow-black/20">
-          <div className="mb-4 text-sm font-semibold text-gray-200">Process stages</div>
+          <div className="mb-4 text-sm font-semibold text-gray-200">Công đoạn tiến trình</div>
           <div className="grid gap-3 sm:grid-cols-3">
             {["vat_1", "vat_2", "vat_3"].map((key, index) => {
             const t = tags[key];
@@ -129,9 +129,9 @@ export default function Overview() {
             const unknown = !t || t.stale;
             return (
               <div key={key} className={`rounded-lg border p-4 transition-colors ${active ? "border-blue-500 bg-blue-950/30" : unknown ? "border-gray-700 bg-gray-900/40" : "border-gray-700 bg-gray-900/20"}`}>
-                <div className="text-xs text-gray-500">Stage {index + 1}</div>
+                <div className="text-xs text-gray-500">Công đoạn {index + 1}</div>
                 <div className={`mt-2 text-lg font-bold ${active ? "text-blue-300" : unknown ? "text-gray-600" : "text-gray-300"}`}>
-                  {unknown ? "UNKNOWN" : active ? "ACTIVE" : "INACTIVE"}
+                  {unknown ? "CHƯA RÕ" : active ? "HOẠT ĐỘNG" : "KHÔNG HOẠT ĐỘNG"}
                 </div>
                 <div className="mt-1 text-[10px] text-gray-600">{key}</div>
               </div>
@@ -185,8 +185,8 @@ function formatRuntime(totalSeconds) {
 }
 
 function statusColor(status) {
-  if (status === "RUNNING") return "text-green-400";
-  if (status === "STOPPED") return "text-yellow-400";
-  if (status === "OFFLINE") return "text-red-400";
+  if (status === "ĐANG CHẠY") return "text-green-400";
+  if (status === "ĐÃ DỪNG") return "text-yellow-400";
+  if (status === "MẤT KẾT NỐI") return "text-red-400";
   return "text-gray-500";
 }

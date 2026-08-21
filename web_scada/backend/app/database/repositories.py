@@ -14,7 +14,7 @@ from typing import Any
 from sqlalchemy import delete, func, select
 
 from .connection import get_session
-from .models import EventRow, TagSample
+from .models import EventRow, PcapAnalysisRow, TagSample
 
 TZ = timezone(timedelta(hours=7))
 MAX_ROWS_PER_TAG = 20000
@@ -139,6 +139,49 @@ def query_recent_events(limit: int = 1000) -> list[dict]:
     session = get_session()
     try:
         stmt = select(EventRow).order_by(EventRow.timestamp.desc()).limit(limit)
+        return [row.to_dict() for row in session.scalars(stmt).all()]
+    finally:
+        session.close()
+
+
+MAX_PCAP_ANALYSIS_ROWS = 500
+
+
+def insert_pcap_analysis(record: dict) -> None:
+    import json
+
+    session = get_session()
+    try:
+        session.add(PcapAnalysisRow(
+            id=record["id"],
+            timestamp=datetime.fromisoformat(record["timestamp"]),
+            protocol=record["protocol"],
+            source_file=record["source_file"],
+            analyzed_by=record["analyzed_by"],
+            total_flows=record["total_flows"],
+            attack_flows=record["attack_flows"],
+            attack_ratio=record["attack_ratio"],
+            prediction_counts_json=json.dumps(record["prediction_counts"]),
+            model_dir=record["model_dir"],
+        ))
+        session.commit()
+
+        count = session.scalar(select(func.count()).select_from(PcapAnalysisRow))
+        if count and count > MAX_PCAP_ANALYSIS_ROWS:
+            oldest_ids = session.scalars(
+                select(PcapAnalysisRow.id).order_by(PcapAnalysisRow.timestamp).limit(count - MAX_PCAP_ANALYSIS_ROWS)
+            ).all()
+            if oldest_ids:
+                session.execute(delete(PcapAnalysisRow).where(PcapAnalysisRow.id.in_(oldest_ids)))
+                session.commit()
+    finally:
+        session.close()
+
+
+def query_recent_pcap_analyses(limit: int = 200) -> list[dict]:
+    session = get_session()
+    try:
+        stmt = select(PcapAnalysisRow).order_by(PcapAnalysisRow.timestamp.desc()).limit(limit)
         return [row.to_dict() for row in session.scalars(stmt).all()]
     finally:
         session.close()

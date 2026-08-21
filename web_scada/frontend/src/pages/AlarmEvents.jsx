@@ -9,13 +9,16 @@ import { COMMAND_EVENT_TYPES } from "../constants/events";
 
 export default function AlarmEvents() {
   const [events, setEvents] = useState([]);
-  const [activeCount, setActiveCount] = useState(0);
   const [lastUpdate, setLastUpdate] = useState(null);
+  // Derived from the events already on screen (not the backend's separate
+  // alarm_engine counter) so it counts every ACTIVE event type shown below —
+  // including ones alarm_engine itself never tracks, like ATTACK_PCAP_DETECTED
+  // from an IDS Upload finding — instead of silently under-counting.
+  const activeCount = events.filter((e) => e.status === "ACTIVE").length;
 
   useEffect(() => {
     fetchEvents().then((data) => {
       setEvents((data.events || []).filter((e) => !COMMAND_EVENT_TYPES.includes(e.event_type)));
-      setActiveCount(data.active_count || 0);
       setLastUpdate(data.timestamp || null);
     });
 
@@ -30,11 +33,6 @@ export default function AlarmEvents() {
           }
           return [data.event, ...prev].slice(0, 100);
         });
-        if (data.active_count !== null && data.active_count !== undefined) {
-          setActiveCount(data.active_count);
-        } else if (data.event.active_count !== null && data.event.active_count !== undefined) {
-          setActiveCount(data.event.active_count);
-        }
         setLastUpdate(data.event.timestamp);
       }
     });
@@ -63,7 +61,7 @@ export default function AlarmEvents() {
       <div className="grid gap-4 sm:grid-cols-3">
         <SummaryCard label="Cảnh báo đang hoạt động" value={activeCount} color={activeCount > 0 ? "text-red-400" : "text-green-400"} icon={Bell} />
         <SummaryCard label="Sự kiện đã lưu" value={events.length} icon={Inbox} />
-        <SummaryCard label="Lưu trữ" value="Cơ sở dữ liệu (SQLite)" color="text-green-400" icon={Database} />
+        <SummaryCard label="Lưu trữ" value="Cơ sở dữ liệu" color="text-green-400" icon={Database} />
       </div>
 
       <div className="overflow-hidden rounded-lg border border-gray-700 bg-gray-800 shadow-sm shadow-black/20">

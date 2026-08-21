@@ -1,7 +1,7 @@
 import { Routes, Route, Navigate, NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Workflow, Bell, TrendingUp, ShieldCheck,
-  BarChart3, UploadCloud, ServerCog, Users as UsersIcon, ChevronRight,
+  UploadCloud, ServerCog, Users as UsersIcon, ChevronRight, FileClock,
   Database, Settings2, ClipboardList,
 } from "lucide-react";
 import StatusBar from "./components/StatusBar";
@@ -10,12 +10,12 @@ import ProcessMonitor from "./pages/ProcessMonitor";
 import AlarmEvents from "./pages/AlarmEvents";
 import AuditLog from "./pages/AuditLog";
 import Trends from "./pages/Trends";
-import SecurityView from "./pages/SecurityView";
 import SystemStatus from "./pages/SystemStatus";
-import DatasetStats from "./pages/DatasetStats";
 import IdsUpload from "./pages/IdsUpload";
+import PcapHistory from "./pages/PcapHistory";
 import Login from "./pages/Login";
 import AdminUsers from "./pages/AdminUsers";
+import OpcuaConfig from "./pages/OpcuaConfig";
 import { AuthProvider, useAuth } from "./stores/authStore";
 import { ConfirmProvider } from "./components/ConfirmDialog";
 import { ToastProvider } from "./components/Toast";
@@ -47,7 +47,6 @@ const NAV_GROUPS = [
     icon: UploadCloud,
     items: [
       { to: "/ids-upload", label: "Tải PCAP phân tích", icon: UploadCloud, end: false, minRole: "operator" },
-      { to: "/dataset", label: "Thống kê mô hình AI", icon: BarChart3, end: false, minRole: "operator" },
     ],
   },
   {
@@ -56,7 +55,7 @@ const NAV_GROUPS = [
     items: [
       { to: "/trends", label: "Xu hướng & Lịch sử", icon: TrendingUp, end: false, minRole: "viewer" },
       { to: "/audit", label: "Nhật ký điều khiển", icon: ClipboardList, end: false, minRole: "operator" },
-      { to: "/security", label: "Lịch sử kịch bản tấn công", icon: ShieldCheck, end: false, minRole: "operator" },
+      { to: "/pcap-history", label: "Lịch sử phân tích PCAP", icon: FileClock, end: false, minRole: "operator" },
     ],
   },
   {
@@ -65,6 +64,7 @@ const NAV_GROUPS = [
     items: [
       { to: "/system", label: "Trạng thái hệ thống", icon: ServerCog, end: false, minRole: "viewer" },
       { to: "/admin/users", label: "Người dùng", icon: UsersIcon, end: false, minRole: "admin" },
+      { to: "/admin/opcua", label: "Cấu hình OPC UA", icon: Settings2, end: false, minRole: "admin" },
     ],
   },
 ];
@@ -201,12 +201,12 @@ function Shell() {
               <Route path="/process" element={<RequireRole minRole="viewer"><ProcessMonitor /></RequireRole>} />
               <Route path="/alarms" element={<RequireRole minRole="viewer"><AlarmEvents /></RequireRole>} />
               <Route path="/audit" element={<RequireRole minRole="operator"><AuditLog /></RequireRole>} />
+              <Route path="/pcap-history" element={<RequireRole minRole="operator"><PcapHistory /></RequireRole>} />
               <Route path="/trends" element={<RequireRole minRole="viewer"><Trends /></RequireRole>} />
-              <Route path="/security" element={<RequireRole minRole="operator"><SecurityView /></RequireRole>} />
-              <Route path="/dataset" element={<RequireRole minRole="operator"><DatasetStats /></RequireRole>} />
               <Route path="/ids-upload" element={<RequireRole minRole="operator"><IdsUpload /></RequireRole>} />
               <Route path="/system" element={<RequireRole minRole="viewer"><SystemStatus /></RequireRole>} />
               <Route path="/admin/users" element={<RequireRole minRole="admin"><AdminUsers /></RequireRole>} />
+              <Route path="/admin/opcua" element={<RequireRole minRole="admin"><OpcuaConfig /></RequireRole>} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </div>

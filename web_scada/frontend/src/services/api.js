@@ -186,3 +186,24 @@ export async function analyzeIdsPcapOpcua(file, plcIp, window) {
   if (!res.ok) throw new Error(body.message || body.detail || "Phân tích thất bại");
   return body;
 }
+
+export async function fetchIdsHistory(limit = 100) {
+  const res = await apiFetch(`/ids/history?limit=${limit}`);
+  return res.json();
+}
+
+export async function fetchOpcuaConfig() {
+  const res = await apiFetch("/admin/opcua-config");
+  return res.json();
+}
+
+export async function setOpcuaConfig(endpoint) {
+  const res = await apiFetch("/admin/opcua-config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ endpoint }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.message || body.detail || "Cập nhật cấu hình thất bại");
+  return body;
+}

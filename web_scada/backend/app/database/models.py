@@ -73,3 +73,41 @@ class EventRow(Base):
             "acked_by": self.acked_by,
             "acked_at": self.acked_at.isoformat() if self.acked_at else None,
         }
+
+
+class PcapAnalysisRow(Base):
+    """One row per pcap uploaded to IDS Upload — the page itself only ever
+    held the most recent result in browser memory, so a page refresh or a
+    second analyst lost every earlier run. This table is what backs the
+    "Lịch sử phân tích PCAP" page.
+    """
+
+    __tablename__ = "pcap_analyses"
+    __table_args__ = (Index("ix_pcap_analyses_timestamp", "timestamp"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime)
+    protocol: Mapped[str] = mapped_column(String(16))
+    source_file: Mapped[str] = mapped_column(String(255))
+    analyzed_by: Mapped[str] = mapped_column(String(64))
+    total_flows: Mapped[int] = mapped_column(Integer)
+    attack_flows: Mapped[int] = mapped_column(Integer)
+    attack_ratio: Mapped[float] = mapped_column(Float)
+    prediction_counts_json: Mapped[str] = mapped_column(String(1024))
+    model_dir: Mapped[str] = mapped_column(String(255))
+
+    def to_dict(self) -> dict:
+        import json
+
+        return {
+            "id": self.id,
+            "timestamp": self.timestamp.isoformat(),
+            "protocol": self.protocol,
+            "source_file": self.source_file,
+            "analyzed_by": self.analyzed_by,
+            "total_flows": self.total_flows,
+            "attack_flows": self.attack_flows,
+            "attack_ratio": self.attack_ratio,
+            "prediction_counts": json.loads(self.prediction_counts_json),
+            "model_dir": self.model_dir,
+        }

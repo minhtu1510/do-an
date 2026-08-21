@@ -69,6 +69,16 @@ class OPCUAGateway:
     def on_value_change(self, callback: Callable[[str, TagValue], None]):
         self._callbacks.append(callback)
 
+    async def reconfigure_endpoint(self, new_endpoint: str) -> None:
+        """Point at a different OPC UA server without restarting the backend
+        process. Sets the new address first, then tears down the current
+        session the same way a real disconnect does — start()'s reconnect
+        loop picks the new self.endpoint up on its very next cycle, with no
+        error logged since this isn't actually a failure.
+        """
+        self.endpoint = new_endpoint
+        await self._disconnect()
+
     async def start(self):
         self._running = True
         self._task = asyncio.current_task()
