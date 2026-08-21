@@ -130,25 +130,25 @@ export default function SystemStatus() {
 
       <div className="grid gap-4 sm:grid-cols-3">
         <ResourcePanel
-          label="CPU — máy backend"
+          label="CPU — máy controller"
           value={resources?.cpu_percent ?? 0}
           color={gaugeColor(resources?.cpu_percent ?? 0)}
           history={history.cpu}
-          note="Tài nguyên máy chạy Web-SCADA gateway, không phải PLC (PLC không có hệ điều hành để đo)."
+          note="Tài nguyên máy controller chạy Web-SCADA gateway, không phải PLC (PLC không có hệ điều hành để đo)."
         />
         <ResourcePanel
-          label="RAM — máy backend"
+          label="RAM — máy controller"
           value={resources?.memory_percent ?? 0}
           color={gaugeColor(resources?.memory_percent ?? 0)}
           history={history.mem}
           note="Tăng khi gateway phải xử lý khối lượng OPC UA lớn (vd: subscription flood)."
         />
         <ResourcePanel
-          label="Disk — máy backend"
+          label="Disk — máy controller"
           value={resources?.disk_percent ?? 0}
           color={gaugeColor(resources?.disk_percent ?? 0)}
           history={history.disk}
-          note="Dung lượng ổ đĩa hệ thống nơi chạy backend (historian DB, model AI...)."
+          note="Dung lượng ổ đĩa hệ thống nơi chạy máy controller (historian DB, model AI...)."
         />
       </div>
 

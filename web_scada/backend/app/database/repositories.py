@@ -14,7 +14,7 @@ from typing import Any
 from sqlalchemy import delete, func, select
 
 from .connection import get_session
-from .models import TagSample
+from .models import EventRow, TagSample
 
 TZ = timezone(timedelta(hours=7))
 MAX_ROWS_PER_TAG = 20000
@@ -81,3 +81,46 @@ def query_tag_history(tag_key: str, start: str | None, end: str | None) -> list[
 
 def query_process_history(tag_keys: list[str], start: str | None, end: str | None) -> dict[str, list[dict]]:
     return {key: query_tag_history(key, start, end) for key in tag_keys}
+
+
+def insert_event(event: dict) -> None:
+    session = get_session()
+    try:
+        session.add(EventRow(
+            id=event["id"],
+            event_type=event["event_type"],
+            message=event["message"],
+            severity=event["severity"],
+            tag_key=event.get("tag_key"),
+            old_value=None if event.get("old_value") is None else str(event["old_value"]),
+            new_value=None if event.get("new_value") is None else str(event["new_value"]),
+            status=event["status"],
+            timestamp=datetime.fromisoformat(event["timestamp"]),
+            acked_by=event.get("acked_by"),
+            acked_at=datetime.fromisoformat(event["acked_at"]) if event.get("acked_at") else None,
+        ))
+        session.commit()
+    finally:
+        session.close()
+
+
+def update_event_ack(event_id: str, acked_by: str, acked_at: str, status: str) -> None:
+    session = get_session()
+    try:
+        row = session.get(EventRow, event_id)
+        if row is not None:
+            row.acked_by = acked_by
+            row.acked_at = datetime.fromisoformat(acked_at)
+            row.status = status
+            session.commit()
+    finally:
+        session.close()
+
+
+def query_recent_events(limit: int = 1000) -> list[dict]:
+    session = get_session()
+    try:
+        stmt = select(EventRow).order_by(EventRow.timestamp.desc()).limit(limit)
+        return [row.to_dict() for row in session.scalars(stmt).all()]
+    finally:
+        session.close()

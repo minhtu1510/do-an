@@ -33,6 +33,7 @@ export default function AuditLog() {
   const writeCount = events.filter((e) => e.event_type === "COMMAND_WRITE").length;
   const rejectedCount = events.filter((e) => e.event_type === "COMMAND_REJECTED").length;
   const failedCount = events.filter((e) => e.event_type === "COMMAND_FAILED").length;
+  const blockedCount = events.filter((e) => e.event_type === "COMMAND_RATE_LIMITED" || e.event_type === "ACCESS_DENIED").length;
 
   return (
     <div className="p-6 space-y-6">
@@ -43,10 +44,11 @@ export default function AuditLog() {
         right={<ExportCsvButton eventTypes={COMMAND_EVENT_TYPES} label="Export audit CSV" />}
       />
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <SummaryCard label="Lệnh thành công" value={writeCount} color="text-green-400" icon={ShieldCheck} />
         <SummaryCard label="Bị từ chối (validate)" value={rejectedCount} color="text-yellow-400" icon={ShieldAlert} />
         <SummaryCard label="Lỗi (không kết nối...)" value={failedCount} color="text-red-400" icon={ShieldX} />
+        <SummaryCard label="Bị chặn (rate-limit / quyền)" value={blockedCount} color="text-orange-400" icon={ShieldAlert} />
       </div>
 
       <div className="overflow-hidden rounded-lg border border-gray-700 bg-gray-800 shadow-sm shadow-black/20">
@@ -88,6 +90,8 @@ const TYPE_STYLE = {
   COMMAND_WRITE: { label: "WRITE", color: "text-green-300 bg-green-950/40" },
   COMMAND_REJECTED: { label: "REJECTED", color: "text-yellow-300 bg-yellow-950/40" },
   COMMAND_FAILED: { label: "FAILED", color: "text-red-300 bg-red-950/40" },
+  COMMAND_RATE_LIMITED: { label: "RATE LIMITED", color: "text-orange-300 bg-orange-950/40" },
+  ACCESS_DENIED: { label: "ACCESS DENIED", color: "text-orange-300 bg-orange-950/40" },
 };
 
 function AuditRow({ event }) {

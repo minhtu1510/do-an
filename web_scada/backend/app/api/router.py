@@ -1,8 +1,11 @@
-"""API routes — read-only OPC UA tags. No Write endpoints."""
+"""API routes — mostly read-only OPC UA tags, plus a whitelisted, rate-limited,
+role-gated write path for PLC control (see write_tag below)."""
 
 import csv
 import io
 import os
+import time
+from collections import defaultdict
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response
 from dotenv import load_dotenv
@@ -97,6 +100,25 @@ class TagWriteRequest(BaseModel):
     value: bool | int | float
 
 
+# Per-user write rate limit — a legitimate operator clicking a button a few
+# times a minute never comes close to this; a compromised/scripted account
+# hammering the write endpoint does. In-memory is fine here: it only needs to
+# survive within one backend process's uptime, not a restart.
+WRITE_RATE_LIMIT_MAX = 5
+WRITE_RATE_LIMIT_WINDOW_S = 10
+_write_attempts: dict[str, list[float]] = defaultdict(list)
+
+
+def _check_write_rate_limit(username: str) -> bool:
+    now = time.monotonic()
+    attempts = _write_attempts[username]
+    attempts[:] = [t for t in attempts if now - t < WRITE_RATE_LIMIT_WINDOW_S]
+    if len(attempts) >= WRITE_RATE_LIMIT_MAX:
+        return False
+    attempts.append(now)
+    return True
+
+
 @api_router.post("/tags/{tag_key}/write")
 async def write_tag(tag_key: str, body: TagWriteRequest, user=Depends(require_role("controller"))):
     """Write a value to a whitelisted PLC tag (see `writable` in opcua_tags.yaml).
@@ -104,6 +126,19 @@ async def write_tag(tag_key: str, body: TagWriteRequest, user=Depends(require_ro
     so there is always an audit trail of who issued which command.
     """
     from ..websocket.manager import ws_manager
+
+    if not _check_write_rate_limit(user.username):
+        event_service.add(EventRecord(
+            event_type="COMMAND_RATE_LIMITED",
+            severity="WARNING",
+            message=f"{user.username} bị chặn: quá {WRITE_RATE_LIMIT_MAX} lệnh ghi trong {WRITE_RATE_LIMIT_WINDOW_S}s (tag={tag_key})",
+            tag_key=tag_key,
+            status="CLEARED",
+        ))
+        return JSONResponse(
+            status_code=429,
+            content={"error": "rate_limited", "message": f"Quá {WRITE_RATE_LIMIT_MAX} lệnh ghi trong {WRITE_RATE_LIMIT_WINDOW_S}s, thử lại sau."},
+        )
 
     g = _gateway()
     old_value = g.get_value(tag_key)

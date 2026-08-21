@@ -59,6 +59,22 @@ function formatTime(t) {
   return new Date(t).toLocaleTimeString();
 }
 
+// Recharts renders every row as real SVG geometry — a pcap with tens of
+// thousands of flow windows would freeze the tab drawing Fusion Chart/swimlane
+// points one by one. Same fix as Trends.jsx's downsampleForChart: a display-
+// only stride cap (always keeps the last point so nothing recent is silently
+// dropped) — full-resolution data is untouched everywhere else (PDF export
+// captures whatever is on screen, flow table below reads straight from
+// `result`, not this downsampled view).
+function downsampleForChart(rows, maxPoints = 3000) {
+  if (!rows || rows.length <= maxPoints) return rows || [];
+  const step = Math.ceil(rows.length / maxPoints);
+  const out = [];
+  for (let i = 0; i < rows.length; i += step) out.push(rows[i]);
+  if (out[out.length - 1] !== rows[rows.length - 1]) out.push(rows[rows.length - 1]);
+  return out;
+}
+
 // Buckets timeline into N time slices so the stat-tile sparklines show a real
 // trend (flow volume, attack ratio) instead of a single flat number.
 function bucketTimeline(timeline, bucketCount = 16) {
@@ -131,21 +147,45 @@ function toEpoch(iso) {
 // shared clock, forward-filling tag values — the left axis is real process
 // data, the right axis is real per-window model confidence. Only meaningful
 // where their real timestamp ranges genuinely overlap (see hasOverlap).
+//
+// Each input array is already sorted by time (historian query is ORDER BY
+// timestamp; pcapPoints is sortedTimeline, sorted client-side), so this walks
+// each with a single advancing pointer instead of `.find()`-scanning it for
+// every merged timestamp — same O(n) fix as Trends.jsx's mergeSeries. This
+// one matters even more here: the caller used to re-run the O(n²) version on
+// every ~150ms playback tick (see fusionMerged below), which would visibly
+// stutter or freeze the "Phát lại" animation on any non-trivial pcap.
 function mergeFusion(historianSeries, pcapPoints) {
+  const seriesKeys = Object.keys(historianSeries);
   const allTimes = new Set();
   Object.values(historianSeries).forEach((arr) => arr.forEach((p) => allTimes.add(toEpoch(p.timestamp))));
   pcapPoints.forEach((p) => allTimes.add(p.timestamp_ms));
   const sorted = [...allTimes].sort((a, b) => a - b);
 
+  const pointers = {};
   const lastVal = {};
+  seriesKeys.forEach((key) => { pointers[key] = 0; lastVal[key] = null; });
+  let pcapIdx = 0;
+
   return sorted.map((t) => {
     const row = { t };
-    for (const [key, arr] of Object.entries(historianSeries)) {
-      const match = arr.find((p) => toEpoch(p.timestamp) === t);
-      if (match) lastVal[key] = match.value;
-      row[key] = lastVal[key] ?? null;
+    for (const key of seriesKeys) {
+      const arr = historianSeries[key];
+      let idx = pointers[key];
+      while (idx < arr.length && toEpoch(arr[idx].timestamp) <= t) {
+        lastVal[key] = arr[idx].value;
+        idx++;
+      }
+      pointers[key] = idx;
+      row[key] = lastVal[key];
     }
-    const pcapMatch = pcapPoints.find((p) => p.timestamp_ms === t);
+    // Exact-match only (not forward-filled): anomaly score should only show
+    // at the flow's own timestamp, not smeared across later ticks. Both
+    // `sorted` and `pcapPoints` are ascending, so a single pointer that only
+    // ever advances past timestamps strictly before `t` lands exactly on the
+    // matching entry (if any) once `t` reaches it.
+    while (pcapIdx < pcapPoints.length && pcapPoints[pcapIdx].timestamp_ms < t) pcapIdx++;
+    const pcapMatch = pcapIdx < pcapPoints.length && pcapPoints[pcapIdx].timestamp_ms === t ? pcapPoints[pcapIdx] : null;
     row.anomalyScore = pcapMatch ? (pcapMatch.prediction !== "BENIGN" ? pcapMatch.confidence * 100 : 0) : null;
     return row;
   });
@@ -339,7 +379,12 @@ export default function IdsUpload() {
   const currentColor = currentFlow ? (currentFlow.prediction !== "BENIGN" ? ATTACK_RED : GOOD_GREEN) : MUTED;
 
   // --- Fusion chart: only meaningful when the historian actually has data in the same real time window as the pcap ---
-  const fusionSeries = useMemo(() => {
+  // Split in two: the O(n) merge below only depends on the analysis result
+  // itself, so it runs once per upload. Slicing by currentAbsoluteMs for
+  // playback is a separate, much cheaper useMemo — it used to be bundled
+  // into this one, which meant the full merge re-ran on every ~150ms
+  // playback tick (see mergeFusion's comment for why that was slow).
+  const fusionBase = useMemo(() => {
     if (!historian || sortedTimeline.length === 0) return null;
     const wanted = { cd1: historian.cd1 || [], cd2: historian.cd2 || [], cd3: historian.cd3 || [] };
     const anyHistorian = Object.values(wanted).some((a) => a.length > 0);
@@ -351,9 +396,27 @@ export default function IdsUpload() {
     const overlapEnd = Math.min(histMax, tMax);
     if (overlapStart >= overlapEnd) return { hasOverlap: false };
 
-    const merged = mergeFusion(wanted, sortedTimeline).filter((r) => r.t <= currentAbsoluteMs);
-    return { hasOverlap: true, data: merged, domain: [overlapStart, Math.min(overlapEnd, currentAbsoluteMs)] };
-  }, [historian, sortedTimeline, tMin, tMax, currentAbsoluteMs]);
+    return { hasOverlap: true, merged: mergeFusion(wanted, sortedTimeline), overlapStart, overlapEnd };
+  }, [historian, sortedTimeline, tMin, tMax]);
+
+  const fusionSeries = useMemo(() => {
+    if (!fusionBase) return null;
+    if (!fusionBase.hasOverlap) return { hasOverlap: false };
+    // Downsample only the CD1-3 line series — a stride cap here just thins
+    // out an otherwise-continuous timer trace, which is fine for display.
+    // The anomaly-score points are rendered separately (fusionAnomalyPoints,
+    // below) straight from the pcap timeline instead of being filtered out
+    // of this array, so a real attack marker can never be silently dropped
+    // by the downsample the way it would if we capped this array and then
+    // filtered it for non-null anomalyScore.
+    const data = downsampleForChart(fusionBase.merged.filter((r) => r.t <= currentAbsoluteMs));
+    return { hasOverlap: true, data, domain: [fusionBase.overlapStart, Math.min(fusionBase.overlapEnd, currentAbsoluteMs)] };
+  }, [fusionBase, currentAbsoluteMs]);
+
+  const fusionAnomalyPoints = useMemo(
+    () => timelineAlerts.map((p) => ({ t: p.timestamp_ms, anomalyScore: p.confidence * 100 })),
+    [timelineAlerts]
+  );
 
   const canPlay = sortedTimeline.length > 1;
 
@@ -514,7 +577,7 @@ export default function IdsUpload() {
                 <Line yAxisId="left" type="stepAfter" dataKey="cd1" name="CD1 (ms)" stroke={BLUE} strokeWidth={2} dot={false} connectNulls />
                 <Line yAxisId="left" type="stepAfter" dataKey="cd2" name="CD2 (ms)" stroke={ORANGE} strokeWidth={2} dot={false} connectNulls />
                 <Line yAxisId="left" type="stepAfter" dataKey="cd3" name="CD3 (ms)" stroke={AQUA} strokeWidth={2} dot={false} connectNulls />
-                <Scatter yAxisId="right" data={fusionSeries.data.filter((d) => d.anomalyScore !== null)} dataKey="anomalyScore" name="Anomaly score (%)" fill={ATTACK_RED} />
+                <Scatter yAxisId="right" data={fusionAnomalyPoints} dataKey="anomalyScore" name="Anomaly score (%)" fill={ATTACK_RED} />
               </ComposedChart>
             </ChartPanel>
           )}

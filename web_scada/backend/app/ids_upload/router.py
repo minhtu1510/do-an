@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 
 from ..auth import require_role
 from .service import IdsUploadError, MODEL_DIR, analyze_pcap, model_configured
@@ -28,7 +29,14 @@ async def ids_analyze(
         return JSONResponse(status_code=400, content={"error": "empty_file"})
 
     try:
-        result = analyze_pcap(body, file.filename or "upload.pcap", plc_ip, window)
+        # analyze_pcap shells out to tshark (subprocess.run, blocking) and runs
+        # the model on the extracted CSV — both can take seconds to a couple
+        # minutes on a large pcap. Running it inline on the event loop would
+        # stall every other coroutine, including the OPC UA gateway's poll
+        # loop and keep-alive traffic, long enough for the PLC/OPC UA server
+        # to time out and drop the session. Run it in a worker thread instead
+        # so the gateway keeps ticking while this request is in flight.
+        result = await run_in_threadpool(analyze_pcap, body, file.filename or "upload.pcap", plc_ip, window)
     except IdsUploadError as exc:
         return JSONResponse(status_code=422, content={"error": "ids_upload_failed", "message": str(exc)})
 

@@ -9,10 +9,12 @@ Role hierarchy (each level includes everything the level below can do):
 
 from __future__ import annotations
 
-from fastapi import Depends, HTTPException, Query, status
+from fastapi import Depends, HTTPException, Query, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import PyJWTError
 
+from ..events import event_service
+from ..events.models import EventRecord
 from .db import get_session
 from .models import User
 from .security import decode_access_token
@@ -59,8 +61,17 @@ def require_role(minimum: str):
     if minimum not in ROLE_RANK:
         raise ValueError(f"Unknown role {minimum!r}")
 
-    def _check(user: User = Depends(get_current_user)) -> User:
+    def _check(request: Request, user: User = Depends(get_current_user)) -> User:
         if ROLE_RANK[user.role] < ROLE_RANK[minimum]:
+            # Audited, not just silently rejected — a role-insufficient user
+            # (or a stolen/guessed token) hitting a gated endpoint is exactly
+            # the kind of thing an audit trail needs to catch, not just block.
+            event_service.add(EventRecord(
+                event_type="ACCESS_DENIED",
+                severity="WARNING",
+                message=f"{user.username} (role={user.role}) bị từ chối truy cập {request.url.path} — cần role {minimum}+",
+                status="CLEARED",
+            ))
             raise HTTPException(status.HTTP_403_FORBIDDEN, f"Requires {minimum} role or higher")
         return user
 

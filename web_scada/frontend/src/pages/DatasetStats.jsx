@@ -104,8 +104,8 @@ export default function DatasetStats() {
       {!configured ? (
         <NotConfiguredNotice
           title="Chưa có kết quả huấn luyện ML"
-          message="Chạy train_ml.py trên máy có dữ liệu thật, rồi trỏ thư mục kết quả vào đây."
-          detail={`Thư mục kỳ vọng: ${status?.results_dir || "ml_results/"}\n\nLệnh train (thay đường dẫn CSV bằng dataset thật):\npython train_ml.py --network-data <duong_dan/network.csv> --output-dir ml_results\n\nSau đó copy thư mục output vào đây, hoặc set biến môi trường ML_RESULTS_DIR trỏ tới nơi đã copy, rồi tải lại trang.`}
+          message="Cần chạy huấn luyện thủ công trên dữ liệu thật trước — trang này không tự sinh số."
+          detail={`Thư mục: ${status?.results_dir ? status.results_dir.split(/[\\/]/).pop() : "ml_results"}/\n\npython train_ml.py --network-data <network.csv> --output-dir ml_results`}
         />
       ) : (
         <>

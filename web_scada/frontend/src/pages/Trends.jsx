@@ -30,21 +30,54 @@ function toEpoch(iso) {
 // shared chart needs one row per distinct timestamp with each series carrying
 // its last known value forward — this is a step representation, not
 // interpolation, matching how a boolean/discrete PLC value actually behaves.
+//
+// Each series' points already arrive sorted by timestamp (backend query is
+// ORDER BY timestamp), so forward-filling can walk each series with a single
+// advancing pointer instead of re-scanning it for every merged timestamp —
+// O(n) total instead of O(distinct_timestamps * points_per_series), which on
+// a historian with tens of thousands of rows was taking 10+ seconds and
+// freezing the tab (single-threaded JS, nothing else can run meanwhile).
 function mergeSeries(seriesMap) {
+  const keys = Object.keys(seriesMap);
   const allTimestamps = new Set();
   Object.values(seriesMap).forEach((points) => points.forEach((p) => allTimestamps.add(p.timestamp)));
   const sorted = [...allTimestamps].sort();
 
+  const pointers = {};
   const last = {};
+  keys.forEach((key) => {
+    pointers[key] = 0;
+    last[key] = null;
+  });
+
   return sorted.map((ts) => {
     const row = { timestamp: ts, t: toEpoch(ts) };
-    for (const [key, points] of Object.entries(seriesMap)) {
-      const match = points.find((p) => p.timestamp === ts);
-      if (match) last[key] = match.value;
-      row[key] = last[key] ?? null;
+    for (const key of keys) {
+      const points = seriesMap[key];
+      let idx = pointers[key];
+      while (idx < points.length && points[idx].timestamp <= ts) {
+        last[key] = points[idx].value;
+        idx++;
+      }
+      pointers[key] = idx;
+      row[key] = last[key];
     }
     return row;
   });
+}
+
+// Recharts renders every row as real SVG geometry — tens of thousands of
+// points froze the tab for 10-15s. This is a display-only cap (stride pick,
+// always keeps the last point so a chart never silently drops its most
+// recent reading); the real full-resolution data is untouched everywhere
+// else — CSV export reads straight from `tags`, not this downsampled view.
+function downsampleForChart(rows, maxPoints = 3000) {
+  if (rows.length <= maxPoints) return rows;
+  const step = Math.ceil(rows.length / maxPoints);
+  const out = [];
+  for (let i = 0; i < rows.length; i += step) out.push(rows[i]);
+  if (out[out.length - 1] !== rows[rows.length - 1]) out.push(rows[rows.length - 1]);
+  return out;
 }
 
 // Buckets any {t,...} series into N time slices for a stat-tile sparkline —
@@ -177,6 +210,17 @@ export default function Trends() {
 
   const hasAnyData = timerData.length > 0 || runData.length > 0 || productionData.length > 0;
 
+  // Chart-only, downsampled views — totalPoints/activityBuckets/uptimePct
+  // below still use the full-resolution arrays. bang_tai is deliberately
+  // NOT downsampled: it's a 2-value boolean, and a stride pick on a rapidly
+  // alternating 1/0/1/0 series (exactly what RWRITE_BURST produces) can
+  // alias into a flat line depending on the stride's parity — silently
+  // hiding the one signal this chart exists to show. Numeric series (CD
+  // timers, production counts) don't have that failure mode.
+  const timerChartData = useMemo(() => downsampleForChart(timerData), [timerData]);
+  const runChartData = runData;
+  const productionChartData = useMemo(() => downsampleForChart(productionData), [productionData]);
+
   const totalPoints = timerData.length + runData.length + productionData.length;
   const activityBuckets = useMemo(() => bucketActivity(timerData), [timerData]);
   const attackBuckets = useMemo(() => bucketActivity(attackEvents.events), [attackEvents]);
@@ -212,11 +256,11 @@ export default function Trends() {
         }
       />
 
-      {!attackEvents.configured && (
+      {attackEvents.events.length === 0 && (
         <NotConfiguredNotice
-          title="Chưa bật overlay mốc tấn công"
-          message="Biểu đồ vẫn hiển thị dữ liệu historian bình thường, chỉ thiếu các mốc đánh dấu thời điểm tấn công thật."
-          detail="Copy file CSV log tấn công từ máy attack (do attack_event_logger.py tạo ra) sang máy chạy backend này, rồi set biến môi trường ATTACK_EVENT_FILE trỏ tới file đó."
+          title="Chưa nhận được mốc tấn công nào"
+          message="Biểu đồ historian vẫn hiển thị bình thường, chỉ thiếu mốc đánh dấu thời điểm tấn công thật."
+          detail="Chạy kịch bản tấn công S7comm (attack_event_logger.py) trên máy attack trong lúc backend đang bật — mốc tự đẩy vào đây qua mạng, không cần copy file tay. Nếu backend không chạy ở localhost, set WEB_SCADA_API=http://<ip-may-controller>:8000/api trên máy attack trước khi chạy."
         />
       )}
 
@@ -252,8 +296,14 @@ export default function Trends() {
             </div>
           </div>
 
+          {(timerChartData.length < timerData.length || runChartData.length < runData.length || productionChartData.length < productionData.length) && (
+            <div className="text-[11px] text-gray-600">
+              Biểu đồ dưới đây giảm mẫu để hiển thị mượt (dữ liệu quá lớn) — {totalPoints} điểm dữ liệu gốc vẫn đầy đủ trong "Xuất CSV".
+            </div>
+          )}
+
           <ChartPanel title="Stage timers — CD1 / CD2 / CD3 (ms)" subtitle="Vùng an toàn 500–10000ms. SETPOINT_ATTACK sẽ đẩy giá trị vọt ra ngoài vùng này.">
-            <AreaChart data={timerData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+            <AreaChart data={timerChartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
               <GradientDefs id="gradCd1" color={BLUE} />
               <GradientDefs id="gradCd2" color={ORANGE} />
               <GradientDefs id="gradCd3" color={AQUA} />
@@ -277,7 +327,7 @@ export default function Trends() {
 
           <div className="grid gap-4 lg:grid-cols-2">
             <ChartPanel title="Conveyor RUN/STOP (bang_tai)" subtitle="0 = STOPPED, 1 = RUNNING. RWRITE_BURST sẽ làm đường này giật liên tục.">
-              <AreaChart data={runData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+              <AreaChart data={runChartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
                 <GradientDefs id="gradRun" color={VIOLET} />
                 <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="t" type="number" domain={["dataMin", "dataMax"]} tickFormatter={formatTime} stroke={AXIS} tick={{ fill: MUTED, fontSize: 11 }} />
@@ -292,7 +342,7 @@ export default function Trends() {
             </ChartPanel>
 
             <ChartPanel title="Production — Target vs Completed (nhap / hien_thi)">
-              <AreaChart data={productionData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+              <AreaChart data={productionChartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
                 <GradientDefs id="gradNhap" color={BLUE} />
                 <GradientDefs id="gradHienThi" color={ORANGE} />
                 <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} />

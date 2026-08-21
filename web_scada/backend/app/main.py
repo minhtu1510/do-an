@@ -55,6 +55,7 @@ async def lifespan(app: FastAPI):
 
     bootstrap_admin()
     init_db()
+    event_service.load_from_db()
 
     tag_registry = get_tag_registry()
     logger.info(f"Loaded {len(tag_registry.tags)} tags from registry")
