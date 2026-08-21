@@ -48,7 +48,11 @@ tags:
     description: "Number of products to be processed"
     data_type: Int16
     group: production
-    writable: true
+    # Not externally writable — this value is loaded directly into the PLC
+    # program itself (confirmed: external OPC UA writes get silently
+    # reverted). Kept read-only here so the API rejects a write attempt with
+    # a clear error instead of accepting it and quietly doing nothing.
+    writable: false
     minimum: 0
     maximum: 9999
     history_enabled: true

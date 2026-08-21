@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Workflow, ChevronDown, AlertTriangle, Play, Square, Send } from "lucide-react";
+import { Workflow, ChevronDown, AlertTriangle, Play, Square } from "lucide-react";
 import { connectWebSocket } from "../services/websocket";
 import { fetchAllTags, writeTag } from "../services/api";
 import { useAuth } from "../stores/authStore";
@@ -90,7 +90,7 @@ export default function ProcessMonitor() {
           </div>
 
           {hasRole("controller") && (
-            <ControlPanel bangTai={bangTai} isRunning={isRunning} offline={offline} nhap={tags.nhap} />
+            <ControlPanel bangTai={bangTai} isRunning={isRunning} offline={offline} />
           )}
         </div>
 
@@ -127,11 +127,10 @@ export default function ProcessMonitor() {
   );
 }
 
-function ControlPanel({ bangTai, isRunning, offline, nhap }) {
+function ControlPanel({ bangTai, isRunning, offline }) {
   const confirm = useConfirm();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
-  const [target, setTarget] = useState("");
 
   async function handleConveyorToggle() {
     const nextValue = !isRunning;
@@ -146,28 +145,6 @@ function ControlPanel({ bangTai, isRunning, offline, nhap }) {
     setBusy(true);
     try {
       await writeTag("bang_tai", nextValue);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleSetTarget(e) {
-    e.preventDefault();
-    const value = Number(target);
-    if (!Number.isFinite(value)) return;
-    const ok = await confirm({
-      title: "Đặt số lượng mục tiêu",
-      message: `Gửi số lượng sản phẩm mục tiêu = ${value} xuống PLC thật?`,
-      confirmLabel: "Gửi lệnh",
-    });
-    if (!ok) return;
-    setError(null);
-    setBusy(true);
-    try {
-      await writeTag("nhap", value);
-      setTarget("");
     } catch (err) {
       setError(err.message);
     } finally {
@@ -197,26 +174,6 @@ function ControlPanel({ bangTai, isRunning, offline, nhap }) {
           {isRunning ? <Square size={14} /> : <Play size={14} />}
           {isRunning ? "Dừng băng tải" : "Chạy băng tải"}
         </button>
-
-        <form onSubmit={handleSetTarget} className="flex items-center gap-2">
-          <input
-            type="number"
-            min={0}
-            max={9999}
-            value={target}
-            onChange={(e) => setTarget(e.target.value)}
-            placeholder={nhap?.value != null ? String(nhap.value) : "Số lượng"}
-            className="w-28 rounded border border-gray-700 bg-gray-950 px-3 py-1.5 text-sm text-gray-200 outline-none transition-colors focus:border-amber-500"
-          />
-          <button
-            type="submit"
-            disabled={busy || target === ""}
-            className="flex items-center gap-1.5 rounded border border-gray-700 bg-gray-800 px-3 py-1.5 text-xs font-semibold text-gray-300 transition-colors hover:border-amber-500 hover:text-amber-300 disabled:opacity-50"
-          >
-            <Send size={12} />
-            Set nhap
-          </button>
-        </form>
       </div>
     </div>
   );

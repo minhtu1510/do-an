@@ -2,7 +2,7 @@ import { Routes, Route, Navigate, NavLink, useLocation } from "react-router-dom"
 import {
   LayoutDashboard, Workflow, Bell, TrendingUp, ShieldCheck,
   BarChart3, UploadCloud, ServerCog, Users as UsersIcon, ChevronRight,
-  Activity, Database, Settings2, ClipboardList,
+  Database, Settings2, ClipboardList,
 } from "lucide-react";
 import StatusBar from "./components/StatusBar";
 import Overview from "./pages/Overview";
@@ -22,27 +22,45 @@ import { ToastProvider } from "./components/Toast";
 
 const NAV_GROUPS = [
   {
-    label: "Operations",
-    icon: Activity,
+    label: "Tổng quan",
+    icon: LayoutDashboard,
     items: [
-      { to: "/", label: "Overview", icon: LayoutDashboard, end: true, minRole: "viewer" },
+      { to: "/", label: "Tổng quan", icon: LayoutDashboard, end: true, minRole: "viewer" },
+    ],
+  },
+  {
+    label: "Giám sát & điều khiển PLC",
+    icon: Workflow,
+    items: [
       { to: "/process", label: "Process Monitor", icon: Workflow, end: false, minRole: "viewer" },
-      { to: "/alarms", label: "Alarms & Events", icon: Bell, end: false, minRole: "viewer" },
-      { to: "/audit", label: "Audit Log", icon: ClipboardList, end: false, minRole: "operator" },
-      { to: "/trends", label: "Trends & History", icon: TrendingUp, end: false, minRole: "viewer" },
     ],
   },
   {
-    label: "Detection & Evidence",
-    icon: ShieldCheck,
+    label: "Cảnh báo bất thường",
+    icon: Bell,
     items: [
-      { to: "/security", label: "Security / IDS", icon: ShieldCheck, end: false, minRole: "operator" },
-      { to: "/dataset", label: "Dataset & Model", icon: BarChart3, end: false, minRole: "operator" },
-      { to: "/ids-upload", label: "IDS Upload", icon: UploadCloud, end: false, minRole: "operator" },
+      { to: "/alarms", label: "Alarms & Events", icon: Bell, end: false, minRole: "viewer" },
     ],
   },
   {
-    label: "Platform",
+    label: "Phân tích PCAP",
+    icon: UploadCloud,
+    items: [
+      { to: "/ids-upload", label: "IDS Upload", icon: UploadCloud, end: false, minRole: "operator" },
+      { to: "/dataset", label: "Dataset & Model", icon: BarChart3, end: false, minRole: "operator" },
+    ],
+  },
+  {
+    label: "Lịch sử & báo cáo",
+    icon: TrendingUp,
+    items: [
+      { to: "/trends", label: "Trends & History", icon: TrendingUp, end: false, minRole: "viewer" },
+      { to: "/audit", label: "Audit Log", icon: ClipboardList, end: false, minRole: "operator" },
+      { to: "/security", label: "Lịch sử kịch bản tấn công", icon: ShieldCheck, end: false, minRole: "operator" },
+    ],
+  },
+  {
+    label: "Quản trị hệ thống",
     icon: Settings2,
     items: [
       { to: "/system", label: "System Status", icon: ServerCog, end: false, minRole: "viewer" },

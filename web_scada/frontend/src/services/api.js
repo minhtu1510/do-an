@@ -170,3 +170,19 @@ export async function analyzeIdsPcap(file, plcIp, window) {
   if (!res.ok) throw new Error(body.message || body.detail || "Phân tích thất bại");
   return body;
 }
+
+export async function fetchIdsStatusOpcua() {
+  const res = await apiFetch("/ids/opcua/status");
+  return res.json();
+}
+
+export async function analyzeIdsPcapOpcua(file, plcIp, window) {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("plc_ip", plcIp);
+  formData.append("window", String(window));
+  const res = await apiFetch("/ids/opcua/analyze", { method: "POST", body: formData });
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.message || body.detail || "Phân tích thất bại");
+  return body;
+}

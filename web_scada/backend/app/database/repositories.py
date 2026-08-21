@@ -83,6 +83,9 @@ def query_process_history(tag_keys: list[str], start: str | None, end: str | Non
     return {key: query_tag_history(key, start, end) for key in tag_keys}
 
 
+MAX_EVENT_ROWS = 20000
+
+
 def insert_event(event: dict) -> None:
     session = get_session()
     try:
@@ -100,6 +103,21 @@ def insert_event(event: dict) -> None:
             acked_at=datetime.fromisoformat(event["acked_at"]) if event.get("acked_at") else None,
         ))
         session.commit()
+
+        # Same retention pattern as TagSample (see MAX_ROWS_PER_TAG above):
+        # routine INFO events (e.g. PRODUCT_COUNT_CHANGED firing every
+        # production cycle) have no natural upper bound like a tag's value
+        # does, so without a cap this table grows forever. Capping keeps the
+        # durable audit trail proportional to recent activity instead of
+        # unbounded disk growth over a long-running demo/lab session.
+        count = session.scalar(select(func.count()).select_from(EventRow))
+        if count and count > MAX_EVENT_ROWS:
+            oldest_ids = session.scalars(
+                select(EventRow.id).order_by(EventRow.timestamp).limit(count - MAX_EVENT_ROWS)
+            ).all()
+            if oldest_ids:
+                session.execute(delete(EventRow).where(EventRow.id.in_(oldest_ids)))
+                session.commit()
     finally:
         session.close()
 

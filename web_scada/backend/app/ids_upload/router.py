@@ -4,6 +4,12 @@ from starlette.concurrency import run_in_threadpool
 
 from ..auth import require_role
 from .service import IdsUploadError, MODEL_DIR, analyze_pcap, model_configured
+from .service_opcua import (
+    IdsUploadOpcuaError,
+    MODEL_DIR as MODEL_DIR_OPCUA,
+    analyze_pcap as analyze_pcap_opcua,
+    model_configured as model_configured_opcua,
+)
 
 ids_upload_router = APIRouter()
 
@@ -39,5 +45,31 @@ async def ids_analyze(
         result = await run_in_threadpool(analyze_pcap, body, file.filename or "upload.pcap", plc_ip, window)
     except IdsUploadError as exc:
         return JSONResponse(status_code=422, content={"error": "ids_upload_failed", "message": str(exc)})
+
+    return result
+
+
+@ids_upload_router.get("/opcua/status")
+async def ids_status_opcua(_user=Depends(require_role("operator"))):
+    return {"configured": model_configured_opcua(), "model_dir": str(MODEL_DIR_OPCUA)}
+
+
+@ids_upload_router.post("/opcua/analyze")
+async def ids_analyze_opcua(
+    file: UploadFile = File(...),
+    plc_ip: str = Form("192.168.210.211"),
+    window: float = Form(5.0),
+    _user=Depends(require_role("operator")),
+):
+    body = await file.read()
+    if len(body) > MAX_UPLOAD_BYTES:
+        return JSONResponse(status_code=413, content={"error": "file_too_large", "max_bytes": MAX_UPLOAD_BYTES})
+    if not body:
+        return JSONResponse(status_code=400, content={"error": "empty_file"})
+
+    try:
+        result = await run_in_threadpool(analyze_pcap_opcua, body, file.filename or "upload.pcap", plc_ip, window)
+    except IdsUploadOpcuaError as exc:
+        return JSONResponse(status_code=422, content={"error": "ids_upload_opcua_failed", "message": str(exc)})
 
     return result

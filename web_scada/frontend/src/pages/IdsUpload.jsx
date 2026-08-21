@@ -12,7 +12,7 @@ import PageHeader from "../components/PageHeader";
 import Gauge from "../components/Gauge";
 import Sparkline from "../components/Sparkline";
 import NotConfiguredNotice from "../components/NotConfiguredNotice";
-import { analyzeIdsPcap, fetchIdsStatus, fetchProcessHistory } from "../services/api";
+import { analyzeIdsPcap, analyzeIdsPcapOpcua, fetchIdsStatus, fetchIdsStatusOpcua, fetchProcessHistory } from "../services/api";
 import { idsUploadStore } from "./idsUploadPersist";
 
 // Same validated categorical order used in Trends.jsx — fixed, never cycled.
@@ -42,6 +42,26 @@ const MITRE_BY_LABEL = {
   FLOOD: { id: "T0814", name: "Denial of Service" },
   FUZZ: { id: "T0814", name: "Denial of Service" },
   CPU_CONTROL: { id: "T0816", name: "Device Restart/Shutdown" },
+};
+
+// OPC UA counterpart to MITRE_BY_LABEL — sourced from tests/day8/scenarios.yaml
+// (mitre_technique / mitre_technique_name there are verified against the live
+// MITRE ATT&CK for ICS matrix, not guessed). OPCUA_MALICIOUS_WRITE covers what
+// model_opcua/ was trained on after merging OPCUA_INVALID_WRITE +
+// OPCUA_WRITE_DENIED (see train_opcua_eval.py — they're wire-identical, a
+// single Write the server rejected, and can't be told apart from features
+// alone). Not shown for "benign".
+const MITRE_BY_LABEL_OPCUA = {
+  OPCUA_ENDPOINT_DISCOVERY: { id: "T0888", name: "Remote System Information Discovery" },
+  OPCUA_NODE_BROWSE: { id: "T0861", name: "Point & Tag Identification" },
+  OPCUA_SESSION_BURST: { id: "T0814", name: "Denial of Service" },
+  OPCUA_SUBSCRIPTION_FLOOD: { id: "T0814", name: "Denial of Service" },
+  OPCUA_MALICIOUS_WRITE: { id: "T0836", name: "Modify Parameter" },
+  OPCUA_READ_SCRAPING: { id: "T0802", name: "Automated Collection" },
+  OPCUA_PROTOCOL_FUZZ: { id: "T0814", name: "Denial of Service" },
+  OPCUA_BEHAVIORAL_PROFILING: { id: "T0801", name: "Monitor Process State" },
+  OPCUA_SLOWLORIS: { id: "T0814", name: "Denial of Service" },
+  OPCUA_RECURSIVE_BROWSE: { id: "T0814", name: "Denial of Service" },
 };
 
 function mitreUrl(techniqueId) {
@@ -139,6 +159,27 @@ function aggregateFromPoints(points) {
   return { prediction_counts, layer_counts, confidence_histogram, total_flows: total, attack_flows: attack, attack_ratio: total ? attack / total : 0 };
 }
 
+// The OPC UA backend (service_opcua.py) returns the same shape as the
+// S7comm one (total_flows/attack_flows/prediction_counts/timeline/flow_table)
+// but with two real differences: labels are lowercase "benign" instead of
+// "BENIGN" (that's literally what's in the training CSV — see
+// data_opc/day8_out/opcua_harvest_features.csv), and there's no layer_used
+// (model_opcua/ is a single classifier, not a 3-layer pipeline, so faking a
+// layer number would misrepresent how the prediction was made). Normalizing
+// here — once, right after the fetch — means every chart/table below can
+// keep using the same "!== BENIGN" checks it already had instead of branching
+// on protocol everywhere.
+function normalizeOpcuaResult(raw) {
+  const upper = (p) => (p === "benign" ? "BENIGN" : p);
+  return {
+    ...raw,
+    protocol: "opcua",
+    prediction_counts: Object.fromEntries(Object.entries(raw.prediction_counts).map(([k, v]) => [upper(k), v])),
+    timeline: raw.timeline.map((p) => ({ ...p, prediction: upper(p.prediction), layer_used: null })),
+    flow_table: raw.flow_table.map((r) => ({ ...r, prediction: upper(r.prediction), layer_used: null })),
+  };
+}
+
 function toEpoch(iso) {
   return new Date(iso).getTime();
 }
@@ -212,6 +253,8 @@ export default function IdsUpload() {
   // picked or the analysis you already ran (see idsUploadPersist.js).
   const [status, setStatusState] = useState(idsUploadStore.status);
   const setStatus = (v) => { idsUploadStore.status = v; setStatusState(v); };
+  const [protocol, setProtocolState] = useState(idsUploadStore.protocol);
+  const setProtocol = (v) => { idsUploadStore.protocol = v; setProtocolState(v); };
   const [file, setFileState] = useState(idsUploadStore.file);
   const setFile = (v) => { idsUploadStore.file = v; setFileState(v); };
   const [plcIp, setPlcIpState] = useState(idsUploadStore.plcIp);
@@ -235,8 +278,9 @@ export default function IdsUpload() {
   const [exportingPdf, setExportingPdf] = useState(false);
 
   useEffect(() => {
-    fetchIdsStatus().then(setStatus).catch(() => setStatus({ configured: false, model_dir: "" }));
-  }, []);
+    const fetchStatus = protocol === "opcua" ? fetchIdsStatusOpcua : fetchIdsStatus;
+    fetchStatus().then(setStatus).catch(() => setStatus({ configured: false, model_dir: "" }));
+  }, [protocol]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const sortedTimeline = useMemo(
     () => (result ? [...result.timeline].sort((a, b) => a.timestamp_ms - b.timestamp_ms) : []),
@@ -346,7 +390,9 @@ export default function IdsUpload() {
     setBusy(true);
     setError(null);
     try {
-      const data = await analyzeIdsPcap(file, plcIp, windowS);
+      const data = protocol === "opcua"
+        ? normalizeOpcuaResult(await analyzeIdsPcapOpcua(file, plcIp, windowS))
+        : { ...(await analyzeIdsPcap(file, plcIp, windowS)), protocol: "s7comm" };
       setResult(data);
       fetchProcessHistory().then((h) => setHistorian(h.tags || {})).catch(() => setHistorian({}));
     } catch (err) {
@@ -366,6 +412,7 @@ export default function IdsUpload() {
     setWindowS(2.0);
   }
 
+  const mitreMap = result?.protocol === "opcua" ? MITRE_BY_LABEL_OPCUA : MITRE_BY_LABEL;
   const predictionRows = Object.entries(live.prediction_counts).sort((a, b) => (a[0] === "BENIGN" ? -1 : b[0] === "BENIGN" ? 1 : b[1] - a[1]));
   const layerLabel = { 1: "Layer 1 — Rule-based", 2: "Layer 2 — Anomaly", 3: "Layer 3 — ML Classifier" };
   const layerRows = Object.entries(live.layer_counts).map(([k, v]) => ({ layer: layerLabel[k] || `Layer ${k}`, count: v }));
@@ -427,13 +474,36 @@ export default function IdsUpload() {
       {status && !status.configured && (
         <NotConfiguredNotice
           title="Model AI chưa được huấn luyện"
-          message="Cần train trên dữ liệu Day 1-6 thật trước khi phân tích pcap ở đây."
-          detail={`Thư mục model: ${status.model_dir}\n\nLệnh train:\npython train_eval.py --dataset <day1_6_labeled.csv> --mode train --output "${status.model_dir}"`}
+          message={protocol === "opcua"
+            ? "Cần train trên dữ liệu OPC UA thật (Day 8) trước khi phân tích pcap OPC UA ở đây."
+            : "Cần train trên dữ liệu Day 1-6 thật trước khi phân tích pcap S7comm ở đây."}
+          detail={protocol === "opcua"
+            ? `Thư mục model: ${status.model_dir}\n\nLệnh train:\npython train_opcua_eval.py --dataset <opcua_features.csv> --output "${status.model_dir}"`
+            : `Thư mục model: ${status.model_dir}\n\nLệnh train:\npython train_eval.py --dataset <day1_6_labeled.csv> --mode train --output "${status.model_dir}"`}
         />
       )}
 
       <form onSubmit={handleSubmit} className="rounded-lg border border-slate-700 bg-slate-800 p-4 shadow-sm shadow-black/20">
         <div className="flex flex-wrap items-end gap-3">
+          <label className="flex flex-col gap-1">
+            <span className="text-xs uppercase text-slate-500">Giao thức</span>
+            <div className="flex overflow-hidden rounded border border-slate-700">
+              <button
+                type="button"
+                onClick={() => setProtocol("s7comm")}
+                className={`px-3 py-1.5 text-xs font-semibold transition-colors ${protocol === "s7comm" ? "bg-blue-600 text-white" : "bg-slate-950 text-slate-400 hover:text-slate-200"}`}
+              >
+                S7comm
+              </button>
+              <button
+                type="button"
+                onClick={() => setProtocol("opcua")}
+                className={`px-3 py-1.5 text-xs font-semibold transition-colors ${protocol === "opcua" ? "bg-blue-600 text-white" : "bg-slate-950 text-slate-400 hover:text-slate-200"}`}
+              >
+                OPC UA
+              </button>
+            </div>
+          </label>
           <label className="flex flex-col gap-1">
             <span className="text-xs uppercase text-slate-500">File pcap/pcapng</span>
             <input
@@ -472,7 +542,11 @@ export default function IdsUpload() {
             </button>
           )}
         </div>
-        <div className="mt-2 text-[10px] text-slate-600">Model hiện tại train trên cửa sổ 2s — đổi giá trị này sẽ lệch phân bố đặc trưng.</div>
+        <div className="mt-2 text-[10px] text-slate-600">
+          Model hiện tại train trên cửa sổ 2s — đổi giá trị này sẽ lệch phân bố đặc trưng. Chọn đúng giao thức của file
+          đang tải lên: {protocol === "opcua" ? "OPC UA" : "S7comm"} dùng model và bộ trích xuất đặc trưng riêng, pcap
+          sai giao thức sẽ không trích được flow nào (báo lỗi rõ, không đoán bừa).
+        </div>
       </form>
 
       {error && (
@@ -551,15 +625,15 @@ export default function IdsUpload() {
                   {currentFlow.prediction}
                 </span>
               )}
-              {currentFlow && MITRE_BY_LABEL[currentFlow.prediction] && (
+              {currentFlow && mitreMap[currentFlow.prediction] && (
                 <a
-                  href={mitreUrl(MITRE_BY_LABEL[currentFlow.prediction].id)}
+                  href={mitreUrl(mitreMap[currentFlow.prediction].id)}
                   target="_blank"
                   rel="noreferrer"
-                  title={MITRE_BY_LABEL[currentFlow.prediction].name}
+                  title={mitreMap[currentFlow.prediction].name}
                   className="mt-1 rounded border border-violet-400/20 bg-violet-400/[0.07] px-1.5 py-0.5 font-mono text-[9px] text-violet-300 transition hover:border-violet-400/40 hover:bg-violet-400/10"
                 >
-                  ATT&CK {MITRE_BY_LABEL[currentFlow.prediction].id}
+                  ATT&CK {mitreMap[currentFlow.prediction].id}
                 </a>
               )}
             </div>
@@ -618,15 +692,26 @@ export default function IdsUpload() {
               </BarChart>
             </ChartPanel>
 
-            <ChartPanel title="Layer nào bắt được" subtitle="Rule-based (tức thì) / Anomaly (thống kê) / ML Classifier (chi tiết)">
-              <BarChart data={layerRows} layout="vertical" margin={{ top: 10, right: 20, left: 20, bottom: 0 }}>
-                <CartesianGrid stroke={GRID} strokeDasharray="3 3" horizontal={false} />
-                <XAxis type="number" stroke={AXIS} tick={{ fill: MUTED, fontSize: 11 }} allowDecimals={false} />
-                <YAxis type="category" dataKey="layer" stroke={AXIS} tick={{ fill: MUTED, fontSize: 11 }} width={160} />
-                <Tooltip contentStyle={{ background: "#0f172a", border: "1px solid #334155", fontSize: 12 }} />
-                <Bar dataKey="count" fill={CATEGORICAL[0]} />
-              </BarChart>
-            </ChartPanel>
+            {result?.protocol === "opcua" ? (
+              <ChartPanel title="Model" subtitle="model_opcua/ là 1 classifier duy nhất (không phải pipeline 3 tầng) — CV macro-F1 dưới đây là ước lượng trung thực từ grouped 5-fold cross-validation lúc train, không phải điểm trên chính dữ liệu đang phân tích.">
+                <div className="flex h-full flex-col items-center justify-center gap-1">
+                  <div className="font-mono text-3xl font-bold text-cyan-300">
+                    {result.model_cv_macro_f1 != null ? `${(result.model_cv_macro_f1 * 100).toFixed(1)}%` : "—"}
+                  </div>
+                  <div className="text-xs text-slate-500">CV macro-F1 (RandomForest, GroupKFold theo episode)</div>
+                </div>
+              </ChartPanel>
+            ) : (
+              <ChartPanel title="Layer nào bắt được" subtitle="Rule-based (tức thì) / Anomaly (thống kê) / ML Classifier (chi tiết)">
+                <BarChart data={layerRows} layout="vertical" margin={{ top: 10, right: 20, left: 20, bottom: 0 }}>
+                  <CartesianGrid stroke={GRID} strokeDasharray="3 3" horizontal={false} />
+                  <XAxis type="number" stroke={AXIS} tick={{ fill: MUTED, fontSize: 11 }} allowDecimals={false} />
+                  <YAxis type="category" dataKey="layer" stroke={AXIS} tick={{ fill: MUTED, fontSize: 11 }} width={160} />
+                  <Tooltip contentStyle={{ background: "#0f172a", border: "1px solid #334155", fontSize: 12 }} />
+                  <Bar dataKey="count" fill={CATEGORICAL[0]} />
+                </BarChart>
+              </ChartPanel>
+            )}
           </div>
 
           <div className="grid gap-4 lg:grid-cols-2">
@@ -669,45 +754,55 @@ export default function IdsUpload() {
               <div className="p-6 text-sm text-slate-500">Không có flow bất thường nào trong đoạn đang phát.</div>
             ) : (
               <>
-                <div className="grid grid-cols-[140px_140px_110px_80px_100px_1fr] gap-3 border-b border-slate-700 px-4 py-2 text-xs uppercase text-slate-500">
-                  <div>Thời điểm</div>
-                  <div>Nhãn</div>
-                  <div>MITRE ATT&CK</div>
-                  <div>Layer</div>
-                  <div>Confidence</div>
-                  <div>Flow</div>
-                </div>
-                <div className="max-h-96 overflow-y-auto divide-y divide-slate-700">
-                  {feedRows.map((row, i) => {
-                    const mitre = MITRE_BY_LABEL[row.prediction];
-                    return (
-                    <div key={i} className="grid grid-cols-[140px_140px_110px_80px_100px_1fr] items-center gap-3 px-4 py-2 text-xs hover:bg-slate-900/40">
-                      <div className="text-slate-500">{row.window_start_ms ? new Date(row.window_start_ms).toLocaleTimeString() : "—"}</div>
-                      <span className="w-fit rounded px-2 py-1 text-[10px] font-bold" style={{ backgroundColor: `${colorFor(row.prediction, colorMap)}33`, color: colorFor(row.prediction, colorMap) }}>
-                        {row.prediction}
-                      </span>
-                      {mitre ? (
-                        <a
-                          href={mitreUrl(mitre.id)}
-                          target="_blank"
-                          rel="noreferrer"
-                          title={mitre.name}
-                          className="w-fit rounded border border-violet-400/20 bg-violet-400/[0.07] px-1.5 py-0.5 font-mono text-[9px] text-violet-300 transition hover:border-violet-400/40 hover:bg-violet-400/10"
-                        >
-                          {mitre.id}
-                        </a>
-                      ) : (
-                        <span className="text-slate-700">—</span>
-                      )}
-                      <div className="text-slate-400">L{row.layer_used}</div>
-                      <div className="text-slate-400">{(row.confidence * 100).toFixed(1)}%</div>
-                      <div className="text-slate-600 truncate">
-                        {row.src_ip ? `${row.src_ip} -> ${row.dst_ip}` : "—"}
+                {(() => {
+                  const isOpcua = result?.protocol === "opcua";
+                  const gridCls = isOpcua
+                    ? "grid grid-cols-[140px_140px_110px_100px_1fr]"
+                    : "grid grid-cols-[140px_140px_110px_80px_100px_1fr]";
+                  return (
+                    <>
+                      <div className={`${gridCls} gap-3 border-b border-slate-700 px-4 py-2 text-xs uppercase text-slate-500`}>
+                        <div>Thời điểm</div>
+                        <div>Nhãn</div>
+                        <div>MITRE ATT&CK</div>
+                        {!isOpcua && <div>Layer</div>}
+                        <div>Confidence</div>
+                        <div>Flow</div>
                       </div>
-                    </div>
-                    );
-                  })}
-                </div>
+                      <div className="max-h-96 overflow-y-auto divide-y divide-slate-700">
+                        {feedRows.map((row, i) => {
+                          const mitre = mitreMap[row.prediction];
+                          return (
+                            <div key={i} className={`${gridCls} items-center gap-3 px-4 py-2 text-xs hover:bg-slate-900/40`}>
+                              <div className="text-slate-500">{row.window_start_ms ? new Date(row.window_start_ms).toLocaleTimeString() : "—"}</div>
+                              <span className="w-fit rounded px-2 py-1 text-[10px] font-bold" style={{ backgroundColor: `${colorFor(row.prediction, colorMap)}33`, color: colorFor(row.prediction, colorMap) }}>
+                                {row.prediction}
+                              </span>
+                              {mitre ? (
+                                <a
+                                  href={mitreUrl(mitre.id)}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  title={mitre.name}
+                                  className="w-fit rounded border border-violet-400/20 bg-violet-400/[0.07] px-1.5 py-0.5 font-mono text-[9px] text-violet-300 transition hover:border-violet-400/40 hover:bg-violet-400/10"
+                                >
+                                  {mitre.id}
+                                </a>
+                              ) : (
+                                <span className="text-slate-700">—</span>
+                              )}
+                              {!isOpcua && <div className="text-slate-400">L{row.layer_used}</div>}
+                              <div className="text-slate-400">{(row.confidence * 100).toFixed(1)}%</div>
+                              <div className="text-slate-600 truncate">
+                                {row.src_ip ? `${row.src_ip} -> ${row.dst_ip}` : "—"}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
+                  );
+                })()}
               </>
             )}
           </div>

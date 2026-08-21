@@ -54,14 +54,15 @@ class AlarmEngine:
                 ))
                 if old_value is True and new_value is False:
                     events.extend(self._check_unexpected_halt())
-            elif key == "hien_thi":
-                events.append(EventRecord(
-                    event_type="PRODUCT_COUNT_CHANGED",
-                    message="Completed production quantity changed",
-                    tag_key=key,
-                    old_value=old_value,
-                    new_value=new_value,
-                ))
+            # hien_thi (completed count) used to emit a PRODUCT_COUNT_CHANGED
+            # event here on every single unit produced. That's not an alarm —
+            # it's routine production data already captured, bounded and
+            # pruned, by the historian (see database/repositories.py's
+            # MAX_ROWS_PER_TAG). The events table has no such pruning, so on
+            # a long-running demo this alone would grow it without bound
+            # while also drowning the "Recent events" UI in non-actionable
+            # noise, pushing real alarms off the visible list. Removed —
+            # check Trends for the actual hien_thi curve instead.
 
         if not was_stale and is_stale:
             self.stale_event_count += 1

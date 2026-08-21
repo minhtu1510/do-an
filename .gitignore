@@ -77,6 +77,9 @@ web_scada/backend/data/
 # 100MB hard file limit; retrain locally with train_eval.py instead of committing)
 /model/
 
+# Trained OPC UA IDS model — retrain locally with train_opcua_eval.py instead of committing
+/model_opcua/
+
 # Portable Windows tool bundle (exe + DLLs, ~700 files) — not source, don't commit
 /ICSScout_Portable/
 

@@ -4,6 +4,7 @@
 // forcing a re-pick + re-analyze for no reason. Cleared only by a fresh
 // upload/reset, not by navigation.
 export const idsUploadStore = {
+  protocol: "s7comm", // "s7comm" | "opcua" — picks which model/extractor analyzes the upload
   file: null,
   plcIp: "192.168.210.211",
   windowS: 2.0,
