@@ -99,6 +99,18 @@ def _to_native(value: Any) -> Any:
     return value
 
 
+def _feature_importance(classifier, features: list[str], top_n: int = 10) -> list[dict[str, Any]]:
+    """Top-N features by importance — classifier here is a single fitted
+    RandomForestClassifier (see train_opcua_eval.py), so feature_importances_
+    is available directly, no wrapper needed like the S7comm ensemble."""
+    try:
+        importances = classifier.feature_importances_
+    except AttributeError:
+        return []
+    pairs = sorted(zip(features, importances), key=lambda t: -t[1])[:top_n]
+    return [{"feature": f, "importance": float(v)} for f, v in pairs]
+
+
 def _summarize(df: pd.DataFrame, predictions: np.ndarray, confidences: np.ndarray, meta: dict[str, Any]) -> dict[str, Any]:
     prediction_counts = pd.Series(predictions).value_counts().to_dict()
 
@@ -173,6 +185,8 @@ def analyze_pcap(pcap_bytes: bytes, filename: str, plc_ip: str, window: float = 
         confidences = proba.max(axis=1)
 
         summary = _summarize(df, predictions, confidences, meta)
+        summary["feature_count"] = len(features)
+        summary["feature_importance"] = _feature_importance(classifier, features)
         summary["job_id"] = job_id
         summary["source_file"] = filename
         summary["model_dir"] = str(MODEL_DIR)

@@ -57,7 +57,7 @@ def _record_analysis(result: dict, protocol: str, username: str) -> None:
                 severity="WARNING",
                 message=(
                     f"{username} phân tích pcap '{result['source_file']}' ({protocol}): "
-                    f"{result['attack_flows']}/{result['total_flows']} flow bị gắn nhãn tấn công — {labels_text}"
+                    f"{result['attack_flows']}/{result['total_flows']} flow bị model dự đoán là tấn công — {labels_text}"
                 ),
                 status="ACTIVE",
             ))

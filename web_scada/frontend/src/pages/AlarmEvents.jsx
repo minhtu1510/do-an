@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Bell, Check, Database, Inbox } from "lucide-react";
+import { Bell, Check, ClipboardList, Inbox, ShieldAlert, ShieldCheck, ShieldX } from "lucide-react";
 import { ackEvent, fetchEvents } from "../services/api";
 import { connectWebSocket } from "../services/websocket";
 import PageHeader from "../components/PageHeader";
@@ -7,34 +7,39 @@ import ExportCsvButton from "../components/ExportCsvButton";
 import { useAuth } from "../stores/authStore";
 import { COMMAND_EVENT_TYPES } from "../constants/events";
 
+// Cảnh báo hệ thống và nhật ký lệnh điều khiển PLC dùng chung 1 nguồn
+// (GET /events) — tách thành 2 mảng ngay từ 1 lần fetch/1 WS stream thay vì
+// gọi 2 lần, và gộp chung 1 trang thay vì 2 trang riêng vì cả hai đều chỉ là
+// "chuyện gì vừa xảy ra" và cùng yêu cầu role operator+ để thấy phần nhật ký.
 export default function AlarmEvents() {
+  const { hasRole } = useAuth();
   const [events, setEvents] = useState([]);
+  const [commandEvents, setCommandEvents] = useState([]);
   const [lastUpdate, setLastUpdate] = useState(null);
-  // Derived from the events already on screen (not the backend's separate
-  // alarm_engine counter) so it counts every ACTIVE event type shown below —
-  // including ones alarm_engine itself never tracks, like ATTACK_PCAP_DETECTED
-  // from an IDS Upload finding — instead of silently under-counting.
   const activeCount = events.filter((e) => e.status === "ACTIVE").length;
 
   useEffect(() => {
-    fetchEvents().then((data) => {
-      setEvents((data.events || []).filter((e) => !COMMAND_EVENT_TYPES.includes(e.event_type)));
+    fetchEvents(500).then((data) => {
+      const all = data.events || [];
+      setEvents(all.filter((e) => !COMMAND_EVENT_TYPES.includes(e.event_type)));
+      setCommandEvents(all.filter((e) => COMMAND_EVENT_TYPES.includes(e.event_type)));
       setLastUpdate(data.timestamp || null);
     });
 
     const unsub = connectWebSocket((data) => {
-      if (data.type === "event" && data.event && !COMMAND_EVENT_TYPES.includes(data.event.event_type)) {
-        setEvents((prev) => {
-          const existingIndex = prev.findIndex((e) => e.id === data.event.id);
-          if (existingIndex !== -1) {
-            const next = [...prev];
-            next[existingIndex] = data.event;
-            return next;
-          }
-          return [data.event, ...prev].slice(0, 100);
-        });
-        setLastUpdate(data.event.timestamp);
-      }
+      if (data.type !== "event" || !data.event) return;
+      const isCommand = COMMAND_EVENT_TYPES.includes(data.event.event_type);
+      const setter = isCommand ? setCommandEvents : setEvents;
+      setter((prev) => {
+        const existingIndex = prev.findIndex((e) => e.id === data.event.id);
+        if (existingIndex !== -1) {
+          const next = [...prev];
+          next[existingIndex] = data.event;
+          return next;
+        }
+        return [data.event, ...prev].slice(0, 500);
+      });
+      setLastUpdate(data.event.timestamp);
     });
 
     return unsub;
@@ -49,27 +54,31 @@ export default function AlarmEvents() {
     }
   }
 
+  const writeCount = commandEvents.filter((e) => e.event_type === "COMMAND_WRITE").length;
+  const rejectedCount = commandEvents.filter((e) => e.event_type === "COMMAND_REJECTED").length;
+  const failedCount = commandEvents.filter((e) => e.event_type === "COMMAND_FAILED").length;
+  const blockedCount = commandEvents.filter((e) => e.event_type === "COMMAND_RATE_LIMITED" || e.event_type === "ACCESS_DENIED").length;
+
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 space-y-8">
       <PageHeader
         icon={Bell}
         title="Cảnh báo & Sự kiện"
-        subtitle="Cảnh báo hệ thống từ trạng thái tag/kết nối OPC UA thật — lệnh điều khiển PLC xem ở trang Nhật ký điều khiển riêng."
+        subtitle="Cảnh báo hệ thống từ trạng thái tag/kết nối OPC UA thật, cùng nhật ký lệnh điều khiển PLC."
         right={<ExportCsvButton excludeEventTypes={COMMAND_EVENT_TYPES} />}
       />
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2">
         <SummaryCard label="Cảnh báo đang hoạt động" value={activeCount} color={activeCount > 0 ? "text-red-400" : "text-green-400"} icon={Bell} />
         <SummaryCard label="Sự kiện đã lưu" value={events.length} icon={Inbox} />
-        <SummaryCard label="Lưu trữ" value="Cơ sở dữ liệu" color="text-green-400" icon={Database} />
       </div>
 
       <div className="overflow-hidden rounded-lg border border-gray-700 bg-gray-800 shadow-sm shadow-black/20">
-        <div className="border-b border-gray-700 px-4 py-3 text-sm font-semibold text-gray-200">Recent events</div>
+        <div className="border-b border-gray-700 px-4 py-3 text-sm font-semibold text-gray-200">Sự kiện gần đây</div>
         {events.length === 0 ? (
           <div className="flex flex-col items-center gap-2 p-10 text-sm text-gray-500">
             <Inbox size={28} className="text-gray-700" />
-            No events recorded yet.
+            Chưa có sự kiện nào được ghi nhận.
           </div>
         ) : (
           <div className="divide-y divide-gray-700">
@@ -80,7 +89,42 @@ export default function AlarmEvents() {
         )}
       </div>
 
-      {lastUpdate && <div className="text-right text-xs text-gray-600">Last event update: {lastUpdate}</div>}
+      {lastUpdate && <div className="text-right text-xs text-gray-600">Cập nhật sự kiện gần nhất: {lastUpdate}</div>}
+
+      {hasRole("operator") && (
+        <div className="space-y-4 border-t border-gray-800 pt-8">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-sm font-semibold text-gray-200">
+              <ClipboardList size={16} className="text-gray-500" />
+              Nhật ký điều khiển
+            </div>
+            <ExportCsvButton eventTypes={COMMAND_EVENT_TYPES} label="Xuất nhật ký CSV" />
+          </div>
+          <p className="text-xs text-gray-500">Mọi lệnh ghi xuống PLC thật — thành công, bị từ chối, hoặc lỗi.</p>
+
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <SummaryCard label="Lệnh thành công" value={writeCount} color="text-green-400" icon={ShieldCheck} />
+            <SummaryCard label="Bị từ chối (validate)" value={rejectedCount} color="text-yellow-400" icon={ShieldAlert} />
+            <SummaryCard label="Lỗi (không kết nối...)" value={failedCount} color="text-red-400" icon={ShieldX} />
+            <SummaryCard label="Bị chặn (rate-limit / quyền)" value={blockedCount} color="text-orange-400" icon={ShieldAlert} />
+          </div>
+
+          <div className="overflow-hidden rounded-lg border border-gray-700 bg-gray-800 shadow-sm shadow-black/20">
+            {commandEvents.length === 0 ? (
+              <div className="flex flex-col items-center gap-2 p-10 text-sm text-gray-500">
+                <ClipboardList size={28} className="text-gray-700" />
+                Chưa có lệnh điều khiển nào được ghi nhận — có dữ liệu sau khi ai đó (vai trò controller trở lên) gửi lệnh ở Giám sát tiến trình.
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-700">
+                {commandEvents.map((event) => (
+                  <AuditRow key={event.id} event={event} />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -126,7 +170,7 @@ function EventRow({ event, onAck }) {
       <div className="text-xs">
         {event.acked_by ? (
           <div className="text-gray-500">
-            <div className="text-green-400">Acked: {event.acked_by}</div>
+            <div className="text-green-400">Đã ack: {event.acked_by}</div>
             <div className="text-[10px] text-gray-600">{formatTime(event.acked_at)}</div>
           </div>
         ) : needsAck && hasRole("operator") ? (
@@ -141,6 +185,31 @@ function EventRow({ event, onAck }) {
           <span className="text-gray-600">Chưa ack</span>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+const TYPE_STYLE = {
+  COMMAND_WRITE: { label: "ĐÃ GHI", color: "text-green-300 bg-green-950/40" },
+  COMMAND_REJECTED: { label: "TỪ CHỐI", color: "text-yellow-300 bg-yellow-950/40" },
+  COMMAND_FAILED: { label: "LỖI", color: "text-red-300 bg-red-950/40" },
+  COMMAND_RATE_LIMITED: { label: "BỊ CHẶN TỐC ĐỘ", color: "text-orange-300 bg-orange-950/40" },
+  ACCESS_DENIED: { label: "TỪ CHỐI TRUY CẬP", color: "text-orange-300 bg-orange-950/40" },
+};
+
+function AuditRow({ event }) {
+  const style = TYPE_STYLE[event.event_type] || { label: event.event_type, color: "text-gray-300 bg-gray-900" };
+  return (
+    <div className="grid gap-3 px-4 py-3 text-xs transition-colors hover:bg-gray-900/40 md:grid-cols-[140px_100px_100px_140px_1fr] md:items-center">
+      <div className="text-gray-500">{formatTime(event.timestamp)}</div>
+      <span className={`w-fit rounded px-2 py-1 text-[10px] font-bold ${style.color}`}>{style.label}</span>
+      <div className="text-gray-400">{event.tag_key || "—"}</div>
+      <div className="font-mono text-gray-400">
+        {event.old_value !== null && event.old_value !== undefined ? String(event.old_value) : "—"}
+        {" → "}
+        {event.new_value !== null && event.new_value !== undefined ? String(event.new_value) : "—"}
+      </div>
+      <div className="text-gray-500">{event.message}</div>
     </div>
   );
 }

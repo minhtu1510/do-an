@@ -75,11 +75,6 @@ export async function fetchProcessHistory() {
   return res.json();
 }
 
-export async function fetchAttackEvents() {
-  const res = await apiFetch("/history/attack-events");
-  return res.json();
-}
-
 export async function ackEvent(eventId) {
   const res = await apiFetch(`/events/${eventId}/ack`, { method: "POST" });
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Failed to ack event");
@@ -192,18 +187,3 @@ export async function fetchIdsHistory(limit = 100) {
   return res.json();
 }
 
-export async function fetchOpcuaConfig() {
-  const res = await apiFetch("/admin/opcua-config");
-  return res.json();
-}
-
-export async function setOpcuaConfig(endpoint) {
-  const res = await apiFetch("/admin/opcua-config", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ endpoint }),
-  });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.message || body.detail || "Cập nhật cấu hình thất bại");
-  return body;
-}

@@ -612,7 +612,7 @@ export default function IdsUpload() {
             <StatTile label="Tổng số flow" value={live.total_flows} accent={CATEGORICAL[0]}>
               <Sparkline data={buckets} dataKey="value" color={CATEGORICAL[0]} />
             </StatTile>
-            <StatTile label="Flow bị gắn nhãn tấn công" value={live.attack_flows} color={live.attack_flows > 0 ? "text-red-400" : "text-green-400"} accent={attackColor}>
+            <StatTile label="Flow bị dự đoán là tấn công" value={live.attack_flows} color={live.attack_flows > 0 ? "text-red-400" : "text-green-400"} accent={attackColor}>
               <Sparkline data={buckets} dataKey="attackRatio" color={attackColor} />
             </StatTile>
             <div className="flex items-center justify-center rounded-lg border border-slate-700 bg-slate-800 p-4 shadow-sm shadow-black/20">
@@ -662,7 +662,7 @@ export default function IdsUpload() {
           )}
 
           {densitySeries.length > 0 && (
-            <ChartPanel title="Mật độ tấn công theo thời gian" subtitle="Tỷ lệ % flow bị gắn nhãn tấn công trong từng lát thời gian — nơi đường càng cao, tấn công càng dồn dập lúc đó.">
+            <ChartPanel title="Mật độ tấn công theo thời gian" subtitle="Tỷ lệ % flow bị model dự đoán là tấn công trong từng lát thời gian — nơi đường càng cao, tấn công càng dồn dập lúc đó.">
               <AreaChart data={densitySeries} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="densityFill" x1="0" y1="0" x2="0" y2="1">
@@ -680,7 +680,7 @@ export default function IdsUpload() {
           )}
 
           <div className="grid gap-4 lg:grid-cols-2">
-            <ChartPanel title="Phân bố loại nhãn">
+            <ChartPanel title="Phân bố kết quả dự đoán">
               <BarChart data={predictionRows.map(([label, count]) => ({ label, count }))} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
                 <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="label" stroke={AXIS} tick={{ fill: MUTED, fontSize: 11 }} />
@@ -714,6 +714,25 @@ export default function IdsUpload() {
             )}
           </div>
 
+          {result?.feature_importance?.length > 0 && (
+            <ChartPanel
+              title="Đặc trưng quan trọng nhất"
+              subtitle={`Model dùng ${result.feature_count} đặc trưng thật (${result.protocol === "opcua" ? "OPC UA" : "S7comm"}) — top ${result.feature_importance.length} đóng góp nhiều nhất theo độ quan trọng Random Forest (Gini importance), tính trên toàn bộ model lúc train, không phải riêng file đang phân tích.`}
+            >
+              <BarChart
+                data={result.feature_importance.map((f) => ({ feature: f.feature, importance: f.importance * 100 }))}
+                layout="vertical"
+                margin={{ top: 10, right: 30, left: 20, bottom: 0 }}
+              >
+                <CartesianGrid stroke={GRID} strokeDasharray="3 3" horizontal={false} />
+                <XAxis type="number" stroke={AXIS} tick={{ fill: MUTED, fontSize: 11 }} unit="%" />
+                <YAxis type="category" dataKey="feature" stroke={AXIS} tick={{ fill: MUTED, fontSize: 11 }} width={220} />
+                <Tooltip contentStyle={{ background: "#0f172a", border: "1px solid #334155", fontSize: 12 }} formatter={(v) => [`${v.toFixed(1)}%`, "Độ quan trọng"]} />
+                <Bar dataKey="importance" fill={CATEGORICAL[2]} />
+              </BarChart>
+            </ChartPanel>
+          )}
+
           <div className="grid gap-4 lg:grid-cols-2">
             <ChartPanel title="Độ tin cậy của model (confidence)">
               <BarChart data={live.confidence_histogram} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
@@ -725,7 +744,7 @@ export default function IdsUpload() {
               </BarChart>
             </ChartPanel>
 
-            <ChartPanel title="Timeline cảnh báo (swimlane)" subtitle="Mỗi hàng là 1 loại nhãn — chỉ hiện flow không phải BENIGN, theo đúng thời điểm">
+            <ChartPanel title="Timeline cảnh báo (swimlane)" subtitle="Mỗi hàng là 1 loại dự đoán — chỉ hiện flow không phải BENIGN, theo đúng thời điểm">
               {timelineAlerts.length === 0 ? (
                 <div className="flex h-full items-center justify-center text-sm text-slate-500">Chưa có cảnh báo nào trong đoạn đang phát.</div>
               ) : (
@@ -763,7 +782,7 @@ export default function IdsUpload() {
                     <>
                       <div className={`${gridCls} gap-3 border-b border-slate-700 px-4 py-2 text-xs uppercase text-slate-500`}>
                         <div>Thời điểm</div>
-                        <div>Nhãn</div>
+                        <div>Dự đoán</div>
                         <div>MITRE ATT&CK</div>
                         {!isOpcua && <div>Layer</div>}
                         <div>Confidence</div>

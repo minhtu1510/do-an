@@ -82,6 +82,24 @@ def _extract_features(pcap_path: Path, plc_ip: str, window: float) -> Path:
     return csv_path
 
 
+def _feature_importance(pipeline, top_n: int = 10) -> list[dict[str, Any]]:
+    """Top-N features by Random Forest importance — pipeline.layer3.rf is a
+    real fitted RandomForestClassifier loaded from layer3_classifier.joblib,
+    feature_importance_report() already exists on AttackClassifier (used by
+    train_eval.py's own CLI report), just reusing it here for the web result.
+    """
+    try:
+        df_imp = pipeline.layer3.feature_importance_report()
+    except Exception:
+        return []
+    if df_imp is None or df_imp.empty:
+        return []
+    return [
+        {"feature": row["feature"], "importance": float(row["importance"])}
+        for _, row in df_imp.head(top_n).iterrows()
+    ]
+
+
 def _summarize(df: pd.DataFrame, results: pd.DataFrame) -> dict[str, Any]:
     prediction_counts = results["prediction"].value_counts().to_dict()
     layer_counts = {str(k): int(v) for k, v in results["layer_used"].value_counts().to_dict().items()}
@@ -162,6 +180,8 @@ def analyze_pcap(pcap_bytes: bytes, filename: str, plc_ip: str, window: float = 
         results = pipeline.predict(df[features])
 
         summary = _summarize(df, results)
+        summary["feature_count"] = len(pipeline.feature_cols)
+        summary["feature_importance"] = _feature_importance(pipeline)
         summary["job_id"] = job_id
         summary["source_file"] = filename
         summary["model_dir"] = str(MODEL_DIR)

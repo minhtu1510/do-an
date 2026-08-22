@@ -5,11 +5,10 @@ import {
 import { TrendingUp, History, FileDown, Loader2, Download } from "lucide-react";
 import { jsPDF } from "jspdf";
 import html2canvas from "html2canvas";
-import { fetchAttackEvents, fetchProcessHistory } from "../services/api";
+import { fetchProcessHistory } from "../services/api";
 import PageHeader from "../components/PageHeader";
 import Gauge from "../components/Gauge";
 import Sparkline from "../components/Sparkline";
-import NotConfiguredNotice from "../components/NotConfiguredNotice";
 
 // Validated categorical slots (dark mode) — fixed order, never cycled per series identity.
 const BLUE = "#3987e5";
@@ -130,13 +129,11 @@ function GradientDefs({ id, color }) {
 
 export default function Trends() {
   const [tags, setTags] = useState(null);
-  const [attackEvents, setAttackEvents] = useState({ configured: false, events: [] });
   const reportRef = useRef(null);
   const [exportingPdf, setExportingPdf] = useState(false);
 
   useEffect(() => {
     fetchProcessHistory().then((data) => setTags(data.tags || {}));
-    fetchAttackEvents().then(setAttackEvents);
   }, []);
 
   function handleExportCsv() {
@@ -169,7 +166,7 @@ export default function Trends() {
       pdf.text("Trends & History — Bao cao lich su tag", 40, 50);
       pdf.setFontSize(10);
       pdf.text(`Thoi gian xuat: ${new Date().toLocaleString()}`, 40, 75);
-      pdf.text(`Tong diem du lieu: ${totalPoints}  |  Moc tan cong overlay: ${attackEvents.events.length}`, 40, 90);
+      pdf.text(`Tong diem du lieu: ${totalPoints}`, 40, 90);
       pdf.text("Du lieu historian that (SQLite/Postgres) — khong noi suy so lieu gia.", 40, 110);
 
       const imgWidth = pageWidth;
@@ -223,7 +220,6 @@ export default function Trends() {
 
   const totalPoints = timerData.length + runData.length + productionData.length;
   const activityBuckets = useMemo(() => bucketActivity(timerData), [timerData]);
-  const attackBuckets = useMemo(() => bucketActivity(attackEvents.events), [attackEvents]);
   const uptimePct = useMemo(() => computeUptimePct(runData), [runData]);
   const uptimeColor = uptimePct >= 50 ? GOOD_GREEN : uptimePct > 0 ? "#c98500" : ATTACK_RED;
 
@@ -256,14 +252,6 @@ export default function Trends() {
         }
       />
 
-      {attackEvents.events.length === 0 && (
-        <NotConfiguredNotice
-          title="Chưa nhận được mốc tấn công nào"
-          message="Biểu đồ historian vẫn hiển thị bình thường, chỉ thiếu mốc đánh dấu thời điểm tấn công thật."
-          detail="Chạy kịch bản tấn công S7comm (attack_event_logger.py) trên máy attack trong lúc backend đang bật — mốc tự đẩy vào đây qua mạng, không cần copy file tay. Nếu backend không chạy ở localhost, set WEB_SCADA_API=http://<ip-may-controller>:8000/api trên máy attack trước khi chạy."
-        />
-      )}
-
       {!hasAnyData ? (
         <div className="flex flex-col items-center gap-2 rounded-lg border border-gray-700 bg-gray-800 p-10 text-sm text-gray-500">
           <History size={28} className="text-gray-700" />
@@ -272,23 +260,13 @@ export default function Trends() {
       ) : (
         <div ref={reportRef} className="space-y-6 bg-slate-950 p-1">
           {/* Z-pattern hero row — the numbers that matter most, top-left to top-right */}
-          <div className="grid gap-4 lg:grid-cols-[1fr_1fr_auto]">
+          <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
             <div className="overflow-hidden rounded-lg border border-gray-700 bg-gray-800 shadow-sm shadow-black/20 transition-colors hover:border-gray-600">
               <div className="h-1" style={{ backgroundColor: AQUA }} />
               <div className="p-4">
                 <div className="text-xs uppercase text-gray-500">Tổng điểm dữ liệu</div>
                 <div className="mt-1 font-mono text-2xl font-bold" style={{ color: AQUA }}>{totalPoints}</div>
                 <Sparkline data={activityBuckets} color={AQUA} />
-              </div>
-            </div>
-            <div className="overflow-hidden rounded-lg border border-gray-700 bg-gray-800 shadow-sm shadow-black/20 transition-colors hover:border-gray-600">
-              <div className="h-1" style={{ backgroundColor: attackEvents.events.length > 0 ? ATTACK_RED : GOOD_GREEN }} />
-              <div className="p-4">
-                <div className="text-xs uppercase text-gray-500">Mốc tấn công overlay</div>
-                <div className="mt-1 font-mono text-2xl font-bold" style={{ color: attackEvents.events.length > 0 ? ATTACK_RED : GOOD_GREEN }}>
-                  {attackEvents.events.length}
-                </div>
-                <Sparkline data={attackBuckets} color={ATTACK_RED} />
               </div>
             </div>
             <div className="flex items-center justify-center rounded-lg border border-gray-700 bg-gray-800 p-4 shadow-sm shadow-black/20">
@@ -317,11 +295,6 @@ export default function Trends() {
               <Area type="stepAfter" dataKey="cd1" name="CD1" stroke={BLUE} strokeWidth={2} fill="url(#gradCd1)" dot={false} connectNulls />
               <Area type="stepAfter" dataKey="cd2" name="CD2" stroke={ORANGE} strokeWidth={2} fill="url(#gradCd2)" dot={false} connectNulls />
               <Area type="stepAfter" dataKey="cd3" name="CD3" stroke={AQUA} strokeWidth={2} fill="url(#gradCd3)" dot={false} connectNulls />
-              {/* Attack markers drawn last so they always sit on top of the area fills. */}
-              {attackEvents.events.map((ev, i) => (
-                <ReferenceLine key={i} x={toEpoch(ev.timestamp)} stroke={ATTACK_RED} strokeWidth={2}
-                  label={{ value: ev.scenario_label, position: "top", fill: ATTACK_RED, fontSize: 10 }} />
-              ))}
             </AreaChart>
           </ChartPanel>
 
@@ -334,10 +307,6 @@ export default function Trends() {
                 <YAxis stroke={AXIS} tick={{ fill: MUTED, fontSize: 11 }} domain={[0, 1]} ticks={[0, 1]} />
                 <Tooltip contentStyle={{ background: "#111827", border: "1px solid #374151", fontSize: 12 }} labelFormatter={formatTime} />
                 <Area type="stepAfter" dataKey="bang_tai" name="Băng tải (CHẠY=1)" stroke={VIOLET} strokeWidth={2} fill="url(#gradRun)" dot={false} connectNulls />
-                {attackEvents.events.map((ev, i) => (
-                  <ReferenceLine key={i} x={toEpoch(ev.timestamp)} stroke={ATTACK_RED} strokeWidth={2}
-                    label={{ value: ev.scenario_label, position: "top", fill: ATTACK_RED, fontSize: 10 }} />
-                ))}
               </AreaChart>
             </ChartPanel>
 
@@ -352,10 +321,6 @@ export default function Trends() {
                 <Legend wrapperStyle={{ fontSize: 12 }} />
                 <Area type="stepAfter" dataKey="nhap" name="Sản lượng mục tiêu" stroke={BLUE} strokeWidth={2} fill="url(#gradNhap)" dot={false} connectNulls />
                 <Area type="stepAfter" dataKey="hien_thi" name="Sản lượng hoàn thành" stroke={ORANGE} strokeWidth={2} fill="url(#gradHienThi)" dot={false} connectNulls />
-                {attackEvents.events.map((ev, i) => (
-                  <ReferenceLine key={i} x={toEpoch(ev.timestamp)} stroke={ATTACK_RED} strokeWidth={2}
-                    label={{ value: ev.scenario_label, position: "top", fill: ATTACK_RED, fontSize: 10 }} />
-                ))}
               </AreaChart>
             </ChartPanel>
           </div>

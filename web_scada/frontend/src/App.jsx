@@ -2,20 +2,18 @@ import { Routes, Route, Navigate, NavLink, useLocation } from "react-router-dom"
 import {
   LayoutDashboard, Workflow, Bell, TrendingUp, ShieldCheck,
   UploadCloud, ServerCog, Users as UsersIcon, ChevronRight, FileClock,
-  Database, Settings2, ClipboardList,
+  Database, Settings2,
 } from "lucide-react";
 import StatusBar from "./components/StatusBar";
 import Overview from "./pages/Overview";
 import ProcessMonitor from "./pages/ProcessMonitor";
 import AlarmEvents from "./pages/AlarmEvents";
-import AuditLog from "./pages/AuditLog";
 import Trends from "./pages/Trends";
 import SystemStatus from "./pages/SystemStatus";
 import IdsUpload from "./pages/IdsUpload";
 import PcapHistory from "./pages/PcapHistory";
 import Login from "./pages/Login";
 import AdminUsers from "./pages/AdminUsers";
-import OpcuaConfig from "./pages/OpcuaConfig";
 import { AuthProvider, useAuth } from "./stores/authStore";
 import { ConfirmProvider } from "./components/ConfirmDialog";
 import { ToastProvider } from "./components/Toast";
@@ -54,7 +52,6 @@ const NAV_GROUPS = [
     icon: TrendingUp,
     items: [
       { to: "/trends", label: "Xu hướng & Lịch sử", icon: TrendingUp, end: false, minRole: "viewer" },
-      { to: "/audit", label: "Nhật ký điều khiển", icon: ClipboardList, end: false, minRole: "operator" },
       { to: "/pcap-history", label: "Lịch sử phân tích PCAP", icon: FileClock, end: false, minRole: "operator" },
     ],
   },
@@ -64,7 +61,6 @@ const NAV_GROUPS = [
     items: [
       { to: "/system", label: "Trạng thái hệ thống", icon: ServerCog, end: false, minRole: "viewer" },
       { to: "/admin/users", label: "Người dùng", icon: UsersIcon, end: false, minRole: "admin" },
-      { to: "/admin/opcua", label: "Cấu hình OPC UA", icon: Settings2, end: false, minRole: "admin" },
     ],
   },
 ];
@@ -200,13 +196,11 @@ function Shell() {
               <Route path="/" element={<RequireRole minRole="viewer"><Overview /></RequireRole>} />
               <Route path="/process" element={<RequireRole minRole="viewer"><ProcessMonitor /></RequireRole>} />
               <Route path="/alarms" element={<RequireRole minRole="viewer"><AlarmEvents /></RequireRole>} />
-              <Route path="/audit" element={<RequireRole minRole="operator"><AuditLog /></RequireRole>} />
               <Route path="/pcap-history" element={<RequireRole minRole="operator"><PcapHistory /></RequireRole>} />
               <Route path="/trends" element={<RequireRole minRole="viewer"><Trends /></RequireRole>} />
               <Route path="/ids-upload" element={<RequireRole minRole="operator"><IdsUpload /></RequireRole>} />
               <Route path="/system" element={<RequireRole minRole="viewer"><SystemStatus /></RequireRole>} />
               <Route path="/admin/users" element={<RequireRole minRole="admin"><AdminUsers /></RequireRole>} />
-              <Route path="/admin/opcua" element={<RequireRole minRole="admin"><OpcuaConfig /></RequireRole>} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </div>

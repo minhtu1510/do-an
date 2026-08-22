@@ -27,7 +27,7 @@ export default function PcapHistory() {
 
       <div className="grid gap-4 sm:grid-cols-2">
         <SummaryCard label="Tổng số lần phân tích" value={total} color="text-blue-400" icon={FileClock} />
-        <SummaryCard label="Có flow bị gắn nhãn tấn công" value={withAttack} color={withAttack > 0 ? "text-red-400" : "text-green-400"} icon={withAttack > 0 ? ShieldAlert : ShieldCheck} />
+        <SummaryCard label="Có flow bị dự đoán là tấn công" value={withAttack} color={withAttack > 0 ? "text-red-400" : "text-green-400"} icon={withAttack > 0 ? ShieldAlert : ShieldCheck} />
       </div>
 
       <div className="overflow-hidden rounded-lg border border-gray-700 bg-gray-800 shadow-sm shadow-black/20">
@@ -48,7 +48,7 @@ export default function PcapHistory() {
                 <div>File</div>
                 <div>Người phân tích</div>
                 <div>Flow tấn công</div>
-                <div>Nhãn chính</div>
+                <div>Dự đoán chính</div>
                 <div>Tỷ lệ</div>
               </div>
               <div className="divide-y divide-gray-700">

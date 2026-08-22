@@ -6,7 +6,6 @@ import io
 import os
 import time
 from collections import defaultdict
-from pathlib import Path
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response
 from dotenv import load_dotenv
@@ -27,7 +26,6 @@ load_dotenv()
 
 TZ = timezone(timedelta(hours=7))
 api_router = APIRouter()
-ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 
 
 def _gateway():
@@ -246,62 +244,6 @@ async def export_events_csv(
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
-
-
-@api_router.get("/admin/opcua-config")
-async def get_opcua_config(_user=Depends(require_role("admin"))):
-    g = _gateway()
-    return {"endpoint": g.endpoint, "connected": g.status.get("connected", False)}
-
-
-class OpcuaConfigRequest(BaseModel):
-    endpoint: str
-
-
-def _update_env_opcua_endpoint(new_endpoint: str) -> None:
-    if not ENV_PATH.is_file():
-        return
-    lines = ENV_PATH.read_text().splitlines()
-    for i, line in enumerate(lines):
-        if line.startswith("OPCUA_ENDPOINT="):
-            lines[i] = f"OPCUA_ENDPOINT={new_endpoint}"
-            break
-    else:
-        lines.append(f"OPCUA_ENDPOINT={new_endpoint}")
-    ENV_PATH.write_text("\n".join(lines) + "\n")
-
-
-@api_router.post("/admin/opcua-config")
-async def set_opcua_config(body: OpcuaConfigRequest, user=Depends(require_role("admin"))):
-    """Changes the endpoint on the running gateway immediately (no backend
-    restart needed — see OPCUAGateway.reconfigure_endpoint) and writes the
-    value into .env so a future real restart also picks it up, instead of
-    silently reverting to the old address.
-    """
-    new_endpoint = body.endpoint.strip()
-    if not new_endpoint.startswith("opc.tcp://"):
-        return JSONResponse(
-            status_code=422,
-            content={"error": "invalid_endpoint", "message": "Endpoint phải bắt đầu bằng opc.tcp://"},
-        )
-
-    g = _gateway()
-    old_endpoint = g.endpoint
-    await g.reconfigure_endpoint(new_endpoint)
-
-    try:
-        _update_env_opcua_endpoint(new_endpoint)
-    except Exception:
-        pass  # gateway already switched live; failing to persist to .env is not fatal
-
-    event_service.add(EventRecord(
-        event_type="OPCUA_ENDPOINT_CHANGED",
-        severity="WARNING",
-        message=f"{user.username} đổi OPC UA endpoint: {old_endpoint} -> {new_endpoint}",
-        status="CLEARED",
-    ))
-
-    return {"endpoint": new_endpoint, "applied": True}
 
 
 @api_router.get("/security/status")
