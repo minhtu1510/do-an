@@ -123,7 +123,10 @@ def _summarize(df: pd.DataFrame, results: pd.DataFrame) -> dict[str, Any]:
     non_benign = results[results["prediction"] != "BENIGN"].copy()
     non_benign["row_index"] = non_benign.index
     top_flows = non_benign.sort_values("confidence", ascending=False).head(200)
-    flow_cols = [c for c in ("window_start_ms", "window_end_ms", "src_ip", "dst_ip", "s7_input_write_count", "s7_output_write_count") if c in df.columns]
+    # src_ip/dst_ip were listed here before but extract_s7_features.py never
+    # emits per-window IP columns (only aggregate counts) — dropped so this
+    # doesn't silently promise a "Flow" column that's always empty.
+    flow_cols = [c for c in ("window_start_ms", "window_end_ms", "s7_input_write_count", "s7_output_write_count") if c in df.columns]
     flow_table = []
     for idx, row in top_flows.iterrows():
         entry = {"prediction": row["prediction"], "confidence": float(row["confidence"]), "layer_used": int(row["layer_used"])}

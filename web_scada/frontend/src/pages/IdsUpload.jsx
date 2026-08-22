@@ -79,6 +79,26 @@ function formatTime(t) {
   return new Date(t).toLocaleTimeString();
 }
 
+// Real per-window counters the backend actually sends (see flow_cols in
+// service.py / service_opcua.py) — src_ip/dst_ip were shown here before but
+// neither extractor emits per-window IP columns, so that cell was always
+// empty. This renders whatever real fields exist instead of a fixed pair.
+function flowDetail(row, isOpcua) {
+  const parts = isOpcua
+    ? [
+        row.opcua_write_count != null && `Write: ${row.opcua_write_count}`,
+        row.opcua_browse_count != null && `Browse: ${row.opcua_browse_count}`,
+        row.opcua_read_count != null && `Read: ${row.opcua_read_count}`,
+        row.opcua_create_session_count != null && `Session: ${row.opcua_create_session_count}`,
+      ]
+    : [
+        row.s7_input_write_count != null && `Ghi vào: ${row.s7_input_write_count}`,
+        row.s7_output_write_count != null && `Ghi ra: ${row.s7_output_write_count}`,
+      ];
+  const shown = parts.filter(Boolean);
+  return shown.length ? shown.join(" · ") : "—";
+}
+
 // Recharts renders every row as real SVG geometry — a pcap with tens of
 // thousands of flow windows would freeze the tab drawing Fusion Chart/swimlane
 // points one by one. Same fix as Trends.jsx's downsampleForChart: a display-
@@ -254,7 +274,17 @@ export default function IdsUpload() {
   const [status, setStatusState] = useState(idsUploadStore.status);
   const setStatus = (v) => { idsUploadStore.status = v; setStatusState(v); };
   const [protocol, setProtocolState] = useState(idsUploadStore.protocol);
-  const setProtocol = (v) => { idsUploadStore.protocol = v; setProtocolState(v); };
+  // model_opcua/ was trained on 5s-aggregated windows (extract_opcua_features.py
+  // default), while the S7comm model was trained on 2s windows — auto-switching
+  // this on protocol change keeps inference windowing aligned with how each
+  // model was actually trained, instead of silently reusing the wrong one.
+  const setProtocol = (v) => {
+    idsUploadStore.protocol = v;
+    setProtocolState(v);
+    const defaultWindow = v === "opcua" ? 5.0 : 2.0;
+    idsUploadStore.windowS = defaultWindow;
+    setWindowSState(defaultWindow);
+  };
   const [file, setFileState] = useState(idsUploadStore.file);
   const setFile = (v) => { idsUploadStore.file = v; setFileState(v); };
   const [plcIp, setPlcIpState] = useState(idsUploadStore.plcIp);
@@ -786,7 +816,7 @@ export default function IdsUpload() {
                         <div>MITRE ATT&CK</div>
                         {!isOpcua && <div>Layer</div>}
                         <div>Confidence</div>
-                        <div>Flow</div>
+                        <div>Chi tiết</div>
                       </div>
                       <div className="max-h-96 overflow-y-auto divide-y divide-slate-700">
                         {feedRows.map((row, i) => {
@@ -812,9 +842,7 @@ export default function IdsUpload() {
                               )}
                               {!isOpcua && <div className="text-slate-400">L{row.layer_used}</div>}
                               <div className="text-slate-400">{(row.confidence * 100).toFixed(1)}%</div>
-                              <div className="text-slate-600 truncate">
-                                {row.src_ip ? `${row.src_ip} -> ${row.dst_ip}` : "—"}
-                              </div>
+                              <div className="text-slate-600 truncate">{flowDetail(row, isOpcua)}</div>
                             </div>
                           );
                         })}
