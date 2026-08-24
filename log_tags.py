@@ -363,6 +363,10 @@ def main():
                     print(f"[LOG_TAGS] Connected {args.target}", flush=True)
                 except Exception as e:
                     print(f"[LOG_TAGS] Connect fail: {e}  (retry in 2s)", file=sys.stderr, flush=True)
+                    try:
+                        client.disconnect()
+                    except Exception:
+                        pass
                     time.sleep(2)
                     continue
 
