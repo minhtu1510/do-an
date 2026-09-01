@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
-import { Workflow, ChevronDown, AlertTriangle, Play, Square } from "lucide-react";
+import { Workflow, ChevronDown, AlertTriangle, Lock, Pencil, Play, Square } from "lucide-react";
 import { connectWebSocket } from "../services/websocket";
-import { fetchAllTags, writeTag } from "../services/api";
+import { fetchAllTags, fetchWriteLock, updateTagThresholds, writeTag } from "../services/api";
 import { useAuth } from "../stores/authStore";
 import { useConfirm } from "../components/ConfirmDialog";
+import { useToast } from "../components/Toast";
 import TagCard from "../components/TagCard";
 import PageHeader from "../components/PageHeader";
 
@@ -11,7 +12,7 @@ export default function ProcessMonitor() {
   const { hasRole } = useAuth();
   const [tags, setTags] = useState({});
 
-  useEffect(() => {
+  function refreshTags() {
     fetchAllTags().then((data) => {
       if (data.tags) {
         const map = {};
@@ -19,6 +20,10 @@ export default function ProcessMonitor() {
         setTags(map);
       }
     });
+  }
+
+  useEffect(() => {
+    refreshTags();
     const unsub = connectWebSocket((data) => {
       if (data.type === "tag_update") {
         setTags((prev) => ({ ...prev, [data.key]: data.data }));
@@ -110,6 +115,13 @@ export default function ProcessMonitor() {
                 );
               })}
             </div>
+            {hasRole("admin") && (
+              <div className="mt-3 space-y-2 border-t border-gray-700 pt-3">
+                {["cd1", "cd2", "cd3"].map((key) => (
+                  <ThresholdEditor key={key} tagKey={key} tag={tags[key]} onSaved={refreshTags} />
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="rounded-lg border border-gray-700 bg-gray-800 p-4 shadow-sm shadow-black/20">
@@ -131,6 +143,13 @@ function ControlPanel({ bangTai, isRunning, offline }) {
   const confirm = useConfirm();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [lock, setLock] = useState(null);
+
+  useEffect(() => {
+    fetchWriteLock().then(setLock).catch(() => {});
+    const timer = setInterval(() => fetchWriteLock().then(setLock).catch(() => {}), 15000);
+    return () => clearInterval(timer);
+  }, []);
 
   async function handleConveyorToggle() {
     const nextValue = !isRunning;
@@ -147,10 +166,13 @@ function ControlPanel({ bangTai, isRunning, offline }) {
       await writeTag("bang_tai", nextValue);
     } catch (err) {
       setError(err.message);
+      fetchWriteLock().then(setLock).catch(() => {});
     } finally {
       setBusy(false);
     }
   }
+
+  const locked = lock?.locked;
 
   return (
     <div className="rounded-lg border border-amber-700/40 bg-amber-950/10 p-4 shadow-sm shadow-black/20">
@@ -159,6 +181,16 @@ function ControlPanel({ bangTai, isRunning, offline }) {
         Control Panel — ghi lệnh trực tiếp xuống PLC thật
       </div>
 
+      {locked && (
+        <div className="mb-3 flex items-start gap-2 rounded border border-red-600 bg-red-950/40 px-3 py-2 text-xs text-red-300">
+          <Lock size={13} className="mt-0.5 shrink-0" />
+          <div>
+            <div className="font-semibold">Lệnh ghi PLC qua web đang bị khóa — {lock.reason}</div>
+            <div className="text-[10px] text-red-400/80">Cần admin mở khóa ở trang Cảnh báo & Sự kiện trước khi gửi lệnh tiếp.</div>
+          </div>
+        </div>
+      )}
+
       {error && (
         <div className="mb-3 rounded border border-red-900/50 bg-red-950/30 px-3 py-2 text-xs text-red-400">{error}</div>
       )}
@@ -166,7 +198,7 @@ function ControlPanel({ bangTai, isRunning, offline }) {
       <div className="flex flex-wrap items-center gap-3">
         <button
           onClick={handleConveyorToggle}
-          disabled={busy || offline}
+          disabled={busy || offline || locked}
           className={`flex items-center gap-1.5 rounded px-4 py-1.5 text-sm font-semibold text-white shadow-sm transition-colors disabled:opacity-50 ${
             isRunning ? "bg-red-600 hover:bg-red-500" : "bg-green-600 hover:bg-green-500"
           }`}
@@ -237,4 +269,83 @@ function formatValue(value) {
   if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
   if (value === null || value === undefined) return "—";
   return String(value);
+}
+
+// Admin-only editor for a stage timer's safety range (500-10000ms by
+// default) — this is the range alarms/engine.py's STAGE_TIMER_OUT_OF_RANGE
+// check and gateway.py's write validation both read, so changing it here
+// takes effect immediately across the whole app, not just this display.
+function ThresholdEditor({ tagKey, tag, onSaved }) {
+  const toast = useToast();
+  const [editing, setEditing] = useState(false);
+  const [min, setMin] = useState("");
+  const [max, setMax] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  function startEdit() {
+    setMin(tag?.minimum ?? "");
+    setMax(tag?.maximum ?? "");
+    setEditing(true);
+  }
+
+  async function save() {
+    const minVal = min === "" ? null : Number(min);
+    const maxVal = max === "" ? null : Number(max);
+    if (minVal !== null && maxVal !== null && minVal > maxVal) {
+      toast("Ngưỡng dưới không được lớn hơn ngưỡng trên.", { tone: "error" });
+      return;
+    }
+    setBusy(true);
+    try {
+      await updateTagThresholds(tagKey, minVal, maxVal);
+      toast(`Đã đổi ngưỡng an toàn ${tagKey}: [${minVal ?? "—"}, ${maxVal ?? "—"}]`, { tone: "success" });
+      setEditing(false);
+      onSaved();
+    } catch (err) {
+      toast(err.message, { tone: "error" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!editing) {
+    return (
+      <div className="flex items-center justify-between text-[11px] text-gray-500">
+        <span>
+          {tagKey}: ngưỡng an toàn [{tag?.minimum ?? "—"}, {tag?.maximum ?? "—"}] {tag?.unit || "ms"}
+        </span>
+        <button onClick={startEdit} className="flex items-center gap-1 text-gray-500 transition-colors hover:text-blue-300">
+          <Pencil size={11} />
+          Sửa
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2 text-[11px]">
+      <span className="text-gray-500">{tagKey}:</span>
+      <input
+        type="number"
+        value={min}
+        onChange={(e) => setMin(e.target.value)}
+        placeholder="min"
+        className="w-16 rounded border border-gray-700 bg-gray-950 px-1.5 py-0.5 text-gray-200 outline-none focus:border-blue-600"
+      />
+      <span className="text-gray-600">–</span>
+      <input
+        type="number"
+        value={max}
+        onChange={(e) => setMax(e.target.value)}
+        placeholder="max"
+        className="w-16 rounded border border-gray-700 bg-gray-950 px-1.5 py-0.5 text-gray-200 outline-none focus:border-blue-600"
+      />
+      <button onClick={save} disabled={busy} className="rounded bg-blue-600 px-2 py-0.5 font-semibold text-white transition-colors hover:bg-blue-500 disabled:opacity-50">
+        {busy ? "..." : "Lưu"}
+      </button>
+      <button onClick={() => setEditing(false)} className="text-gray-500 hover:text-gray-300">
+        Hủy
+      </button>
+    </div>
+  );
 }

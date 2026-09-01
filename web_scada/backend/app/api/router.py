@@ -14,6 +14,8 @@ from datetime import datetime, timezone, timedelta
 
 from ..alarms import alarm_engine
 from ..auth import require_role
+from .. import control_lock
+from .. import ip_allowlist
 from ..events import event_service
 from ..events.models import EventRecord
 from ..ids_upload.service import model_configured as ids_model_configured
@@ -101,6 +103,35 @@ class TagWriteRequest(BaseModel):
     value: bool | int | float
 
 
+class TagThresholdRequest(BaseModel):
+    minimum: float | None = None
+    maximum: float | None = None
+
+
+@api_router.patch("/tags/{tag_key}/thresholds")
+async def update_tag_thresholds(tag_key: str, body: TagThresholdRequest, user=Depends(require_role("admin"))):
+    """Admin-only: edit a tag's safety range (e.g. cd1/cd2/cd3's 500-10000ms
+    window) — this is what alarms/engine.py's STAGE_TIMER_OUT_OF_RANGE check
+    and gateway.py's write validation both read, and takes effect
+    immediately, no restart needed."""
+    reg = _tag_registry()
+    if body.minimum is not None and body.maximum is not None and body.minimum > body.maximum:
+        return JSONResponse(status_code=422, content={"error": "invalid_range", "message": "minimum không được lớn hơn maximum"})
+
+    cfg = reg.set_threshold(tag_key, body.minimum, body.maximum)
+    if cfg is None:
+        return JSONResponse(status_code=404, content={"error": "tag_not_found"})
+
+    event_service.add(EventRecord(
+        event_type="TAG_THRESHOLD_CHANGED",
+        severity="WARNING",
+        message=f"{user.username} đổi ngưỡng an toàn của tag '{tag_key}': [{cfg.minimum}, {cfg.maximum}]",
+        tag_key=tag_key,
+        status="CLEARED",
+    ))
+    return {"key": cfg.key, "minimum": cfg.minimum, "maximum": cfg.maximum}
+
+
 # Per-user write rate limit — a legitimate operator clicking a button a few
 # times a minute never comes close to this; a compromised/scripted account
 # hammering the write endpoint does. In-memory is fine here: it only needs to
@@ -127,6 +158,24 @@ async def write_tag(tag_key: str, body: TagWriteRequest, user=Depends(require_ro
     so there is always an audit trail of who issued which command.
     """
     from ..websocket.manager import ws_manager
+
+    if control_lock.is_locked():
+        lock = control_lock.status()
+        event_service.add(EventRecord(
+            event_type="COMMAND_BLOCKED_LOCKED",
+            severity="WARNING",
+            message=f"{user.username} bị chặn ghi tag={tag_key}: lệnh ghi PLC đang khóa ({lock['reason']}).",
+            tag_key=tag_key,
+            status="CLEARED",
+        ))
+        return JSONResponse(
+            status_code=423,
+            content={
+                "error": "write_locked",
+                "message": f"Lệnh ghi PLC đang bị khóa: {lock['reason']}. Cần admin mở khóa ở trang Cảnh báo & Sự kiện.",
+                "lock": lock,
+            },
+        )
 
     if not _check_write_rate_limit(user.username):
         event_service.add(EventRecord(
@@ -187,6 +236,74 @@ async def write_tag(tag_key: str, body: TagWriteRequest, user=Depends(require_ro
     return {"written": True, "tag": result}
 
 
+@api_router.get("/control/lock")
+async def get_write_lock(_user=Depends(require_role("viewer"))):
+    return control_lock.status()
+
+
+@api_router.post("/control/unlock")
+async def release_write_lock(user=Depends(require_role("admin"))):
+    from ..websocket.manager import ws_manager
+
+    was_locked = control_lock.is_locked()
+    control_lock.release()
+    if was_locked:
+        # add() itself auto-closes the matching WRITE_LOCK_ENGAGED via
+        # AUTO_CLEAR_MAP (events/service.py) — no separate call needed.
+        event = event_service.add(EventRecord(
+            event_type="WRITE_LOCK_RELEASED",
+            severity="INFO",
+            message=f"{user.username} đã mở khóa lệnh ghi PLC.",
+            status="CLEARED",
+        ))
+        payload = event.to_dict()
+        payload["active_count"] = alarm_engine.active_alarm_count()
+        await ws_manager.broadcast_event(payload)
+    return control_lock.status()
+
+
+class IpAllowlistRequest(BaseModel):
+    ip: str
+    label: str = ""
+
+
+@api_router.get("/ip-allowlist")
+async def get_ip_allowlist(_user=Depends(require_role("viewer"))):
+    return {"entries": ip_allowlist.list_entries()}
+
+
+@api_router.post("/ip-allowlist")
+async def add_ip_allowlist(body: IpAllowlistRequest, admin=Depends(require_role("admin"))):
+    ip = body.ip.strip()
+    if not ip:
+        return JSONResponse(status_code=422, content={"error": "invalid_ip"})
+    try:
+        entry = ip_allowlist.add_entry(ip, body.label.strip(), admin.username)
+    except ValueError as e:
+        return JSONResponse(status_code=409, content={"error": "duplicate", "message": str(e)})
+    event_service.add(EventRecord(
+        event_type="IP_ALLOWLIST_ADDED",
+        severity="INFO",
+        message=f"{admin.username} thêm IP hợp lệ: {ip}" + (f" ({body.label})" if body.label else ""),
+        status="CLEARED",
+    ))
+    return entry
+
+
+@api_router.delete("/ip-allowlist/{ip}")
+async def remove_ip_allowlist(ip: str, admin=Depends(require_role("admin"))):
+    removed = ip_allowlist.remove_entry(ip)
+    if not removed:
+        return JSONResponse(status_code=404, content={"error": "not_found"})
+    event_service.add(EventRecord(
+        event_type="IP_ALLOWLIST_REMOVED",
+        severity="WARNING",
+        message=f"{admin.username} xoá IP hợp lệ: {ip}",
+        status="CLEARED",
+    ))
+    return {"removed": ip}
+
+
 @api_router.get("/events")
 async def get_events(limit: int = 100, _user=Depends(require_role("viewer"))):
     return {
@@ -196,11 +313,32 @@ async def get_events(limit: int = 100, _user=Depends(require_role("viewer"))):
     }
 
 
+ALLOWED_DISPOSITIONS = {None, "investigating", "false_positive", "confirmed_new_pattern"}
+# "confirmed_new_pattern" is a bigger call than the other two (operator can
+# self-serve investigating/false_positive) — it's the explicit human
+# validation step real human-in-the-loop anomaly-detection practice calls
+# for before treating a flagged case as real signal instead of noise
+# (default assumption stays false-positive-like until someone with
+# authority says otherwise). Reserved for admin, same tier as this app's
+# other consequential-judgment actions (release write-lock, manage users).
+ADMIN_ONLY_DISPOSITIONS = {"confirmed_new_pattern"}
+
+
+class AckEventRequest(BaseModel):
+    disposition: str | None = None  # None (đã xác nhận) | "investigating" | "false_positive" | "confirmed_new_pattern"
+    note: str | None = None
+
+
 @api_router.post("/events/{event_id}/ack")
-async def ack_event(event_id: str, user=Depends(require_role("operator"))):
+async def ack_event(event_id: str, body: AckEventRequest = AckEventRequest(), user=Depends(require_role("operator"))):
     from ..websocket.manager import ws_manager
 
-    event = event_service.ack(event_id, user.username)
+    if body.disposition not in ALLOWED_DISPOSITIONS:
+        return JSONResponse(status_code=400, content={"error": "invalid_disposition"})
+    if body.disposition in ADMIN_ONLY_DISPOSITIONS and user.role != "admin":
+        return JSONResponse(status_code=403, content={"error": "admin_only", "message": "Chỉ admin mới xác nhận được 'phát hiện mẫu mới thật'."})
+
+    event = event_service.ack(event_id, user.username, body.disposition, body.note)
     if event is None:
         return JSONResponse(status_code=404, content={"error": "event_not_found", "id": event_id})
 

@@ -130,7 +130,7 @@ export default function Overview() {
             return (
               <div key={key} className={`rounded-lg border p-4 transition-colors ${active ? "border-blue-500 bg-blue-950/30" : unknown ? "border-gray-700 bg-gray-900/40" : "border-gray-700 bg-gray-900/20"}`}>
                 <div className="text-xs text-gray-500">Công đoạn {index + 1}</div>
-                <div className={`mt-2 text-lg font-bold ${active ? "text-blue-300" : unknown ? "text-gray-600" : "text-gray-300"}`}>
+                <div className={`mt-2 break-words text-sm font-bold leading-tight ${active ? "text-blue-300" : unknown ? "text-gray-600" : "text-gray-300"}`}>
                   {unknown ? "CHƯA RÕ" : active ? "HOẠT ĐỘNG" : "KHÔNG HOẠT ĐỘNG"}
                 </div>
                 <div className="mt-1 text-[10px] text-gray-600">{key}</div>

@@ -173,7 +173,7 @@ def analyze_pcap(pcap_bytes: bytes, filename: str, plc_ip: str, window: float = 
 
         df = pd.read_csv(csv_path, low_memory=False)
         if df.empty:
-            raise IdsUploadOpcuaError("File pcap không trích xuất được flow OPC UA nào (kiểm tra lại --plc-ip có đúng không).")
+            raise IdsUploadOpcuaError("File pcap không trích xuất được cửa sổ OPC UA nào (kiểm tra lại --plc-ip có đúng không).")
 
         missing = [f for f in features if f not in df.columns]
         for f in missing:
@@ -190,6 +190,11 @@ def analyze_pcap(pcap_bytes: bytes, filename: str, plc_ip: str, window: float = 
         summary["job_id"] = job_id
         summary["source_file"] = filename
         summary["model_dir"] = str(MODEL_DIR)
+        try:
+            from .packet_capture import attach_attack_packets
+            attach_attack_packets(pcap_path, summary["flow_table"])
+        except Exception:
+            pass
         return summary
     finally:
         pcap_path.unlink(missing_ok=True)

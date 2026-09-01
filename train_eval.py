@@ -158,20 +158,29 @@ class RuleBasedDetector:
         if row.get("dcp_identify_request_count", 0) >= 2:
             return "SCAN"
 
-        # Rule 3: FUZZ nghiêm trọng – TCP RST rất cao + S7 error rất cao
-        # Dấu hiệu: PLC liên tục reject malformed PDU
-        tcp_rst = row.get("tcp_rst_count", 0)
-        s7_err = row.get("s7_error_count", 0)
-        pkt_count = max(row.get("packet_count", 1), 1)
-        if tcp_rst / pkt_count > 0.4 and s7_err > 30:
-            return "FUZZ"
+        # FUZZ: không dùng ngưỡng cứng ở Layer 1. Tài liệu về phát hiện bất
+        # thường S7comm (Kleinmann & Wool, "Accurate Modeling of the Siemens
+        # S7 SCADA Protocol for Intrusion Detection and Digital Forensics")
+        # khuyến nghị coi đây là bài toán thống kê (độ lệch so với baseline),
+        # không phải 1 ngưỡng cố định — đúng việc Layer 2 (IsolationForest)
+        # đã đảm nhiệm, nên rule cứng ở đây bị bỏ để tránh trùng/chế ngưỡng.
 
-        # Rule 4: FLOOD cực đoan – hàng trăm SYN trong 1 window
+        # Rule 3: FLOOD – ngập SYN trong 1 window
+        # Ngưỡng quy đổi từ mốc ~10 SYN/giây dùng cho luật IDS SCADA
+        # (arXiv:2412.07917, "Distributed Intrusion Detection System using
+        # Semantic-based Rules for SCADA in Smart Grid") — với window 2s:
+        # 10 SYN/s * 2s = 20.
+        # Đã bỏ 2 điều kiện AND cũ (cotp_cr>40, read_write_total==0): kiểm
+        # tra trên 2 file SYN_FLOOD/S7_FLOOD thật (samples/day6_synflood_
+        # real_slice.pcap, day6_s7flood_real_slice.pcap) thấy cotp_cr_count
+        # luôn = 0 suốt cuộc tấn công thật (bắt tay COTP không được ghi
+        # nhận) và s7_read_count không bao giờ về 0 (máy trạm hợp lệ vẫn
+        # đọc dữ liệu song song) — 2 điều kiện đó khiến luật không thể khớp
+        # trên dữ liệu thật bất kể ngưỡng. Chỉ còn syn_count: test trên file
+        # benign thật (day6_benign_check_slice.pcap) syn_count tối đa 2s là
+        # 4 → ngưỡng 20 không gây false positive trên mẫu benign đã kiểm.
         syn_count = row.get("tcp_syn_count", 0)
-        pkt_rate = row.get("packet_rate", 0)
-        cotp_cr = row.get("cotp_cr_count", 0)
-        read_write_total = row.get("s7_read_count", 0) + row.get("s7_write_count", 0)
-        if syn_count > 40 and cotp_cr > 40 and read_write_total == 0:
+        if syn_count > 20:
             return "FLOOD"
 
         # Không match rule nào → return None

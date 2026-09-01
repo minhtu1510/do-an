@@ -12,8 +12,8 @@ import PageHeader from "../components/PageHeader";
 import Gauge from "../components/Gauge";
 import Sparkline from "../components/Sparkline";
 import NotConfiguredNotice from "../components/NotConfiguredNotice";
-import { analyzeIdsPcap, analyzeIdsPcapOpcua, fetchIdsStatus, fetchIdsStatusOpcua, fetchProcessHistory } from "../services/api";
-import { idsUploadStore } from "./idsUploadPersist";
+import { analyzeIdsPcap, analyzeIdsPcapOpcua, fetchIdsStatus, fetchIdsStatusOpcua, fetchIpAllowlist, fetchProcessHistory } from "../services/api";
+import { idsUploadStore, normalizeOpcuaResult } from "./idsUploadPersist";
 
 // Same validated categorical order used in Trends.jsx — fixed, never cycled.
 const CATEGORICAL = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"];
@@ -83,20 +83,64 @@ function formatTime(t) {
 // service.py / service_opcua.py) — src_ip/dst_ip were shown here before but
 // neither extractor emits per-window IP columns, so that cell was always
 // empty. This renders whatever real fields exist instead of a fixed pair.
+//
+// For S7comm, which field is actually non-zero depends on the attack type:
+// SENSOR_SPOOF writes the Merker (M) area, not Input/Output, so a row
+// predicted SPOOF showing "Ghi vào/Ghi ra: 0" was correct but misleading —
+// the real write was happening in a counter the table never displayed.
+// Lead with the counter each prediction's own detection logic actually
+// looks at (mirrors RuleBasedDetector in train_eval.py), then fall back to
+// whichever write counters are non-zero so nothing real gets hidden.
+const S7_LEAD_FIELD = {
+  CPU_CONTROL: ["s7_cpu_control_count", "Lệnh CPU"],
+  SCAN: ["dcp_identify_request_count", "DCP Identify"],
+  FLOOD: ["tcp_syn_count", "SYN"],
+  FUZZ: ["tcp_rst_count", "TCP RST"],
+};
+
 function flowDetail(row, isOpcua) {
-  const parts = isOpcua
-    ? [
-        row.opcua_write_count != null && `Write: ${row.opcua_write_count}`,
-        row.opcua_browse_count != null && `Browse: ${row.opcua_browse_count}`,
-        row.opcua_read_count != null && `Read: ${row.opcua_read_count}`,
-        row.opcua_create_session_count != null && `Session: ${row.opcua_create_session_count}`,
-      ]
-    : [
-        row.s7_input_write_count != null && `Ghi vào: ${row.s7_input_write_count}`,
-        row.s7_output_write_count != null && `Ghi ra: ${row.s7_output_write_count}`,
-      ];
-  const shown = parts.filter(Boolean);
-  return shown.length ? shown.join(" · ") : "—";
+  if (isOpcua) {
+    const parts = [
+      row.opcua_write_count != null && `Write: ${row.opcua_write_count}`,
+      row.opcua_browse_count != null && `Browse: ${row.opcua_browse_count}`,
+      row.opcua_read_count != null && `Read: ${row.opcua_read_count}`,
+      row.opcua_create_session_count != null && `Session: ${row.opcua_create_session_count}`,
+    ];
+    const shown = parts.filter(Boolean);
+    return shown.length ? shown.join(" · ") : "—";
+  }
+
+  // Only leads with a field the prediction's own rule actually looks at
+  // when that field is non-zero — a 0 there isn't the interesting number
+  // for this row (e.g. real SCAN_PORT windows have dcp_identify_request=0,
+  // it's a TCP-port scan, not DCP; showing "DCP Identify: 0" up front would
+  // bury the real tcp_syn/tcp_rst signal below it for no reason).
+  const [leadField, leadLabel] = S7_LEAD_FIELD[row.prediction] || [];
+  const candidates = [
+    ...(leadField ? [[leadField, leadLabel]] : []),
+    ["tcp_syn_count", "SYN"],
+    ["tcp_rst_count", "TCP RST"],
+    ["dcp_identify_request_count", "DCP Identify"],
+    ["s7_cpu_control_count", "Lệnh CPU"],
+    ["s7_input_write_count", "Ghi vào"],
+    ["s7_output_write_count", "Ghi ra"],
+    ["s7_merker_write_count", "Ghi Merker"],
+    ["s7_db_write_count", "Ghi DB"],
+  ];
+  const seen = new Set();
+  const parts = [];
+  for (const [field, label] of candidates) {
+    if (seen.has(field) || row[field] == null || row[field] <= 0) continue;
+    seen.add(field);
+    parts.push(`${label}: ${row[field]}`);
+  }
+  // Nothing non-zero at all (e.g. a BENIGN window) — still show input/output
+  // as the baseline pair so the cell isn't empty for no reason.
+  if (parts.length === 0) {
+    if (row.s7_input_write_count != null) parts.push(`Ghi vào: ${row.s7_input_write_count}`);
+    if (row.s7_output_write_count != null) parts.push(`Ghi ra: ${row.s7_output_write_count}`);
+  }
+  return parts.length ? parts.join(" · ") : "—";
 }
 
 // Recharts renders every row as real SVG geometry — a pcap with tens of
@@ -189,17 +233,6 @@ function aggregateFromPoints(points) {
 // here — once, right after the fetch — means every chart/table below can
 // keep using the same "!== BENIGN" checks it already had instead of branching
 // on protocol everywhere.
-function normalizeOpcuaResult(raw) {
-  const upper = (p) => (p === "benign" ? "BENIGN" : p);
-  return {
-    ...raw,
-    protocol: "opcua",
-    prediction_counts: Object.fromEntries(Object.entries(raw.prediction_counts).map(([k, v]) => [upper(k), v])),
-    timeline: raw.timeline.map((p) => ({ ...p, prediction: upper(p.prediction), layer_used: null })),
-    flow_table: raw.flow_table.map((r) => ({ ...r, prediction: upper(r.prediction), layer_used: null })),
-  };
-}
-
 function toEpoch(iso) {
   return new Date(iso).getTime();
 }
@@ -306,11 +339,19 @@ export default function IdsUpload() {
   const prevAttackCountRef = useRef(0);
   const reportRef = useRef(null);
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [allowedIps, setAllowedIps] = useState(new Set());
 
   useEffect(() => {
     const fetchStatus = protocol === "opcua" ? fetchIdsStatusOpcua : fetchIdsStatus;
     fetchStatus().then(setStatus).catch(() => setStatus({ configured: false, model_dir: "" }));
   }, [protocol]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Used only to highlight "unexpected" source IPs in the packet detail view
+  // below — a real, admin-managed list (Người dùng -> IP hợp lệ), not
+  // hardcoded. Read-only here (viewer role can already GET it).
+  useEffect(() => {
+    fetchIpAllowlist().then((d) => setAllowedIps(new Set((d.entries || []).map((e) => e.ip)))).catch(() => {});
+  }, []);
 
   const sortedTimeline = useMemo(
     () => (result ? [...result.timeline].sort((a, b) => a.timestamp_ms - b.timestamp_ms) : []),
@@ -385,7 +426,7 @@ export default function IdsUpload() {
       pdf.text(`File pcap: ${result.source_file || "-"}`, 40, 75);
       pdf.text(`Model: ${result.model_dir || "-"}`, 40, 90);
       pdf.text(`Thoi gian xuat: ${new Date().toLocaleString()}`, 40, 105);
-      pdf.text(`Tong flow: ${result.total_flows}  |  Flow tan cong: ${result.attack_flows} (${(result.attack_ratio * 100).toFixed(1)}%)`, 40, 120);
+      pdf.text(`Tong cua so: ${result.total_flows}  |  Cua so tan cong: ${result.attack_flows} (${(result.attack_ratio * 100).toFixed(1)}%)`, 40, 120);
       pdf.text("Toan bo bieu do/bang duoi day la trang thai dang hien thi tren man hinh (ke ca vi tri phat lai neu dang tua).", 40, 140);
 
       const imgWidth = pageWidth;
@@ -450,6 +491,22 @@ export default function IdsUpload() {
   const feedRows = result
     ? [...result.flow_table].filter((r) => (r.window_start_ms ?? 0) <= currentAbsoluteMs).sort((a, b) => (a.window_start_ms ?? 0) - (b.window_start_ms ?? 0))
     : [];
+  // "Top talkers" among captured attack packets — real IPs from packet_capture.py
+  // (backend), not derived from the feature CSV (which has no per-window IP
+  // field at all — see flowDetail()'s comment). Scoped honestly: this is a
+  // count over the packet SAMPLES already attached to the highest-confidence
+  // flagged windows (packet_capture.py caps at 20 windows x 8 packets), not
+  // every packet in the file.
+  const topTalkerRows = (() => {
+    if (!result) return [];
+    const counts = {};
+    for (const row of result.flow_table) {
+      for (const p of row.packets || []) {
+        if (p.src_ip) counts[p.src_ip] = (counts[p.src_ip] || 0) + 1;
+      }
+    }
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([ip, count]) => ({ ip, count }));
+  })();
 
   const attackPct = live.attack_ratio * 100;
   const attackColor = attackPct > 0 ? ATTACK_RED : GOOD_GREEN;
@@ -499,7 +556,7 @@ export default function IdsUpload() {
 
   return (
     <div className="p-6 space-y-6">
-      <PageHeader icon={UploadCloud} title="Tải PCAP phân tích" />
+      <PageHeader icon={UploadCloud} title="Phân tích lưu lượng mạng" />
 
       {status && !status.configured && (
         <NotConfiguredNotice
@@ -575,7 +632,7 @@ export default function IdsUpload() {
         <div className="mt-2 text-[10px] text-slate-600">
           Model hiện tại train trên cửa sổ 2s — đổi giá trị này sẽ lệch phân bố đặc trưng. Chọn đúng giao thức của file
           đang tải lên: {protocol === "opcua" ? "OPC UA" : "S7comm"} dùng model và bộ trích xuất đặc trưng riêng, pcap
-          sai giao thức sẽ không trích được flow nào (báo lỗi rõ, không đoán bừa).
+          sai giao thức sẽ không trích được cửa sổ nào (báo lỗi rõ, không đoán bừa).
         </div>
       </form>
 
@@ -639,10 +696,10 @@ export default function IdsUpload() {
           <div ref={reportRef} className="space-y-6 bg-slate-950 p-1">
           {/* Z-pattern: most important numbers top-left, gauges top-right */}
           <div className="grid gap-4 lg:grid-cols-[1fr_1fr_auto_auto]">
-            <StatTile label="Tổng số flow" value={live.total_flows} accent={CATEGORICAL[0]}>
+            <StatTile label="Tổng số cửa sổ" value={live.total_flows} accent={CATEGORICAL[0]}>
               <Sparkline data={buckets} dataKey="value" color={CATEGORICAL[0]} />
             </StatTile>
-            <StatTile label="Flow bị dự đoán là tấn công" value={live.attack_flows} color={live.attack_flows > 0 ? "text-red-400" : "text-green-400"} accent={attackColor}>
+            <StatTile label="Cửa sổ bị dự đoán là tấn công" value={live.attack_flows} color={live.attack_flows > 0 ? "text-red-400" : "text-green-400"} accent={attackColor}>
               <Sparkline data={buckets} dataKey="attackRatio" color={attackColor} />
             </StatTile>
             <div className="flex items-center justify-center rounded-lg border border-slate-700 bg-slate-800 p-4 shadow-sm shadow-black/20">
@@ -692,7 +749,7 @@ export default function IdsUpload() {
           )}
 
           {densitySeries.length > 0 && (
-            <ChartPanel title="Mật độ tấn công theo thời gian" subtitle="Tỷ lệ % flow bị model dự đoán là tấn công trong từng lát thời gian — nơi đường càng cao, tấn công càng dồn dập lúc đó.">
+            <ChartPanel title="Mật độ tấn công theo thời gian" subtitle="Tỷ lệ % cửa sổ bị model dự đoán là tấn công trong từng lát thời gian — nơi đường càng cao, tấn công càng dồn dập lúc đó.">
               <AreaChart data={densitySeries} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="densityFill" x1="0" y1="0" x2="0" y2="1">
@@ -744,21 +801,21 @@ export default function IdsUpload() {
             )}
           </div>
 
-          {result?.feature_importance?.length > 0 && (
+          {topTalkerRows.length > 0 && (
             <ChartPanel
-              title="Đặc trưng quan trọng nhất"
-              subtitle={`Model dùng ${result.feature_count} đặc trưng thật (${result.protocol === "opcua" ? "OPC UA" : "S7comm"}) — top ${result.feature_importance.length} đóng góp nhiều nhất theo độ quan trọng Random Forest (Gini importance), tính trên toàn bộ model lúc train, không phải riêng file đang phân tích.`}
+              title="IP xuất hiện nhiều nhất trong gói tin tấn công (mẫu)"
+              subtitle="Đếm trên các gói tin thật đã lấy mẫu cho tối đa 20 cửa sổ tin cậy cao nhất — không phải toàn bộ file pcap. Mở 'Xem gói tin' ở bảng bên dưới để xem chi tiết từng dòng."
             >
-              <BarChart
-                data={result.feature_importance.map((f) => ({ feature: f.feature, importance: f.importance * 100 }))}
-                layout="vertical"
-                margin={{ top: 10, right: 30, left: 20, bottom: 0 }}
-              >
+              <BarChart data={topTalkerRows} layout="vertical" margin={{ top: 10, right: 20, left: 20, bottom: 0 }}>
                 <CartesianGrid stroke={GRID} strokeDasharray="3 3" horizontal={false} />
-                <XAxis type="number" stroke={AXIS} tick={{ fill: MUTED, fontSize: 11 }} unit="%" />
-                <YAxis type="category" dataKey="feature" stroke={AXIS} tick={{ fill: MUTED, fontSize: 11 }} width={220} />
-                <Tooltip contentStyle={{ background: "#0f172a", border: "1px solid #334155", fontSize: 12 }} formatter={(v) => [`${v.toFixed(1)}%`, "Độ quan trọng"]} />
-                <Bar dataKey="importance" fill={CATEGORICAL[2]} />
+                <XAxis type="number" stroke={AXIS} tick={{ fill: MUTED, fontSize: 11 }} allowDecimals={false} />
+                <YAxis type="category" dataKey="ip" stroke={AXIS} tick={{ fill: MUTED, fontSize: 11, fontFamily: "monospace" }} width={110} />
+                <Tooltip contentStyle={{ background: "#0f172a", border: "1px solid #334155", fontSize: 12 }} />
+                <Bar dataKey="count" fill={CATEGORICAL[1]}>
+                  {topTalkerRows.map((r, i) => (
+                    <Cell key={i} fill={allowedIps?.size > 0 && !allowedIps.has(r.ip) ? "#f59e0b" : CATEGORICAL[1]} />
+                  ))}
+                </Bar>
               </BarChart>
             </ChartPanel>
           )}
@@ -774,7 +831,7 @@ export default function IdsUpload() {
               </BarChart>
             </ChartPanel>
 
-            <ChartPanel title="Timeline cảnh báo (swimlane)" subtitle="Mỗi hàng là 1 loại dự đoán — chỉ hiện flow không phải BENIGN, theo đúng thời điểm">
+            <ChartPanel title="Timeline cảnh báo (swimlane)" subtitle="Mỗi hàng là 1 loại dự đoán — chỉ hiện cửa sổ không phải BENIGN, theo đúng thời điểm">
               {timelineAlerts.length === 0 ? (
                 <div className="flex h-full items-center justify-center text-sm text-slate-500">Chưa có cảnh báo nào trong đoạn đang phát.</div>
               ) : (
@@ -797,10 +854,10 @@ export default function IdsUpload() {
 
           <div className="overflow-hidden rounded-lg border border-slate-700 bg-slate-800 shadow-sm shadow-black/20">
             <div className="border-b border-slate-700 px-4 py-3 text-sm font-semibold text-slate-200">
-              Chi tiết flow không phải BENIGN ({feedRows.length})
+              Chi tiết cửa sổ không phải BENIGN ({feedRows.length})
             </div>
             {feedRows.length === 0 ? (
-              <div className="p-6 text-sm text-slate-500">Không có flow bất thường nào trong đoạn đang phát.</div>
+              <div className="p-6 text-sm text-slate-500">Không có cửa sổ bất thường nào trong đoạn đang phát.</div>
             ) : (
               <>
                 {(() => {
@@ -819,33 +876,9 @@ export default function IdsUpload() {
                         <div>Chi tiết</div>
                       </div>
                       <div className="max-h-96 overflow-y-auto divide-y divide-slate-700">
-                        {feedRows.map((row, i) => {
-                          const mitre = mitreMap[row.prediction];
-                          return (
-                            <div key={i} className={`${gridCls} items-center gap-3 px-4 py-2 text-xs hover:bg-slate-900/40`}>
-                              <div className="text-slate-500">{row.window_start_ms ? new Date(row.window_start_ms).toLocaleTimeString() : "—"}</div>
-                              <span className="w-fit rounded px-2 py-1 text-[10px] font-bold" style={{ backgroundColor: `${colorFor(row.prediction, colorMap)}33`, color: colorFor(row.prediction, colorMap) }}>
-                                {row.prediction}
-                              </span>
-                              {mitre ? (
-                                <a
-                                  href={mitreUrl(mitre.id)}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  title={mitre.name}
-                                  className="w-fit rounded border border-violet-400/20 bg-violet-400/[0.07] px-1.5 py-0.5 font-mono text-[9px] text-violet-300 transition hover:border-violet-400/40 hover:bg-violet-400/10"
-                                >
-                                  {mitre.id}
-                                </a>
-                              ) : (
-                                <span className="text-slate-700">—</span>
-                              )}
-                              {!isOpcua && <div className="text-slate-400">L{row.layer_used}</div>}
-                              <div className="text-slate-400">{(row.confidence * 100).toFixed(1)}%</div>
-                              <div className="text-slate-600 truncate">{flowDetail(row, isOpcua)}</div>
-                            </div>
-                          );
-                        })}
+                        {feedRows.map((row, i) => (
+                          <FlowRow key={i} row={row} isOpcua={isOpcua} gridCls={gridCls} mitre={mitreMap[row.prediction]} allowedIps={allowedIps} colorMap={colorMap} />
+                        ))}
                       </div>
                     </>
                   );
@@ -855,6 +888,85 @@ export default function IdsUpload() {
           </div>
           </div>
         </>
+      )}
+    </div>
+  );
+}
+
+// Real packets tshark found inside this window's time range — attached by
+// the backend (packet_capture.py) for the highest-confidence non-BENIGN
+// windows only, before the uploaded pcap gets deleted. Collapsed by
+// default since most rows won't have this (only ~20 per analysis do).
+function FlowRow({ row, isOpcua, gridCls, mitre, allowedIps, colorMap }) {
+  const [open, setOpen] = useState(false);
+  const hasPackets = Array.isArray(row.packets) && row.packets.length > 0;
+
+  return (
+    <div>
+      <div
+        onClick={() => hasPackets && setOpen((v) => !v)}
+        className={`${gridCls} items-center gap-3 px-4 py-2 text-xs hover:bg-slate-900/40 ${hasPackets ? "cursor-pointer" : ""}`}
+      >
+        <div className="text-slate-500">{row.window_start_ms ? new Date(row.window_start_ms).toLocaleTimeString() : "—"}</div>
+        <span className="w-fit rounded px-2 py-1 text-[10px] font-bold" style={{ backgroundColor: `${colorFor(row.prediction, colorMap)}33`, color: colorFor(row.prediction, colorMap) }}>
+          {row.prediction}
+        </span>
+        {mitre ? (
+          <a
+            href={mitreUrl(mitre.id)}
+            target="_blank"
+            rel="noreferrer"
+            title={mitre.name}
+            onClick={(e) => e.stopPropagation()}
+            className="w-fit rounded border border-violet-400/20 bg-violet-400/[0.07] px-1.5 py-0.5 font-mono text-[9px] text-violet-300 transition hover:border-violet-400/40 hover:bg-violet-400/10"
+          >
+            {mitre.id}
+          </a>
+        ) : (
+          <span className="text-slate-700">—</span>
+        )}
+        {!isOpcua && <div className="text-slate-400">L{row.layer_used}</div>}
+        <div className="text-slate-400">{(row.confidence * 100).toFixed(1)}%</div>
+        <div className="flex items-center justify-between gap-2 text-slate-600">
+          <span className="truncate">{flowDetail(row, isOpcua)}</span>
+          {hasPackets && (
+            <span className="shrink-0 rounded border border-slate-600 px-1.5 py-0.5 text-[9px] font-semibold text-slate-400">
+              {open ? "Ẩn" : "Xem"} {row.packets.length} gói tin
+            </span>
+          )}
+        </div>
+      </div>
+
+      {open && hasPackets && (
+        <div className="border-t border-slate-800 bg-slate-950/60 px-4 py-2">
+          <div className="grid grid-cols-[90px_130px_130px_60px_70px_1fr] gap-2 pb-1 text-[9px] uppercase text-slate-600">
+            <div>Thời điểm</div>
+            <div>IP nguồn</div>
+            <div>IP đích</div>
+            <div>Len</div>
+            <div>Giao thức</div>
+            <div>Info</div>
+          </div>
+          {row.packets.map((p, j) => {
+            // Only flag "unknown" once the admin has actually populated the
+            // allowlist (Người dùng) — with an empty list, every IP would
+            // be "unknown" and the highlight would be meaningless noise.
+            const srcUnknown = allowedIps?.size > 0 && p.src_ip && !allowedIps.has(p.src_ip);
+            return (
+              <div key={j} className="grid grid-cols-[90px_130px_130px_60px_70px_1fr] gap-2 py-1 text-[10px] text-slate-400">
+                <div className="font-mono">{new Date(p.time_epoch * 1000).toLocaleTimeString()}.{String(Math.round((p.time_epoch % 1) * 1000)).padStart(3, "0")}</div>
+                <div className={`font-mono ${srcUnknown ? "font-bold text-amber-400" : "text-slate-300"}`} title={srcUnknown ? "IP không có trong danh sách IP hợp lệ" : ""}>
+                  {p.src_ip || "—"}
+                  {srcUnknown && " ⚠"}
+                </div>
+                <div className="font-mono text-slate-300">{p.dst_ip || "—"}</div>
+                <div>{p.length ?? "—"}</div>
+                <div className="text-cyan-400">{p.protocol || "—"}</div>
+                <div className="truncate text-slate-500" title={p.info}>{p.info}</div>
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );

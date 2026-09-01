@@ -5,7 +5,7 @@ import {
 import { TrendingUp, History, FileDown, Loader2, Download } from "lucide-react";
 import { jsPDF } from "jspdf";
 import html2canvas from "html2canvas";
-import { fetchProcessHistory } from "../services/api";
+import { fetchAllTags, fetchProcessHistory } from "../services/api";
 import PageHeader from "../components/PageHeader";
 import Gauge from "../components/Gauge";
 import Sparkline from "../components/Sparkline";
@@ -129,11 +129,22 @@ function GradientDefs({ id, color }) {
 
 export default function Trends() {
   const [tags, setTags] = useState(null);
+  const [stageTimerRange, setStageTimerRange] = useState({ minimum: 500, maximum: 10000 });
   const reportRef = useRef(null);
   const [exportingPdf, setExportingPdf] = useState(false);
 
   useEffect(() => {
     fetchProcessHistory().then((data) => setTags(data.tags || {}));
+    // Reference lines below must track whatever an admin has actually set
+    // cd1's safety range to (Giám sát tiến trình -> Sửa ngưỡng) — 500/10000
+    // is only the factory default from config/opcua_tags.yaml, not a fixed
+    // constant. Falls back to that default if the tag isn't configured/live.
+    fetchAllTags().then((data) => {
+      const cd1 = (data.tags || []).find((t) => t.key === "cd1");
+      if (cd1 && cd1.minimum != null && cd1.maximum != null) {
+        setStageTimerRange({ minimum: cd1.minimum, maximum: cd1.maximum });
+      }
+    }).catch(() => {});
   }, []);
 
   function handleExportCsv() {
@@ -280,7 +291,10 @@ export default function Trends() {
             </div>
           )}
 
-          <ChartPanel title="Timer công đoạn — CD1 / CD2 / CD3 (ms)" subtitle="Vùng an toàn 500–10000ms. SETPOINT_ATTACK sẽ đẩy giá trị vọt ra ngoài vùng này.">
+          <ChartPanel
+            title="Timer công đoạn — CD1 / CD2 / CD3 (ms)"
+            subtitle={`Vùng an toàn ${stageTimerRange.minimum}–${stageTimerRange.maximum}ms (theo ngưỡng cd1 hiện tại, chỉnh ở Giám sát tiến trình). SETPOINT_ATTACK sẽ đẩy giá trị vọt ra ngoài vùng này.`}
+          >
             <AreaChart data={timerChartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
               <GradientDefs id="gradCd1" color={BLUE} />
               <GradientDefs id="gradCd2" color={ORANGE} />
@@ -290,8 +304,8 @@ export default function Trends() {
               <YAxis stroke={AXIS} tick={{ fill: MUTED, fontSize: 11 }} label={{ value: "ms", angle: -90, position: "insideLeft", fill: MUTED, fontSize: 11 }} />
               <Tooltip contentStyle={{ background: "#111827", border: "1px solid #374151", fontSize: 12 }} labelFormatter={formatTime} />
               <Legend wrapperStyle={{ fontSize: 12 }} />
-              <ReferenceLine y={500} stroke={MUTED} strokeDasharray="2 2" />
-              <ReferenceLine y={10000} stroke={MUTED} strokeDasharray="2 2" />
+              <ReferenceLine y={stageTimerRange.minimum} stroke={MUTED} strokeDasharray="2 2" />
+              <ReferenceLine y={stageTimerRange.maximum} stroke={MUTED} strokeDasharray="2 2" />
               <Area type="stepAfter" dataKey="cd1" name="CD1" stroke={BLUE} strokeWidth={2} fill="url(#gradCd1)" dot={false} connectNulls />
               <Area type="stepAfter" dataKey="cd2" name="CD2" stroke={ORANGE} strokeWidth={2} fill="url(#gradCd2)" dot={false} connectNulls />
               <Area type="stepAfter" dataKey="cd3" name="CD3" stroke={AQUA} strokeWidth={2} fill="url(#gradCd3)" dot={false} connectNulls />

@@ -43,6 +43,12 @@ class OPCUAGateway:
         self._last_connected_at: Optional[datetime] = None
         self._reconnect_count = 0
         self._failed_tags = 0
+        # Rolling window of real subscription-notification arrival times
+        # (monotonic seconds) — the closest honest proxy this app has to
+        # "live OPC UA traffic rate" without raw packet capture: every
+        # datachange_notification below is one real message the PLC server
+        # actually sent. notifications_per_sec() prunes+rates this on read.
+        self._notification_times: list = []
 
         self._running = False
         self._callbacks: list = []
@@ -64,10 +70,21 @@ class OPCUAGateway:
             "subscribed_tags": len(self._values),
             "failed_tags": self._failed_tags,
             "reconnect_count": self._reconnect_count,
+            "notifications_per_sec": self.notifications_per_sec(),
         }
 
     def on_value_change(self, callback: Callable[[str, TagValue], None]):
         self._callbacks.append(callback)
+
+    def record_notification(self) -> None:
+        import time as _time
+        self._notification_times.append(_time.monotonic())
+
+    def notifications_per_sec(self, window_s: float = 10.0) -> float:
+        import time as _time
+        now = _time.monotonic()
+        self._notification_times = [t for t in self._notification_times if now - t < window_s]
+        return round(len(self._notification_times) / window_s, 2)
 
     async def start(self):
         self._running = True
@@ -404,6 +421,7 @@ class _SubscriptionHandler:
 
                 self.gateway._values[cfg.key] = tag_value
                 self.gateway._last_data_at = datetime.now(TZ)
+                self.gateway.record_notification()
                 self.gateway._notify_callbacks(cfg.key, tag_value)
 
         except Exception as e:

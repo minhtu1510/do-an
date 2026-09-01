@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import DateTime, Float, Index, Integer, String
+from sqlalchemy import DateTime, Float, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .connection import Base
@@ -58,8 +58,13 @@ class EventRow(Base):
     timestamp: Mapped[datetime] = mapped_column(DateTime)
     acked_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
     acked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    disposition: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    labels_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     def to_dict(self) -> dict:
+        import json
+
         return {
             "id": self.id,
             "event_type": self.event_type,
@@ -72,6 +77,9 @@ class EventRow(Base):
             "timestamp": self.timestamp.isoformat(),
             "acked_by": self.acked_by,
             "acked_at": self.acked_at.isoformat() if self.acked_at else None,
+            "disposition": self.disposition,
+            "note": self.note,
+            "labels": json.loads(self.labels_json) if self.labels_json else None,
         }
 
 
@@ -95,6 +103,12 @@ class PcapAnalysisRow(Base):
     attack_ratio: Mapped[float] = mapped_column(Float)
     prediction_counts_json: Mapped[str] = mapped_column(String(1024))
     model_dir: Mapped[str] = mapped_column(String(255))
+    # Full analyze_pcap()/analyze_pcap_opcua() response (timeline, flow_table,
+    # feature_importance, confidence_histogram...) — kept so a history row can
+    # be reopened and rendered exactly like a fresh analysis, instead of only
+    # ever showing the 6-column summary row. The source pcap itself is still
+    # deleted right after analysis either way (see UPLOAD_SCRATCH cleanup).
+    result_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     def to_dict(self) -> dict:
         import json
@@ -111,3 +125,13 @@ class PcapAnalysisRow(Base):
             "prediction_counts": json.loads(self.prediction_counts_json),
             "model_dir": self.model_dir,
         }
+
+    def to_full_dict(self) -> dict | None:
+        """Full stored analyze_pcap() response, for reopening one history row
+        — heavier than to_dict(), so only used by the single-item detail
+        endpoint, never the list view. None for rows saved before this column
+        existed (result_json is nullable so those old rows aren't lost, they
+        just can't be reopened)."""
+        import json
+
+        return json.loads(self.result_json) if self.result_json else None

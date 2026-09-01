@@ -95,7 +95,9 @@ fi
 # ENG_STATION_PORT_SCAN va nua lateral-movement cua KILL_CHAIN danh vao HMI,
 # neu chi loc "host <PLC>" thi traffic tan cong toi HMI bi tshark drop sach
 # -> pcap co label attack nhung 0 goi tuong ung. Set SAU khi HMI_IP da resolve.
-[[ -z "$CAPTURE_FILTER" ]] && CAPTURE_FILTER="host $TARGET_IP or host $HMI_IP"
+# THEM 'ether proto 0x8892': PROFINET_DCP_ABUSE la layer-2 (khong co IP layer)
+# -> loc theo "host ..." se drop sach frame DCP. Bat ca Profinet EtherType.
+[[ -z "$CAPTURE_FILTER" ]] && CAPTURE_FILTER="host $TARGET_IP or host $HMI_IP or ether proto 0x8892"
 
 mkdir -p "$CAPTURE_DIR/day${DAY}" "$LABEL_DIR" "$LOG_DIR"
 
@@ -198,23 +200,28 @@ PYEOF
 }
 
 # ── Attack runners ───────────────────────────────────────────────
+# LUU Y (sua loi trung nhan): MOI attack module tu ghi START/END cua no vao
+# cung --label-file qua write_label() (config_ext.py). Truoc day shell CUNG ghi
+# label START/END o day -> moi tan cong bi 2xSTART + 2xEND trung episode, tao
+# interval chong lap khi dung timeline. Nay shell KHONG ghi nhan attack nua;
+# module la nguon nhan duy nhat (timing sat hon + note giau hon: cong mo, ket
+# qua probe...). Shell chi con ghi cac pha BENIGN (warmup/gap/cooldown).
 _run_attack() {
     local scenario="$1" module="$2" extra_args="${3:-}" dur ep
     dur="$(rand_duration "$SHORT_ATTACK_DURATION_S")"
     ep="${SESSION_ID}:day${DAY}:${scenario}"
-    label "$scenario" "START" "$ep" "dur=${dur}s"
+    echo "[$(date +%H:%M:%S)] >>> $scenario (dur=${dur}s, ep=$ep)"
     "$PY_CMD" -u -m attacks_ext.${module} \
         --duration "$dur" \
         --session-id "$SESSION_ID" --host-id "$HOST_ID" \
         --label-file "$(label_file)" \
         --episode-id "$ep" --day "$DAY" \
         $extra_args 2>&1 || echo "[WARN] $scenario returned non-zero"
-    label "$scenario" "END" "$ep" "dur=${dur}s"
 }
 
 run_kill_chain() {
     local ep="${SESSION_ID}:day${DAY}:KILL_CHAIN"
-    label "KILL_CHAIN" "START" "$ep" "foothold_s7_then_lateral_movement_hmi"
+    echo "[$(date +%H:%M:%S)] >>> KILL_CHAIN (ep=$ep)"
     "$PY_CMD" -u -m attacks_ext.kill_chain \
         --session-id "$SESSION_ID" --host-id "$HOST_ID" \
         --label-file "$(label_file)" \
@@ -222,7 +229,6 @@ run_kill_chain() {
         --target "$TARGET_IP" --rack "$RACK" --slot "$SLOT" \
         --hmi-target "$HMI_IP" \
         2>&1 || echo "[WARN] KILL_CHAIN returned non-zero"
-    label "KILL_CHAIN" "END" "$ep" "foothold_s7_then_lateral_movement_hmi"
 }
 
 # ── Controller ───────────────────────────────────────────────────
@@ -263,7 +269,7 @@ esac
 start_capture "day7_attacks"
 
 echo ""
-echo "  SCHEDULE: Warmup -> SMB(x3) -> KillChain(x2) -> ConcealedStop(x2) -> Cooldown"
+echo "  SCHEDULE: Warmup -> SMB(x3) -> ProgUpload(x2) -> DCP(x2) -> KillChain(x2) -> ConcealedStop(x2) -> Cooldown"
 echo ""
 
 # Phase 1: Warmup
@@ -279,6 +285,34 @@ for i in $(seq 1 "$ATTACK_REPETITIONS"); do
     wait_s "$BENIGN_GAP_S" "gap_smb_${i}"
 done
 wait_s "$COOLDOWN_S" "cooldown_after_smb"
+
+# Phase 2b (MOI): PROGRAM_UPLOAD_THEFT — hut logic OB/FB/FC/DB qua S7 (T0845).
+# Chu ky rieng, khong trung read/write_area cua Day 1-6. Ghi nhan qua module.
+echo "[Phase 2b] Program Upload Theft (T0845)"
+for i in 1 2; do
+    _run_attack "PROGRAM_UPLOAD_THEFT" "program_upload" \
+        "--target ${TARGET_IP} --rack ${RACK} --slot ${SLOT}"
+    wait_s "$BENIGN_GAP_S" "gap_progupload_${i}"
+done
+wait_s "$COOLDOWN_S" "cooldown_after_progupload"
+
+# Phase 2c (MOI): PROFINET_DCP_ABUSE — tan cong layer-2 Profinet DCP (T0814/T0816).
+# Mac dinh recon/identify-flood (an toan). Set-NameOfStation phai opt-in rieng:
+# them "--enable-set-name --victim-mac <MAC> --new-name evil" vao extra_args.
+# CAN root + dung --iface (cung segment Profinet). Neu CAPTURE_IFACE la ten kieu
+# tshark (\Device\NPF_...) tren Windows, dat DCP_IFACE rieng cho scapy.
+DCP_IFACE="${DCP_IFACE:-$CAPTURE_IFACE}"
+if [[ -n "$DCP_IFACE" ]]; then
+    echo "[Phase 2c] Profinet DCP Abuse (T0814/T0816) iface=$DCP_IFACE"
+    for i in 1 2; do
+        _run_attack "PROFINET_DCP_ABUSE" "profinet_dcp" \
+            "--iface ${DCP_IFACE}"
+        wait_s "$BENIGN_GAP_S" "gap_dcp_${i}"
+    done
+    wait_s "$COOLDOWN_S" "cooldown_after_dcp"
+else
+    echo "[Phase 2c] SKIP Profinet DCP — chua co --iface/DCP_IFACE (DCP can L2 raw socket)"
+fi
 
 # -- Da BO Phase 2b (ENG_STATION_PORT_SCAN standalone): chuc nang port-scan
 #    may Engineering da nam san trong KILL_CHAIN lateral movement (import

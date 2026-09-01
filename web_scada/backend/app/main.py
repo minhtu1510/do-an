@@ -92,11 +92,38 @@ async def lifespan(app: FastAPI):
                 await ws_manager.broadcast_system_resources({
                     **sample_system_resources(),
                     "ws_connections": ws_manager.count,
+                    "opcua_notifications_per_sec": gateway.notifications_per_sec(),
                 })
             except Exception:
                 pass
 
     resources_task = asyncio.create_task(system_resources_loop())
+
+    # Alarm escalation (ISA-18.2 style, alarm-clock snooze ladder): an
+    # ERROR-severity event still ACTIVE and unacked gets re-pushed to
+    # Telegram at 5m, 15m, 30m, 2h, 10h, then 24h since it fired — spaced
+    # out instead of nagging every 5 minutes forever, and it stops once the
+    # ladder is exhausted. Checked every 60s; a rung firing a few seconds
+    # late doesn't matter in practice.
+    ESCALATION_SCHEDULE_MINUTES = [5, 15, 30, 120, 600, 1440]
+
+    async def escalation_loop():
+        while True:
+            await asyncio.sleep(60)
+            try:
+                from .notify import notify_event, telegram_configured
+                if not telegram_configured():
+                    continue
+                for event in event_service.due_for_escalation("ERROR", ESCALATION_SCHEDULE_MINUTES):
+                    rung = event.escalation_level + 1
+                    event.escalation_level = rung
+                    escalated = dict(event.to_dict())
+                    escalated["message"] = f"[NHẮC LẠI lần {rung} — chưa ai xác nhận] {escalated['message']}"
+                    await notify_event(escalated)
+            except Exception:
+                pass
+
+    escalation_task = asyncio.create_task(escalation_loop())
 
     yield
 
@@ -104,12 +131,17 @@ async def lifespan(app: FastAPI):
     await gateway.stop()
     task.cancel()
     resources_task.cancel()
+    escalation_task.cancel()
     try:
         await task
     except asyncio.CancelledError:
         pass
     try:
         await resources_task
+    except asyncio.CancelledError:
+        pass
+    try:
+        await escalation_task
     except asyncio.CancelledError:
         pass
     logger.info("Web-SCADA backend stopped cleanly")

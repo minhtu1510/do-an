@@ -14,8 +14,12 @@ Mạch truyện: **Recon → Foothold + Lateral Movement → Impact có che gi�
 | # | Scenario label | Module | MITRE (ICS) | Kỹ thuật cốt lõi | Lặp |
 |---|---|---|---|---|---|
 | 1 | `SMB_RECON_ENUM` | `attacks_ext/smb_enum.py` | T0842 Network Share Discovery | SMB2 Negotiate + share/named-pipe probe trên máy HMI (kỹ thuật SMB2-specific, không chỉ port scan thô) | ×3 |
-| 2 | `KILL_CHAIN` | `attacks_ext/kill_chain.py` | Initial Access (S7) → Lateral Movement (T0846) | Chiếm foothold qua S7, dùng chính phiên đó pivot port-scan sang HMI/Engineering (RDP/SMB/S7-local) trong cùng 1 kịch bản liên tục | ×2 |
-| 3 | `CONCEALED_STOP_ATTACK` | `attacks_ext/concealed_stop_attack.py` | T0831 + T0832 phối hợp (Urbina CCS16-style) | STOP thật trên PLC qua S7 + đồng thời ghi giả `BangTai=RUNNING` qua OPC UA trong đúng cửa sổ STOP đó | ×2 |
+| 2 | `PROGRAM_UPLOAD_THEFT` **(MỚI)** | `attacks_ext/program_upload.py` | **T0845 Program Upload** | `list_blocks` + `full_upload` hút toàn bộ khối logic OB/FB/FC/DB qua S7 — đánh cắp mã điều khiển (IP theft). Khác hẳn read/write_area (chỉ ô nhớ) | ×2 |
+| 3 | `PROFINET_DCP_ABUSE` **(MỚI)** | `attacks_ext/profinet_dcp.py` | **T0814 DoS / T0816 / T0842** | Tấn công **layer-2 Profinet DCP**: Identify-All flood (recon + tải bất đối xứng); tùy chọn Set-NameOfStation (chiếm danh tính). Bề mặt giao thức mới, `extract_dcp_features.py` đã hỗ trợ | ×2 |
+| 4 | `KILL_CHAIN` | `attacks_ext/kill_chain.py` | Initial Access (S7) → Lateral Movement (T0846) | Chiếm foothold qua S7, dùng chính phiên đó pivot port-scan sang HMI/Engineering (RDP/SMB/S7-local) trong cùng 1 kịch bản liên tục | ×2 |
+| 5 | `CONCEALED_STOP_ATTACK` | `attacks_ext/concealed_stop_attack.py` | T0831 + T0832 phối hợp (Urbina CCS16-style) | STOP thật trên PLC qua S7 + đồng thời ghi giả `BangTai=RUNNING` qua OPC UA trong đúng cửa sổ STOP đó | ×2 |
+
+> **CPU_STOP KHÔNG thêm vào Day 7** — đã tồn tại ở Day 3 (`run_day_bangtruyen.sh`, label `CPU_STOP`) và **bị tắt mặc định** vì lỗi đã biết: `plc_stop()` chạy được nhưng S7-1500 **TỪ CHỐI `plc_hot_start()`** → CPU kẹt STOP, phải khởi động lại thủ công trong TIA Portal. Thêm lại sẽ trùng nhãn + dính đúng lỗi cũ.
 
 > Trong 3 kịch bản, `CONCEALED_STOP_ATTACK` là đóng góp **mới và phân biệt rõ nhất** (signature burst ghi OPC UA Boolean — không tồn tại ở đâu trong Day 1–6). `KILL_CHAIN` mang giá trị tường thuật APT đa giai đoạn. `SMB_RECON_ENUM` là recon SMB2-specific.
 
@@ -30,9 +34,11 @@ Mạch truyện: **Recon → Foothold + Lateral Movement → Impact có che gi�
 
 ## 4. Lỗi capture đã sửa (quan trọng cho chất lượng dataset)
 
-**Trước:** [run_day_bangtruyen_ext.sh](run_day_bangtruyen_ext.sh) đặt `CAPTURE_FILTER="host $TARGET_IP"` = chỉ `host 192.168.210.211` (PLC). Nhưng `SMB_RECON_ENUM` và nửa lateral-movement của `KILL_CHAIN` đánh vào HMI (`192.168.210.31`) → traffic `attacker ↔ .31` **không đụng .211** → bị tshark BPF filter **drop sạch** → pcap có label "attack" nhưng 0 gói tấn công tương ứng (đầu độc dataset).
+**4.1 Filter bỏ sót HMI (đã sửa trước đó).** `CAPTURE_FILTER="host $TARGET_IP"` chỉ bắt PLC; traffic `SMB_RECON_ENUM`/nửa lateral-movement `KILL_CHAIN` đánh HMI (`.31`) bị drop → label attack nhưng 0 gói. Sửa: `host $TARGET_IP or host $HMI_IP`.
 
-**Đã sửa:** `CAPTURE_FILTER="host $TARGET_IP or host $HMI_IP"`, đặt **sau** khi `HMI_IP` được resolve. Giờ bắt đủ traffic cả 2 host.
+**4.2 Filter drop DCP layer-2 (mới, sửa cùng đợt thêm PROFINET_DCP).** DCP là layer-2 (EtherType `0x8892`), **không có IP layer** → filter `host ...` drop sạch mọi frame DCP → lại rơi vào đúng bẫy "label attack, 0 gói". Sửa: `CAPTURE_FILTER="host $TARGET_IP or host $HMI_IP or ether proto 0x8892"`.
+
+**4.3 Trùng nhãn (label collision ở tầng ghi) — mới sửa.** `_run_attack`/`run_kill_chain` (shell) ghi `label START/END`, **đồng thời** mỗi module cũng `write_label START/END` vào **cùng file, cùng schema, cùng episode** → mỗi tấn công có **2×START + 2×END** → interval chồng lấn khi dựng timeline. Sửa: **bỏ nhãn attack ở tầng shell**, module là nguồn nhãn duy nhất (timing sát hơn + note giàu hơn). Shell chỉ còn ghi các pha benign.
 
 ## 5. Điểm nhấn: `CONCEALED_STOP_ATTACK` — Stealthy Concealment Attack
 
@@ -105,6 +111,13 @@ python -m attacks_ext.smb_enum --target 192.168.210.31 --duration 15 --session-i
 python -m attacks_ext.kill_chain --target 192.168.210.211 --rack 0 --slot 1 --hmi-target 192.168.210.31 --session-id smoke --host-id attacker_host --label-file labels/smoke_test.csv
 
 python -m attacks_ext.concealed_stop_attack --target 192.168.210.211 --rack 0 --slot 1 --opc-url opc.tcp://192.168.210.211:4840 --duration 30 --session-id smoke --host-id attacker_host --label-file labels/smoke_test.csv
+
+# MỚI — Program Upload Theft (T0845)
+python -m attacks_ext.program_upload --target 192.168.210.211 --rack 0 --slot 1 --duration 60 --session-id smoke --host-id attacker_host --label-file labels/smoke_test.csv
+
+# MỚI — Profinet DCP Abuse (T0814/T0816). CẦN root + đúng --iface (cùng segment Profinet).
+# Mặc định recon/identify-flood (an toàn). Thêm --enable-set-name --victim-mac <MAC> để bật mức phá hoại.
+sudo python -m attacks_ext.profinet_dcp --iface eth0 --duration 60 --session-id smoke --host-id attacker_host --label-file labels/smoke_test.csv
 ```
 
 ### 7.2 Preflight

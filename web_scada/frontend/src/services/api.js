@@ -50,6 +50,52 @@ export async function writeTag(key, value) {
   return body;
 }
 
+export async function updateTagThresholds(key, minimum, maximum) {
+  const res = await apiFetch(`/tags/${key}/thresholds`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ minimum, maximum }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.message || body.detail || "Đổi ngưỡng thất bại");
+  return body;
+}
+
+export async function fetchIpAllowlist() {
+  const res = await apiFetch("/ip-allowlist");
+  return res.json();
+}
+
+export async function addIpAllowlist(ip, label) {
+  const res = await apiFetch("/ip-allowlist", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ip, label }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.message || body.detail || "Thêm IP thất bại");
+  return body;
+}
+
+export async function removeIpAllowlist(ip) {
+  const res = await apiFetch(`/ip-allowlist/${encodeURIComponent(ip)}`, { method: "DELETE" });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.message || body.detail || "Xoá IP thất bại");
+  return body;
+}
+
+export async function fetchWriteLock() {
+  const res = await apiFetch("/control/lock");
+  return res.json();
+}
+
+export async function releaseWriteLock() {
+  const res = await apiFetch("/control/unlock", { method: "POST" });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.message || body.detail || "Mở khóa thất bại");
+  return body;
+}
+
 export async function fetchEvents(limit = 100) {
   const res = await apiFetch(`/events?limit=${limit}`);
   return res.json();
@@ -75,8 +121,12 @@ export async function fetchProcessHistory() {
   return res.json();
 }
 
-export async function ackEvent(eventId) {
-  const res = await apiFetch(`/events/${eventId}/ack`, { method: "POST" });
+export async function ackEvent(eventId, { disposition = null, note = null } = {}) {
+  const res = await apiFetch(`/events/${eventId}/ack`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ disposition, note }),
+  });
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Failed to ack event");
   return res.json();
 }
@@ -185,5 +235,12 @@ export async function analyzeIdsPcapOpcua(file, plcIp, window) {
 export async function fetchIdsHistory(limit = 100) {
   const res = await apiFetch(`/ids/history?limit=${limit}`);
   return res.json();
+}
+
+export async function fetchIdsHistoryDetail(id) {
+  const res = await apiFetch(`/ids/history/${id}`);
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.message || body.detail || "Không tải được kết quả phân tích cũ");
+  return body;
 }
 

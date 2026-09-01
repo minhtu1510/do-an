@@ -44,7 +44,7 @@ const NAV_GROUPS = [
     label: "Phân tích PCAP",
     icon: UploadCloud,
     items: [
-      { to: "/ids-upload", label: "Tải PCAP phân tích", icon: UploadCloud, end: false, minRole: "operator" },
+      { to: "/ids-upload", label: "Phân tích lưu lượng mạng", icon: UploadCloud, end: false, minRole: "operator" },
     ],
   },
   {
@@ -212,10 +212,25 @@ function Shell() {
 
 function Routed() {
   const { isAuthenticated } = useAuth();
+  const location = useLocation();
   return (
     <Routes>
       <Route path="/login" element={isAuthenticated ? <Navigate to="/" replace /> : <Login />} />
-      <Route path="/*" element={<Shell />} />
+      <Route
+        path="/*"
+        element={
+          isAuthenticated ? (
+            <Shell />
+          ) : (
+            // Shell renders StatusBar unconditionally (it's the top bar for every
+            // authenticated page) — without this guard, hitting any non-/login
+            // path while logged out mounted Shell anyway for one render, firing
+            // StatusBar's fetchPlcStatus() with no token and logging a real 401
+            // before RequireRole's own (per-route, deeper) redirect ever ran.
+            <Navigate to="/login" replace state={{ from: location.pathname }} />
+          )
+        }
+      />
     </Routes>
   );
 }

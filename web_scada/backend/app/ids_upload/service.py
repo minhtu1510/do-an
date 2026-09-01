@@ -126,7 +126,18 @@ def _summarize(df: pd.DataFrame, results: pd.DataFrame) -> dict[str, Any]:
     # src_ip/dst_ip were listed here before but extract_s7_features.py never
     # emits per-window IP columns (only aggregate counts) — dropped so this
     # doesn't silently promise a "Flow" column that's always empty.
-    flow_cols = [c for c in ("window_start_ms", "window_end_ms", "s7_input_write_count", "s7_output_write_count") if c in df.columns]
+    # Beyond input/output writes, also send the counters each attack rule
+    # actually keys off of (SCAN->DCP, FLOOD->SYN, FUZZ->RST/error,
+    # CPU_CONTROL->cpu_control, SPOOF-style writes->merker/db) so the
+    # frontend can show the field that's actually non-zero for that
+    # prediction instead of always showing input/output writes, which are
+    # frequently 0 for attacks that write elsewhere (e.g. SENSOR_SPOOF
+    # writes the Merker area, not Input/Output).
+    flow_cols = [c for c in (
+        "window_start_ms", "window_end_ms",
+        "s7_input_write_count", "s7_output_write_count", "s7_merker_write_count", "s7_db_write_count",
+        "dcp_identify_request_count", "tcp_syn_count", "tcp_rst_count", "s7_error_count", "s7_cpu_control_count",
+    ) if c in df.columns]
     flow_table = []
     for idx, row in top_flows.iterrows():
         entry = {"prediction": row["prediction"], "confidence": float(row["confidence"]), "layer_used": int(row["layer_used"])}
@@ -175,7 +186,7 @@ def analyze_pcap(pcap_bytes: bytes, filename: str, plc_ip: str, window: float = 
 
         df = pd.read_csv(csv_path, low_memory=False)
         if df.empty:
-            raise IdsUploadError("File pcap không trích xuất được flow nào (kiểm tra lại --plc-ip có đúng không).")
+            raise IdsUploadError("File pcap không trích xuất được cửa sổ nào (kiểm tra lại --plc-ip có đúng không).")
 
         from train_eval import load_and_preprocess  # noqa: PLC0415
 
@@ -188,6 +199,11 @@ def analyze_pcap(pcap_bytes: bytes, filename: str, plc_ip: str, window: float = 
         summary["job_id"] = job_id
         summary["source_file"] = filename
         summary["model_dir"] = str(MODEL_DIR)
+        try:
+            from .packet_capture import attach_attack_packets
+            attach_attack_packets(pcap_path, summary["flow_table"])
+        except Exception:
+            pass
         return summary
     finally:
         pcap_path.unlink(missing_ok=True)

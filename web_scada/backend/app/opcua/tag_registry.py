@@ -122,6 +122,34 @@ class TagRegistry:
             self._by_node_id[nid] = cfg
 
         self.config_path = path
+        self._apply_saved_overrides()
+
+    def _apply_saved_overrides(self) -> None:
+        """Re-apply any admin-edited thresholds (threshold_store.py) on top
+        of the YAML defaults just loaded — load() can be called again later
+        (e.g. a config reload), so this needs to run every time, not just
+        once in __init__."""
+        from .threshold_store import load_overrides
+
+        for key, override in load_overrides().items():
+            cfg = self._by_key.get(key)
+            if cfg is not None:
+                cfg.minimum = override.get("minimum", cfg.minimum)
+                cfg.maximum = override.get("maximum", cfg.maximum)
+
+    def set_threshold(self, key: str, minimum: float | None, maximum: float | None) -> Optional[TagConfig]:
+        """Admin-editable safety range for a tag — takes effect immediately
+        (gateway.py's write validation and every live tag payload read
+        straight from this same TagConfig object) and persists across
+        restarts via threshold_store.py."""
+        cfg = self._by_key.get(key)
+        if cfg is None:
+            return None
+        cfg.minimum = minimum
+        cfg.maximum = maximum
+        from .threshold_store import save_override
+        save_override(key, minimum, maximum)
+        return cfg
 
     def get_by_key(self, key: str) -> Optional[TagConfig]:
         return self._by_key.get(key)

@@ -2,6 +2,7 @@
 
 from .connection import database_configured, init_db
 from .repositories import (
+    get_pcap_analysis,
     insert_event,
     insert_pcap_analysis,
     insert_sample,
@@ -10,10 +11,12 @@ from .repositories import (
     query_recent_pcap_analyses,
     query_tag_history,
     update_event_ack,
+    update_event_status,
 )
 
 __all__ = [
     "database_configured",
+    "get_pcap_analysis",
     "init_db",
     "insert_event",
     "insert_pcap_analysis",
@@ -23,4 +26,5 @@ __all__ = [
     "query_recent_pcap_analyses",
     "query_tag_history",
     "update_event_ack",
+    "update_event_status",
 ]

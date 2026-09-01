@@ -33,6 +33,45 @@ def init_db() -> None:
     from . import models  # noqa: F401 — register models on Base before create_all
 
     Base.metadata.create_all(engine)
+    _migrate_pcap_analyses_result_json()
+    _migrate_events_disposition_note()
+
+
+def _migrate_pcap_analyses_result_json() -> None:
+    """create_all() only creates missing tables, it never alters an existing
+    one — a pcap_analyses table from before result_json existed (this repo
+    has no formal migration tool) would otherwise make every query against
+    that column fail. Nullable column, so old rows just get NULL and are
+    reported as not reopenable (see get_pcap_analysis)."""
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    if "pcap_analyses" not in inspector.get_table_names():
+        return
+    columns = {c["name"] for c in inspector.get_columns("pcap_analyses")}
+    if "result_json" in columns:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE pcap_analyses ADD COLUMN result_json TEXT"))
+
+
+def _migrate_events_disposition_note() -> None:
+    """Same reasoning as _migrate_pcap_analyses_result_json — an events
+    table from before disposition/note/labels_json existed needs these
+    columns added in place, not recreated (would lose the audit trail)."""
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    if "events" not in inspector.get_table_names():
+        return
+    columns = {c["name"] for c in inspector.get_columns("events")}
+    with engine.begin() as conn:
+        if "disposition" not in columns:
+            conn.execute(text("ALTER TABLE events ADD COLUMN disposition VARCHAR(24)"))
+        if "note" not in columns:
+            conn.execute(text("ALTER TABLE events ADD COLUMN note TEXT"))
+        if "labels_json" not in columns:
+            conn.execute(text("ALTER TABLE events ADD COLUMN labels_json TEXT"))
 
 
 def get_session() -> Session:

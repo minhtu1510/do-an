@@ -87,6 +87,8 @@ MAX_EVENT_ROWS = 20000
 
 
 def insert_event(event: dict) -> None:
+    import json
+
     session = get_session()
     try:
         session.add(EventRow(
@@ -101,6 +103,9 @@ def insert_event(event: dict) -> None:
             timestamp=datetime.fromisoformat(event["timestamp"]),
             acked_by=event.get("acked_by"),
             acked_at=datetime.fromisoformat(event["acked_at"]) if event.get("acked_at") else None,
+            disposition=event.get("disposition"),
+            note=event.get("note"),
+            labels_json=json.dumps(event["labels"]) if event.get("labels") else None,
         ))
         session.commit()
 
@@ -122,13 +127,29 @@ def insert_event(event: dict) -> None:
         session.close()
 
 
-def update_event_ack(event_id: str, acked_by: str, acked_at: str, status: str) -> None:
+def update_event_ack(
+    event_id: str, acked_by: str, acked_at: str, status: str,
+    disposition: str | None = None, note: str | None = None,
+) -> None:
     session = get_session()
     try:
         row = session.get(EventRow, event_id)
         if row is not None:
             row.acked_by = acked_by
             row.acked_at = datetime.fromisoformat(acked_at)
+            row.status = status
+            row.disposition = disposition
+            row.note = note
+            session.commit()
+    finally:
+        session.close()
+
+
+def update_event_status(event_id: str, status: str) -> None:
+    session = get_session()
+    try:
+        row = session.get(EventRow, event_id)
+        if row is not None:
             row.status = status
             session.commit()
     finally:
@@ -163,6 +184,7 @@ def insert_pcap_analysis(record: dict) -> None:
             attack_ratio=record["attack_ratio"],
             prediction_counts_json=json.dumps(record["prediction_counts"]),
             model_dir=record["model_dir"],
+            result_json=json.dumps(record["result"]),
         ))
         session.commit()
 
@@ -183,5 +205,23 @@ def query_recent_pcap_analyses(limit: int = 200) -> list[dict]:
     try:
         stmt = select(PcapAnalysisRow).order_by(PcapAnalysisRow.timestamp.desc()).limit(limit)
         return [row.to_dict() for row in session.scalars(stmt).all()]
+    finally:
+        session.close()
+
+
+def get_pcap_analysis(analysis_id: str) -> dict | None:
+    """None means the row itself doesn't exist (404). A row that exists but
+    predates the result_json column returns {"available": False, ...summary}
+    instead — still a 200, just nothing to reopen."""
+    session = get_session()
+    try:
+        row = session.get(PcapAnalysisRow, analysis_id)
+        if row is None:
+            return None
+        full = row.to_full_dict()
+        if full is not None:
+            full["available"] = True
+            return full
+        return {**row.to_dict(), "available": False}
     finally:
         session.close()

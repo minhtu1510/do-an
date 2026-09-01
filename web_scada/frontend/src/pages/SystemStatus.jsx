@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { ServerCog, ArrowUp, ArrowDown, Radio, BellRing } from "lucide-react";
+import { ServerCog, ArrowUp, ArrowDown, Activity, Radio, BellRing } from "lucide-react";
 import { fetchAllTags, fetchEvents, fetchPlcStatus, fetchSystemResources } from "../services/api";
 import { connectWebSocket } from "../services/websocket";
 import PageHeader from "../components/PageHeader";
@@ -11,6 +11,7 @@ const WARN_AMBER = "#c98500";
 const ATTACK_RED = "#e66767";
 const BLUE = "#3987e5";
 const AQUA = "#199e70";
+const VIOLET = "#9085e9";
 
 function gaugeColor(pct) {
   if (pct >= 85) return ATTACK_RED;
@@ -56,7 +57,7 @@ export default function SystemStatus() {
   const [tags, setTags] = useState({});
   const [resources, setResources] = useState(null);
   const [eventRate, setEventRate] = useState([]);
-  const historyRef = useRef({ cpu: [], mem: [], disk: [], netSent: [], netRecv: [] });
+  const historyRef = useRef({ cpu: [], mem: [], disk: [], netSent: [], netRecv: [], opcuaRate: [] });
   const [, forceTick] = useState(0);
 
   useEffect(() => {
@@ -101,6 +102,7 @@ export default function SystemStatus() {
           net_sent_bytes_per_sec: data.net_sent_bytes_per_sec,
           net_recv_bytes_per_sec: data.net_recv_bytes_per_sec,
           ws_connections: data.ws_connections,
+          opcua_notifications_per_sec: data.opcua_notifications_per_sec,
         };
         setResources(r);
         const h = historyRef.current;
@@ -109,6 +111,7 @@ export default function SystemStatus() {
         h.disk = pushHistory(h.disk, r.disk_percent ?? 0);
         h.netSent = pushHistory(h.netSent, r.net_sent_bytes_per_sec ?? 0);
         h.netRecv = pushHistory(h.netRecv, r.net_recv_bytes_per_sec ?? 0);
+        h.opcuaRate = pushHistory(h.opcuaRate, r.opcua_notifications_per_sec ?? 0);
         forceTick((n) => n + 1);
       }
     });
@@ -152,7 +155,7 @@ export default function SystemStatus() {
         />
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatTile
           icon={ArrowUp}
           iconColor={BLUE}
@@ -168,6 +171,15 @@ export default function SystemStatus() {
           value={formatBytesPerSec(resources?.net_recv_bytes_per_sec)}
           history={history.netRecv}
           sparkColor={AQUA}
+        />
+        <StatTile
+          icon={Activity}
+          iconColor={VIOLET}
+          label="Lưu lượng OPC UA sống"
+          value={`${resources?.opcua_notifications_per_sec ?? 0}/s`}
+          history={history.opcuaRate}
+          sparkColor={VIOLET}
+          note="Số thông báo thay đổi giá trị tag thật nhận từ PLC/giây (trung bình 10s gần nhất) — không phải phân tích pcap upload, đây là traffic đang chạy thời gian thực."
         />
         <StatTile
           icon={Radio}
