@@ -939,35 +939,173 @@ function FlowRow({ row, isOpcua, gridCls, mitre, allowedIps, colorMap }) {
 
       {open && hasPackets && (
         <div className="border-t border-slate-800 bg-slate-950/60 px-4 py-2">
-          <div className="grid grid-cols-[90px_130px_130px_60px_70px_1fr] gap-2 pb-1 text-[9px] uppercase text-slate-600">
+          <div className="grid grid-cols-[90px_150px_150px_55px_70px_1fr] gap-2 pb-1 text-[9px] uppercase text-slate-600">
             <div>Thời điểm</div>
-            <div>IP nguồn</div>
-            <div>IP đích</div>
+            <div>Nguồn</div>
+            <div>Đích</div>
             <div>Len</div>
             <div>Giao thức</div>
             <div>Info</div>
           </div>
-          {row.packets.map((p, j) => {
-            // Only flag "unknown" once the admin has actually populated the
-            // allowlist (Người dùng) — with an empty list, every IP would
-            // be "unknown" and the highlight would be meaningless noise.
-            const srcUnknown = allowedIps?.size > 0 && p.src_ip && !allowedIps.has(p.src_ip);
-            return (
-              <div key={j} className="grid grid-cols-[90px_130px_130px_60px_70px_1fr] gap-2 py-1 text-[10px] text-slate-400">
-                <div className="font-mono">{new Date(p.time_epoch * 1000).toLocaleTimeString()}.{String(Math.round((p.time_epoch % 1) * 1000)).padStart(3, "0")}</div>
-                <div className={`font-mono ${srcUnknown ? "font-bold text-amber-400" : "text-slate-300"}`} title={srcUnknown ? "IP không có trong danh sách IP hợp lệ" : ""}>
-                  {p.src_ip || "—"}
-                  {srcUnknown && " ⚠"}
-                </div>
-                <div className="font-mono text-slate-300">{p.dst_ip || "—"}</div>
-                <div>{p.length ?? "—"}</div>
-                <div className="text-cyan-400">{p.protocol || "—"}</div>
-                <div className="truncate text-slate-500" title={p.info}>{p.info}</div>
-              </div>
-            );
-          })}
+          {row.packets.map((p, j) => (
+            <PacketRow key={j} packet={p} allowedIps={allowedIps} />
+          ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// One captured packet — collapsed to the summary line by default (matches
+// what Wireshark's packet LIST pane shows); clicking it opens the full
+// protocol layer tree + hex dump (Wireshark's packet DETAIL + bytes panes),
+// captured up front in packet_capture.py because the source pcap is gone
+// by the time anyone would click this.
+function PacketRow({ packet: p, allowedIps }) {
+  const [open, setOpen] = useState(false);
+  const hasDetail = !!p.detail;
+  // Only flag "unknown" once the admin has actually populated the
+  // allowlist (Người dùng) — with an empty list, every IP would be
+  // "unknown" and the highlight would be meaningless noise.
+  const srcUnknown = allowedIps?.size > 0 && p.src_ip && !allowedIps.has(p.src_ip);
+
+  return (
+    <div className={hasDetail ? "border-b border-slate-900/60 last:border-b-0" : ""}>
+      <div
+        onClick={() => hasDetail && setOpen((v) => !v)}
+        className={`grid grid-cols-[90px_150px_150px_55px_70px_1fr] gap-2 py-1 text-[10px] text-slate-400 ${hasDetail ? "cursor-pointer hover:bg-slate-900/50" : ""}`}
+      >
+        <div className="font-mono">
+          {hasDetail && <span className="mr-1 text-slate-600">{open ? "▾" : "▸"}</span>}
+          {new Date(p.time_epoch * 1000).toLocaleTimeString()}.{String(Math.round((p.time_epoch % 1) * 1000)).padStart(3, "0")}
+        </div>
+        <div className={`font-mono ${srcUnknown ? "font-bold text-amber-400" : "text-slate-300"}`} title={srcUnknown ? "IP không có trong danh sách IP hợp lệ" : ""}>
+          {p.src_ip || "—"}{p.src_port ? `:${p.src_port}` : ""}
+          {srcUnknown && " ⚠"}
+        </div>
+        <div className="font-mono text-slate-300">{p.dst_ip || "—"}{p.dst_port ? `:${p.dst_port}` : ""}</div>
+        <div>{p.length ?? "—"}</div>
+        <div className="text-cyan-400">{p.protocol || "—"}</div>
+        <div className="truncate text-slate-500" title={p.info}>{p.info}</div>
+      </div>
+      {open && hasDetail && (
+        <div className="mb-3 ml-4 space-y-3 border-l border-slate-800 pl-3">
+          <div className="rounded border border-slate-700 bg-slate-900/60 px-3 py-2 text-[11px] text-slate-200">
+            {p.info || "(không có tóm tắt)"}
+          </div>
+          <PacketDetailTree layers={p.detail} />
+          {p.hex && <HexDumpToggle hex={p.hex} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HexDumpToggle({ hex }) {
+  const [show, setShow] = useState(false);
+  return (
+    <div>
+      <button
+        onClick={() => setShow((v) => !v)}
+        className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[9px] font-semibold text-slate-500 transition-colors hover:border-cyan-600 hover:text-cyan-300"
+      >
+        {show ? "Ẩn" : "Xem"} hex byte thô
+      </button>
+      {show && <div className="mt-1"><HexDump hex={hex} /></div>}
+    </div>
+  );
+}
+
+// Wireshark's own tree (dumped raw before) puts every layer, and every
+// Wireshark-internal bookkeeping field inside each layer, at equal visual
+// weight — fine for a network engineer who already knows what to ignore,
+// overwhelming for an operator who doesn't. Two fixes, same idea Wireshark
+// alternatives aimed at non-experts use (summarize first, raw detail
+// second): only the LAST layer (the actual protocol carrying the
+// meaningful command — s7comm/opcua — the ones before it are just the
+// network path getting the packet there) opens by default, and a curated
+// list of pure Wireshark-analysis fields (checksum bookkeeping, GUI
+// timestamp deltas...) that carry no real packet content are dropped
+// entirely rather than just collapsed.
+const NOISY_KEYS = new Set([
+  "tcp.completeness", "tcp.completeness_tree", "tcp.analysis", "tcp.checksum_status",
+  "ip.checksum_status", "Timestamps", "frame.interface_id_tree", "eth.dst_resolved",
+  "eth.src_resolved", "eth.dst.oui_resolved", "eth.src.oui_resolved",
+]);
+
+const LAYER_COLOR = {
+  frame: "#64748b", eth: "#64748b", ip: "#3987e5", tcp: "#199e70", udp: "#199e70",
+  tpkt: "#9085e9", cotp: "#9085e9", s7comm: "#e66767", "s7comm-plus": "#e66767", opcua: "#e66767",
+};
+
+function PacketDetailTree({ layers }) {
+  const keys = Object.keys(layers || {});
+  const lastKey = keys[keys.length - 1];
+  return (
+    <div className="space-y-1 text-[10px]">
+      {keys.map((key) => (
+        <DetailNode key={key} label={key} value={layers[key]} depth={0} defaultOpen={key === lastKey} />
+      ))}
+    </div>
+  );
+}
+
+function DetailNode({ label, value, depth, defaultOpen = false }) {
+  const [open, setOpen] = useState(defaultOpen);
+  if (label.endsWith("_raw") || NOISY_KEYS.has(label)) return null;
+
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    const entries = Object.entries(value).filter(([k]) => !k.endsWith("_raw") && !NOISY_KEYS.has(k));
+    const color = depth === 0 ? LAYER_COLOR[label] : null;
+    return (
+      <div style={{ marginLeft: depth * 14 }} className={depth === 0 ? "py-0.5" : ""}>
+        <div
+          onClick={() => setOpen((v) => !v)}
+          className="flex cursor-pointer items-center gap-1.5 text-slate-300 hover:text-cyan-300"
+        >
+          <span className="text-slate-600">{open ? "▾" : "▸"}</span>
+          {color ? (
+            <span className="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase" style={{ backgroundColor: `${color}33`, color }}>
+              {label}
+            </span>
+          ) : (
+            <span className={depth === 0 ? "font-semibold" : ""}>{label}</span>
+          )}
+        </div>
+        {open && (
+          <div className="mt-0.5 border-l border-slate-800/80 pl-2">
+            {entries.map(([k, v]) => <DetailNode key={k} label={k} value={v} depth={depth + 1} />)}
+          </div>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div style={{ marginLeft: depth * 14 }} className="py-[1px] text-slate-500">
+      <span className="text-slate-400">{label}</span>: <span className="font-mono text-slate-300">{String(value)}</span>
+    </div>
+  );
+}
+
+// Classic hex + ASCII dump, 16 bytes/row — same layout Wireshark's bytes
+// pane uses. `hex` is one long hex string (no spaces) as tshark emits it.
+// Collapsed behind a toggle (see HexDumpToggle below) — raw bytes are the
+// least operator-readable part of all this, kept one click away instead
+// of always taking up screen space.
+function HexDump({ hex }) {
+  const bytes = hex.match(/.{1,2}/g) || [];
+  const rows = [];
+  for (let i = 0; i < bytes.length; i += 16) rows.push(bytes.slice(i, i + 16));
+  return (
+    <div className="overflow-x-auto rounded border border-slate-800 bg-black/30 p-2 font-mono text-[9px] text-slate-500">
+      {rows.map((row, i) => (
+        <div key={i} className="whitespace-pre">
+          {String(i * 16).padStart(4, "0")}  {row.map((b) => b).join(" ").padEnd(47, " ")}  {row.map((b) => {
+            const code = parseInt(b, 16);
+            return code >= 32 && code < 127 ? String.fromCharCode(code) : ".";
+          }).join("")}
+        </div>
+      ))}
     </div>
   );
 }

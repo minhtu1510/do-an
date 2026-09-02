@@ -188,6 +188,23 @@ def analyze_pcap(pcap_bytes: bytes, filename: str, plc_ip: str, window: float = 
         if df.empty:
             raise IdsUploadError("File pcap không trích xuất được cửa sổ nào (kiểm tra lại --plc-ip có đúng không).")
 
+        # extract_s7_features.py doesn't require any real S7comm payload to
+        # produce a window — it happily buckets generic TCP/IP traffic into
+        # windows too, so uploading e.g. an OPC UA pcap here doesn't error,
+        # it silently produces a plausible-looking but meaningless result
+        # (verified: an OPC UA capture run through here came back "94%
+        # ANOMALY" — not because it's an attack, but because none of it
+        # resembles real S7comm BENIGN traffic to Layer 2). decode_level
+        # reaching "s7_full" requires an actual decoded S7comm PDU; every
+        # real S7comm capture tested (including pure-noise SCAN/FUZZ
+        # attacks) has close to 100% s7_full, so 0% is a safe, specific
+        # signal this file has no real S7comm traffic in it at all.
+        if "decode_level" in df.columns and (df["decode_level"] == "s7_full").mean() == 0:
+            raise IdsUploadError(
+                "File pcap này không có gói tin S7comm nào được giải mã đầy đủ — có thể bạn đã chọn nhầm giao thức "
+                "(thử lại với giao thức OPC UA) hoặc file không chứa lưu lượng S7comm thật."
+            )
+
         from train_eval import load_and_preprocess  # noqa: PLC0415
 
         df, features = load_and_preprocess(str(csv_path), pipeline.feature_cols)

@@ -19,12 +19,26 @@ const DISPOSITION_LABEL = {
 // One-event incident PDF — plain pdf.text() calls, not a screenshot: a
 // single event's fields don't need a rendered-page capture, and text is
 // crisper and more reliable than html2canvas for this.
+// jsPDF's built-in fonts (Helvetica etc.) only support WinAnsi encoding —
+// no Vietnamese diacritics. Feeding them accented text silently renders
+// garbled bytes ("Báo cáo sự cố" -> "Báo cáo sñ cÑ") instead of erroring,
+// so this went unnoticed until someone actually opened the PDF. Stripping
+// diacritics before every pdf.text() call is the same fix already used in
+// IdsUpload.jsx's PDF export for this identical jsPDF limitation.
+function stripDiacritics(text) {
+  return String(text)
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D");
+}
+
 function exportEventPdf(event) {
   const pdf = new jsPDF({ orientation: "p", unit: "pt", format: "a4" });
   let y = 50;
   const line = (text, size = 10, gap = 18) => {
     pdf.setFontSize(size);
-    const wrapped = pdf.splitTextToSize(text, 500);
+    const wrapped = pdf.splitTextToSize(stripDiacritics(text), 500);
     pdf.text(wrapped, 40, y);
     y += gap * wrapped.length;
   };
@@ -298,14 +312,21 @@ function EventRow({ event, onAck }) {
             <span className="text-gray-600">Chưa xác nhận</span>
           ) : null}
         </div>
-        <button
-          onClick={() => exportEventPdf(event)}
-          title="Xuất báo cáo sự cố PDF"
-          className="flex items-center gap-1 rounded border border-gray-700 bg-gray-900 px-2 py-1 text-[10px] font-semibold text-gray-400 transition-colors hover:border-blue-600 hover:text-blue-300"
-        >
-          <FileDown size={11} />
-          PDF
-        </button>
+        {/* Only WARNING/ERROR are actual "incidents" worth a report — a
+        routine INFO event (PLC_CONNECTED, OPCUA_RECONNECTED...) has nothing
+        incident-like to report on, the button was just noise there. */}
+        {event.severity !== "INFO" ? (
+          <button
+            onClick={() => exportEventPdf(event)}
+            title="Xuất báo cáo sự cố PDF"
+            className="flex items-center gap-1 rounded border border-gray-700 bg-gray-900 px-2 py-1 text-[10px] font-semibold text-gray-400 transition-colors hover:border-blue-600 hover:text-blue-300"
+          >
+            <FileDown size={11} />
+            PDF
+          </button>
+        ) : (
+          <div />
+        )}
       </div>
 
       {suggestion && (

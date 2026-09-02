@@ -22,6 +22,29 @@ MAX_UPLOAD_BYTES = 200 * 1024 * 1024  # 200 MB — a few hours of ICS traffic, g
 TZ = timezone(timedelta(hours=7))
 
 
+def _without_packet_detail(result: dict) -> dict:
+    """Full Wireshark-style detail (packet_capture.py's `detail`/`hex`) is
+    fine in the live HTTP response for the analysis you just ran (~1-3MB),
+    but keeping that in every history row would bloat the SQLite historian
+    (500 rows x that easily reaches gigabytes) for a feature that's only
+    useful right after analyzing, while the context is still fresh. History
+    keeps the lightweight per-packet fields (time/IP/port/protocol/info),
+    just not the full layer tree — a shallow copy, does not mutate `result`
+    (the caller still returns the full version to the current request).
+    """
+    flow_table = result.get("flow_table")
+    if not flow_table:
+        return result
+    trimmed_flow_table = []
+    for row in flow_table:
+        if not row.get("packets"):
+            trimmed_flow_table.append(row)
+            continue
+        trimmed_packets = [{k: v for k, v in p.items() if k not in ("detail", "hex")} for p in row["packets"]]
+        trimmed_flow_table.append({**row, "packets": trimmed_packets})
+    return {**result, "flow_table": trimmed_flow_table}
+
+
 async def _record_analysis(result: dict, protocol: str, username: str) -> None:
     """Persist the analysis to history, and raise a real alarm if it found
     anything non-benign. Both steps are best-effort — a DB/event write must
@@ -42,7 +65,7 @@ async def _record_analysis(result: dict, protocol: str, username: str) -> None:
             "attack_ratio": result["attack_ratio"],
             "prediction_counts": result["prediction_counts"],
             "model_dir": result["model_dir"],
-            "result": {**result, "protocol": protocol},
+            "result": {**_without_packet_detail(result), "protocol": protocol},
         })
     except Exception:
         pass

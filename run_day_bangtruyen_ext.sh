@@ -141,7 +141,11 @@ rand_duration() {
 
 # ── Capture ──────────────────────────────────────────────────────
 start_capture() {
-    local suf="$1" pcap="$CAPTURE_DIR/day${DAY}/${SESSION_ID}_${suf}.pcapng"
+    # Tach khai bao: gop 'local suf="$1" pcap="...${suf}..."' bi loi tren bash
+    # MINGW64/Git Bash (danh gia ${suf} truoc khi suf duoc gan -> set -u bao
+    # "suf: unbound variable"). Gan suf truoc, roi moi dung trong pcap.
+    local suf="$1"
+    local pcap="$CAPTURE_DIR/day${DAY}/${SESSION_ID}_${suf}.pcapng"
     [[ "$CAPTURE_ENABLED" != "1" ]] && { echo "[$suf] capture disabled"; return 0; }
     tshark -n -i "$CAPTURE_IFACE" -f "$CAPTURE_FILTER" -w "$pcap" -q \
         -o "tls.desegment_ssl_records:FALSE" \
@@ -158,12 +162,25 @@ except ImportError: from snap7.types import Areas
 c = snap7.client.Client()
 try:
     c.connect("$TARGET_IP", int("$RACK"), int("$SLOT"))
-    print(f"[preflight] state={c.get_cpu_state()}", flush=True)
+except Exception as e:
+    print(f"[preflight] FAIL connect: {e}", flush=True); sys.exit(2)
+# get_cpu_state THUONG bi S7-1500 chan (class=0x84 code=0x04) -> KHONG fatal,
+# chi canh bao. Cong THAT la doc duoc vung M (cai attack read/write can).
+try:
+    print(f"[preflight] cpu_state={c.get_cpu_state()}", flush=True)
+except Exception as e:
+    print(f"[preflight][warn] get_cpu_state bi chan (binh thuong tren S7-1500): {e}", flush=True)
+try:
     c.read_area(Areas.MK, 0, 0, 1)
-    print("[preflight] M area OK", flush=True)
+    print("[preflight] M area READ OK -> PLC dung duoc", flush=True)
     c.disconnect(); sys.exit(0)
 except Exception as e:
-    print(f"[preflight] FAIL: {e}", flush=True); sys.exit(2)
+    print(f"[preflight] FAIL read M: {e}", flush=True)
+    print("[preflight] Neu 0x8404 'function cannot be performed': kiem tra CPU co dang STOP khong", flush=True)
+    print("[preflight] (bat RUN trong TIA Portal), hoac protection level cao. Co the bo qua bang --no-preflight.", flush=True)
+    try: c.disconnect()
+    except Exception: pass
+    sys.exit(2)
 PYEOF
 }
 
