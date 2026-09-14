@@ -1,0 +1,31 @@
+{
+  "model_dir": "model_opcua",
+  "model_trained_on": "/home/sus/do-an/data_opc/day8_out/opcua_harvest_ext_aa.csv",
+  "model_cv_macro_f1_in_distribution": 0.9667244567625386,
+  "test_dataset": "data_opc/day8_out/opcua_testclean_ext_aa.csv",
+  "n_test_windows": 753,
+  "n_benign_windows": 708,
+  "n_attack_windows": 45,
+  "window_seconds": 5.0,
+  "labels_unseen_by_model": [],
+  "n_rows_with_unseen_label": 0,
+  "binary_benign_vs_attack": {
+    "tp": 45,
+    "fp": 0,
+    "tn": 708,
+    "fn": 0,
+    "recall": 1.0,
+    "precision": 1.0,
+    "fpr": 0.0,
+    "f1": 1.0,
+    "fpr_per_hour": 0.0
+  },
+  "multiclass": {
+    "accuracy": 0.996,
+    "macro_f1_raw": 0.8798,
+    "macro_f1_fair_known_classes": 0.8798,
+    "macro_precision": 0.8926,
+    "macro_recall": 0.8727,
+    "note": "macro_f1_raw bi phat boi lop model khong emit duoc + lop vang mat trong test; macro_f1_fair chi tinh tren lop model that su biet -> con so nen dung khi so voi in-distribution CV."
+  }
+}

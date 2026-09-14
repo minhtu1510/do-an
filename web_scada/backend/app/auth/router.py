@@ -9,7 +9,15 @@ from sqlalchemy.exc import IntegrityError
 from .db import get_session
 from .deps import get_current_user, require_role
 from .models import ROLES, User
-from .schemas import ChangeRoleRequest, CreateUserRequest, LoginRequest, TokenResponse, UserOut
+from .schemas import (
+    AdminResetPasswordRequest,
+    ChangePasswordRequest,
+    ChangeRoleRequest,
+    CreateUserRequest,
+    LoginRequest,
+    TokenResponse,
+    UserOut,
+)
 from .security import create_access_token, hash_password, verify_password
 
 auth_router = APIRouter()
@@ -110,6 +118,36 @@ def me(user: User = Depends(get_current_user)):
     return UserOut(**user.to_dict())
 
 
+@auth_router.post("/me/password", status_code=status.HTTP_204_NO_CONTENT)
+def change_own_password(body: ChangePasswordRequest, user: User = Depends(get_current_user)):
+    """Self-service — every role can change their own password (admin
+    resetting someone else's is the separate PATCH .../users/{id}/role path
+    for role, there's no equivalent 'admin sets password' endpoint on
+    purpose: an admin silently knowing another user's new password isn't
+    something this app should make easy). Requires the current password,
+    same as any normal account settings page, so a hijacked-but-not-yet-
+    logged-out session can't be used to lock the real owner out.
+    """
+    session = get_session()
+    try:
+        db_user = session.get(User, user.id)
+        if db_user is None or not verify_password(body.old_password, db_user.password_hash):
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Mật khẩu hiện tại không đúng")
+        db_user.password_hash = hash_password(body.new_password)
+        session.commit()
+        try:
+            _event_service().add(_event_record_cls()(
+                event_type="PASSWORD_CHANGED",
+                severity="INFO",
+                message=f"{user.username} đã tự đổi mật khẩu.",
+                status="CLEARED",
+            ))
+        except Exception:
+            pass
+    finally:
+        session.close()
+
+
 @auth_router.get("/users", response_model=list[UserOut])
 def list_users(_admin: User = Depends(require_role("admin"))):
     session = get_session()
@@ -176,6 +214,36 @@ def change_role(user_id: int, body: ChangeRoleRequest, admin: User = Depends(req
             except Exception:
                 pass
         return UserOut(**user.to_dict())
+    finally:
+        session.close()
+
+
+@auth_router.post("/users/{user_id}/password", status_code=status.HTTP_204_NO_CONTENT)
+def admin_reset_password(user_id: int, body: AdminResetPasswordRequest, admin: User = Depends(require_role("admin"))):
+    """Recovery path for a forgotten password: there's no email/SMS on this
+    app (no self-registration either — see bootstrap_admin/create_user, an
+    admin-provisioned system by design), so "forgot password" can't be a
+    self-service emailed reset link. An admin resetting the account is the
+    honest equivalent — same authority that created the account in the
+    first place. Unlike change_own_password, no old-password check: the
+    whole point is the user *can't* provide it.
+    """
+    session = get_session()
+    try:
+        user = session.get(User, user_id)
+        if user is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+        user.password_hash = hash_password(body.new_password)
+        session.commit()
+        try:
+            _event_service().add(_event_record_cls()(
+                event_type="PASSWORD_RESET_BY_ADMIN",
+                severity="WARNING",
+                message=f"{admin.username} đã đặt lại mật khẩu cho tài khoản '{user.username}'.",
+                status="CLEARED",
+            ))
+        except Exception:
+            pass
     finally:
         session.close()
 

@@ -209,6 +209,61 @@ def query_recent_pcap_analyses(limit: int = 200) -> list[dict]:
         session.close()
 
 
+def list_ip_asset_inventory(limit_analyses: int = 200) -> list[dict]:
+    """Every source/destination IP seen in the packet samples attached to
+    recent pcap analyses (packet_capture.attach_attack_packets — only the
+    highest-confidence non-BENIGN windows get packets, not full traffic; see
+    that module's docstring), aggregated across analyses.
+
+    Deliberately scoped, not a real network asset inventory: this app never
+    captures traffic on its own, it only ever sees what someone uploads for
+    analysis, and only the sampled packets of flagged windows within that —
+    so an IP absent from this list was never proven absent from the network,
+    only never sampled. Framed as "IP thấy được qua các lần phân tích", not
+    "danh sách thiết bị trên mạng", to not overclaim what read-only pcap
+    analysis can actually see.
+    """
+    import json
+
+    session = get_session()
+    try:
+        stmt = (
+            select(PcapAnalysisRow.timestamp, PcapAnalysisRow.source_file, PcapAnalysisRow.result_json)
+            .order_by(PcapAnalysisRow.timestamp.desc())
+            .limit(limit_analyses)
+        )
+        rows = session.execute(stmt).all()
+    finally:
+        session.close()
+
+    seen: dict[str, dict[str, Any]] = {}
+    for timestamp, source_file, result_json in rows:
+        if not result_json:
+            continue
+        try:
+            result = json.loads(result_json)
+        except (TypeError, ValueError):
+            continue
+        ts_iso = timestamp.isoformat()
+        for flow in result.get("flow_table", []):
+            for packet in flow.get("packets", []) or []:
+                for ip in (packet.get("src_ip"), packet.get("dst_ip")):
+                    if not ip:
+                        continue
+                    entry = seen.setdefault(ip, {"ip": ip, "first_seen": ts_iso, "last_seen": ts_iso, "count": 0, "sources": set()})
+                    entry["count"] += 1
+                    entry["sources"].add(source_file)
+                    if ts_iso < entry["first_seen"]:
+                        entry["first_seen"] = ts_iso
+                    if ts_iso > entry["last_seen"]:
+                        entry["last_seen"] = ts_iso
+
+    return [
+        {**v, "sources": len(v["sources"])}
+        for v in sorted(seen.values(), key=lambda v: v["last_seen"], reverse=True)
+    ]
+
+
 def get_pcap_analysis(analysis_id: str) -> dict | None:
     """None means the row itself doesn't exist (404). A row that exists but
     predates the result_json column returns {"available": False, ...summary}

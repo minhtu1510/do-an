@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { jsPDF } from "jspdf";
-import { Bell, Check, ClipboardList, FileDown, Inbox, Lock, ShieldAlert, ShieldCheck, ShieldX, Unlock } from "lucide-react";
+import { Bell, Check, ChevronRight, ClipboardList, FileDown, Inbox, Lock, Search, ShieldAlert, ShieldCheck, ShieldX, Unlock } from "lucide-react";
 import { ackEvent, fetchEvents, fetchWriteLock, releaseWriteLock } from "../services/api";
 import { connectWebSocket } from "../services/websocket";
 import PageHeader from "../components/PageHeader";
@@ -74,7 +74,20 @@ export default function AlarmEvents() {
   const [lastUpdate, setLastUpdate] = useState(null);
   const [lock, setLock] = useState(null);
   const [unlocking, setUnlocking] = useState(false);
+  const [search, setSearch] = useState("");
+  const [severityFilter, setSeverityFilter] = useState("ALL");
+  const [statusFilter, setStatusFilter] = useState("ALL");
   const activeCount = events.filter((e) => e.status === "ACTIVE").length;
+
+  const filteredEvents = events.filter((e) => {
+    if (severityFilter !== "ALL" && e.severity !== severityFilter) return false;
+    if (statusFilter !== "ALL" && e.status !== statusFilter) return false;
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      if (!e.message?.toLowerCase().includes(q) && !e.event_type?.toLowerCase().includes(q)) return false;
+    }
+    return true;
+  });
 
   useEffect(() => {
     fetchEvents(500).then((data) => {
@@ -179,15 +192,56 @@ export default function AlarmEvents() {
       </div>
 
       <div className="overflow-hidden rounded-lg border border-gray-700 bg-gray-800 shadow-sm shadow-black/20">
-        <div className="border-b border-gray-700 px-4 py-3 text-sm font-semibold text-gray-200">Sự kiện gần đây</div>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-700 px-4 py-3">
+          <div className="text-sm font-semibold text-gray-200">
+            Sự kiện gần đây {filteredEvents.length !== events.length && <span className="text-gray-500">({filteredEvents.length}/{events.length})</span>}
+          </div>
+          {events.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative">
+                <Search size={12} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-600" />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Tìm theo nội dung / loại..."
+                  className="w-56 rounded border border-gray-700 bg-gray-900 py-1.5 pl-7 pr-2 text-xs text-gray-200 outline-none focus:border-cyan-500"
+                />
+              </div>
+              <select
+                value={severityFilter}
+                onChange={(e) => setSeverityFilter(e.target.value)}
+                className="rounded border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300"
+              >
+                <option value="ALL">Mọi mức độ</option>
+                <option value="ERROR">ERROR</option>
+                <option value="WARNING">WARNING</option>
+                <option value="INFO">INFO</option>
+              </select>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="rounded border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300"
+              >
+                <option value="ALL">Mọi trạng thái</option>
+                <option value="ACTIVE">ACTIVE</option>
+                <option value="CLEARED">CLEARED</option>
+              </select>
+            </div>
+          )}
+        </div>
         {events.length === 0 ? (
           <div className="flex flex-col items-center gap-2 p-10 text-sm text-gray-500">
             <Inbox size={28} className="text-gray-700" />
             Chưa có sự kiện nào được ghi nhận.
           </div>
+        ) : filteredEvents.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 p-10 text-sm text-gray-500">
+            <Search size={28} className="text-gray-700" />
+            Không có sự kiện nào khớp bộ lọc.
+          </div>
         ) : (
           <div className="max-h-[600px] divide-y divide-gray-700 overflow-y-auto">
-            {events.map((event) => (
+            {filteredEvents.map((event) => (
               <EventRow key={event.id} event={event} onAck={handleAck} />
             ))}
           </div>
@@ -253,6 +307,7 @@ function SummaryCard({ label, value, color = "text-white", icon: Icon }) {
 function EventRow({ event, onAck }) {
   const { hasRole } = useAuth();
   const [formOpen, setFormOpen] = useState(false);
+  const [suggestionOpen, setSuggestionOpen] = useState(false);
   const [note, setNote] = useState("");
   const [disposition, setDisposition] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -330,9 +385,19 @@ function EventRow({ event, onAck }) {
       </div>
 
       {suggestion && (
-        <div className="mt-2 rounded border border-gray-700 bg-gray-900/60 px-3 py-2 text-[11px] text-gray-400">
-          <span className="font-semibold text-gray-300">Gợi ý xử lý ({suggestion[0]}): </span>
-          {suggestion[1]}
+        <div className="mt-2">
+          <button
+            onClick={() => setSuggestionOpen((v) => !v)}
+            className="flex items-center gap-1 text-[11px] text-gray-500 transition-colors hover:text-gray-300"
+          >
+            <ChevronRight size={11} className={`transition-transform ${suggestionOpen ? "rotate-90" : ""}`} />
+            Gợi ý xử lý ({suggestion[0]})
+          </button>
+          {suggestionOpen && (
+            <div className="mt-1 rounded border border-gray-700 bg-gray-900/60 px-3 py-2 text-[11px] text-gray-400">
+              {suggestion[1]}
+            </div>
+          )}
         </div>
       )}
 

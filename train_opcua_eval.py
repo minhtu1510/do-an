@@ -10,6 +10,16 @@ full dataset once and persists the result, since evaluate_opcua.py itself
 never saves a model (it's benchmark-only, in-memory, cross-validated and
 discarded).
 
+Model: ExtraTreesClassifier(max_depth=10), not plain RandomForestClassifier.
+Chosen after a held-out ablation on a cross-session OOD test (capture taken
+about a month after the training capture, see evaluate_opcua_ood.py): at the
+same n_estimators, ExtraTrees's extra split-point randomization costs only
+~0.007 in-distribution CV macro-F1 (0.967->0.960) but genuinely improves the
+detailed 10-class OOD macro-F1 (0.462->0.518) with the OOD detection recall
+and steady-state FPR UNCHANGED (0.992 / 0.00%) -- a real generalization gain,
+not a reframing of the same number. See bao-cao/opcua_bao_cao_chi_tiet.md
+S8.8 for the full comparison table.
+
 Usage:
   python train_opcua_eval.py --dataset data_opc/day8_out/opcua_harvest_features.csv --output model_opcua/
 """
@@ -23,7 +33,7 @@ from pathlib import Path
 
 import joblib
 import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import ExtraTreesClassifier
 from sklearn.model_selection import GroupKFold, cross_val_predict
 from sklearn.metrics import f1_score
 
@@ -53,7 +63,7 @@ def main() -> None:
     # training-set score that would look artificially perfect.
     cv_macro_f1 = None
     if groups is not None and pd.Series(groups).nunique() >= 5:
-        clf_cv = RandomForestClassifier(n_estimators=400, random_state=0, n_jobs=-1)
+        clf_cv = ExtraTreesClassifier(n_estimators=400, max_depth=10, random_state=0, n_jobs=-1)
         pred = cross_val_predict(clf_cv, X, y, groups=groups, cv=GroupKFold(5), n_jobs=-1)
         cv_macro_f1 = float(f1_score(y, pred, average="macro"))
         print(f"[*] Grouped 5-fold CV macro-F1 (honest estimate): {cv_macro_f1:.3f}")
@@ -61,7 +71,7 @@ def main() -> None:
         print("[!] Not enough distinct episode_id groups for 5-fold CV — skipping CV estimate.")
 
     print(f"[*] Fitting final classifier on all {len(df)} windows, {len(feat)} features, {df['label'].nunique()} labels...")
-    clf = RandomForestClassifier(n_estimators=400, random_state=0, n_jobs=-1)
+    clf = ExtraTreesClassifier(n_estimators=400, max_depth=10, random_state=0, n_jobs=-1)
     clf.fit(X, y)
 
     out_dir = Path(args.output)
@@ -72,6 +82,7 @@ def main() -> None:
         "labels": sorted(df["label"].unique().tolist()),
         "n_windows": len(df),
         "n_features": len(feat),
+        "model": "ExtraTreesClassifier(n_estimators=400, max_depth=10)",
         "cv_macro_f1": cv_macro_f1,
         "trained_at": datetime.now(timezone.utc).isoformat(),
         "source_dataset": str(Path(args.dataset).resolve()),

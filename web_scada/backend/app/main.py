@@ -21,7 +21,6 @@ from .database import init_db, insert_sample
 from .events import event_service
 from .history.router import history_router
 from .ids_upload.router import ids_upload_router
-from .ml_results.router import ml_results_router
 from .system import sample as sample_system_resources, warm_up as warm_up_system_resources
 from .websocket.manager import ws_manager
 
@@ -107,6 +106,14 @@ async def lifespan(app: FastAPI):
     # late doesn't matter in practice.
     ESCALATION_SCHEDULE_MINUTES = [5, 15, 30, 120, 600, 1440]
 
+    # A confirmed attack detection is WARNING-severity for UI coloring (it's
+    # not a system fault), but if nobody acks it, it needs the same nagging
+    # ladder as an ERROR — otherwise a missed first Telegram push means the
+    # operator never hears about a live attack again. Escalated by
+    # event_type, not by severity, so routine WARNING events (a rejected
+    # command, an admin action) stay one-shot instead of getting nagged too.
+    ESCALATED_WARNING_EVENT_TYPES = {"ATTACK_PCAP_DETECTED", "IDS_ANOMALY_DETECTED"}
+
     async def escalation_loop():
         while True:
             await asyncio.sleep(60)
@@ -114,7 +121,13 @@ async def lifespan(app: FastAPI):
                 from .notify import notify_event, telegram_configured
                 if not telegram_configured():
                     continue
-                for event in event_service.due_for_escalation("ERROR", ESCALATION_SCHEDULE_MINUTES):
+                due = [
+                    *event_service.due_for_escalation("ERROR", ESCALATION_SCHEDULE_MINUTES),
+                    *event_service.due_for_escalation(
+                        None, ESCALATION_SCHEDULE_MINUTES, event_types=ESCALATED_WARNING_EVENT_TYPES
+                    ),
+                ]
+                for event in due:
                     rung = event.escalation_level + 1
                     event.escalation_level = rung
                     escalated = dict(event.to_dict())
@@ -165,7 +178,6 @@ app.add_middleware(
 app.include_router(auth_router, prefix="/api/auth")
 app.include_router(api_router, prefix="/api")
 app.include_router(history_router, prefix="/api/history")
-app.include_router(ml_results_router, prefix="/api/ml")
 app.include_router(ids_upload_router, prefix="/api/ids")
 
 

@@ -61,6 +61,11 @@ export async function updateTagThresholds(key, minimum, maximum) {
   return body;
 }
 
+export async function fetchIpAssetInventory() {
+  const res = await apiFetch("/ids/asset-inventory");
+  return res.json();
+}
+
 export async function fetchIpAllowlist() {
   const res = await apiFetch("/ip-allowlist");
   return res.json();
@@ -193,6 +198,17 @@ export async function changeUserRole(userId, role) {
   return res.json();
 }
 
+export async function adminResetPassword(userId, newPassword) {
+  const res = await apiFetch(`/auth/users/${userId}/password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ new_password: newPassword }),
+  });
+  if (!res.ok && res.status !== 204) {
+    throw new Error((await res.json().catch(() => ({}))).detail || "Đặt lại mật khẩu thất bại");
+  }
+}
+
 export async function deleteUser(userId) {
   const res = await apiFetch(`/auth/users/${userId}`, { method: "DELETE" });
   if (!res.ok && res.status !== 204) {
@@ -230,6 +246,22 @@ export async function analyzeIdsPcapOpcua(file, plcIp, window) {
   const body = await res.json();
   if (!res.ok) throw new Error(body.message || body.detail || "Phân tích thất bại");
   return body;
+}
+
+export async function downloadIdsEvidence(jobId) {
+  const res = await apiFetch(`/ids/evidence/${jobId}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.message || "Không tải được file bằng chứng");
+  }
+  const blob = await res.blob();
+  const filename = res.headers.get("Content-Disposition")?.match(/filename=(.+)/)?.[1] || `evidence_${jobId}.pcap`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 export async function fetchIdsHistory(limit = 100) {

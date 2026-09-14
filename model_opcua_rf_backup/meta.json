@@ -1,0 +1,20 @@
+{
+  "labels": [
+    "OPCUA_BEHAVIORAL_PROFILING",
+    "OPCUA_ENDPOINT_DISCOVERY",
+    "OPCUA_MALICIOUS_WRITE",
+    "OPCUA_NODE_BROWSE",
+    "OPCUA_PROTOCOL_FUZZ",
+    "OPCUA_READ_SCRAPING",
+    "OPCUA_RECURSIVE_BROWSE",
+    "OPCUA_SESSION_BURST",
+    "OPCUA_SLOWLORIS",
+    "OPCUA_SUBSCRIPTION_FLOOD",
+    "benign"
+  ],
+  "n_windows": 3427,
+  "n_features": 61,
+  "cv_macro_f1": 0.9667244567625386,
+  "trained_at": "2026-09-02T16:26:03.350650+00:00",
+  "source_dataset": "/home/sus/do-an/data_opc/day8_out/opcua_harvest_ext_aa.csv"
+}

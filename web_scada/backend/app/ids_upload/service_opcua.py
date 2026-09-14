@@ -7,7 +7,19 @@ would silently produce a meaningless result instead of a real prediction.
 This module is a separate model + separate feature extractor for that reason.
 
 Reuses:
-  - extract_opcua_features.py  (needs tshark on PATH) -> feature CSV
+  - extract_opcua_features_ext.py (needs tshark on PATH) -> feature CSV.
+    NOT the original extract_opcua_features.py (28 features) — model_opcua/
+    was retrained on the 61-feature extended set (see that script's own
+    docstring for why: per-source isolation so a sparse attacker doesn't get
+    diluted into whole-window aggregates). Found and fixed a real bug here:
+    this module was still pointed at the 28-feature script after that
+    retrain, so every upload silently zero-filled the ~33 missing columns —
+    verified on samples/opcua_malicious_write_sample.pcap, a confirmed real
+    OPCUA_MALICIOUS_WRITE, going from 99.25% confidence (extended
+    extractor, real features) to 100% "benign" (old extractor, zero-filled)
+    with the exact same pcap and model. The feature-count guard below is
+    there so a future retrain that changes the feature set again fails
+    loudly instead of repeating this silently.
   - model_opcua/classifier.joblib, trained by train_opcua_eval.py using the
     exact recipe tests/day8/evaluate_opcua.py validated via grouped CV
     (merge OPCUA_INVALID_WRITE/OPCUA_WRITE_DENIED, no class_weight balancing)
@@ -32,7 +44,7 @@ import numpy as np
 import pandas as pd
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-EXTRACT_SCRIPT = REPO_ROOT / "extract_opcua_features.py"
+EXTRACT_SCRIPT = REPO_ROOT / "extract_opcua_features_ext.py"
 MODEL_DIR = Path(os.getenv("IDS_MODEL_OPCUA_DIR", str(REPO_ROOT / "model_opcua")))
 
 UPLOAD_SCRATCH = Path(__file__).resolve().parents[2] / "data" / "ids_uploads"
@@ -175,9 +187,20 @@ def analyze_pcap(pcap_bytes: bytes, filename: str, plc_ip: str, window: float = 
         if df.empty:
             raise IdsUploadOpcuaError("File pcap không trích xuất được cửa sổ OPC UA nào (kiểm tra lại --plc-ip có đúng không).")
 
+        # Fail loudly instead of silently zero-filling: a real, previously
+        # shipped bug here was extract_opcua_features_ext.py's feature set
+        # drifting out of sync with model_opcua/ after a retrain (28 vs 61
+        # columns) — zero-filling the gap looked like a normal analysis but
+        # quietly blinded the model to real attacks (verified: a confirmed
+        # OPCUA_MALICIOUS_WRITE dropped from 99% confidence to "benign").
         missing = [f for f in features if f not in df.columns]
-        for f in missing:
-            df[f] = 0
+        if missing:
+            raise IdsUploadOpcuaError(
+                f"Bộ trích đặc trưng OPC UA đang thiếu {len(missing)}/{len(features)} cột model cần "
+                f"({', '.join(missing[:5])}{'...' if len(missing) > 5 else ''}) — model_opcua/ có thể vừa được "
+                f"train lại với bộ đặc trưng khác. Kiểm tra lại extract_opcua_features_ext.py có khớp "
+                f"model_opcua/features.json không trước khi phân tích tiếp."
+            )
         X = df[features].fillna(0).values
 
         predictions = classifier.predict(X)
@@ -190,11 +213,15 @@ def analyze_pcap(pcap_bytes: bytes, filename: str, plc_ip: str, window: float = 
         summary["job_id"] = job_id
         summary["source_file"] = filename
         summary["model_dir"] = str(MODEL_DIR)
+        summary["model_trained_at"] = meta.get("trained_at")
         try:
-            from .packet_capture import attach_attack_packets
+            from .packet_capture import attach_attack_packets, extract_evidence_pcap, sweep_old_evidence
+            sweep_old_evidence(UPLOAD_SCRATCH)
             attach_attack_packets(pcap_path, summary["flow_table"])
+            evidence_path = extract_evidence_pcap(pcap_path, summary["flow_table"], job_id)
+            summary["evidence_available"] = evidence_path is not None
         except Exception:
-            pass
+            summary["evidence_available"] = False
         return summary
     finally:
         pcap_path.unlink(missing_ok=True)

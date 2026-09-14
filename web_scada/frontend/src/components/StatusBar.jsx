@@ -1,11 +1,14 @@
 import { useState, useEffect } from "react";
-import { Cpu, Radio, Wifi, LogOut, AlertTriangle, ShieldCheck } from "lucide-react";
-import { fetchPlcStatus } from "../services/api";
+import { createPortal } from "react-dom";
+import { Cpu, Radio, Wifi, LogOut, AlertTriangle, ShieldCheck, KeyRound, X } from "lucide-react";
+import { apiFetch, fetchPlcStatus } from "../services/api";
 import { connectWebSocket } from "../services/websocket";
 import { useAuth } from "../stores/authStore";
+import { useToast } from "./Toast";
 
 export default function StatusBar() {
   const { username, role, logout } = useAuth();
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [plcStatus, setPlcStatus] = useState(null);
   const [tags, setTags] = useState({});
   const [wsOpen, setWsOpen] = useState(false);
@@ -85,12 +88,121 @@ export default function StatusBar() {
             <div className="text-[11px] font-medium text-slate-300">{username}</div>
             <div className="text-[9px] uppercase tracking-wider text-slate-600">{role}</div>
           </div>
+          <button onClick={() => setShowPasswordModal(true)} title="Đổi mật khẩu" className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-600 transition-colors hover:bg-cyan-500/10 hover:text-cyan-300">
+            <KeyRound size={14} />
+          </button>
           <button onClick={logout} title="Đăng xuất" className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-600 transition-colors hover:bg-red-500/10 hover:text-red-300">
             <LogOut size={14} />
           </button>
         </div>
       </div>
+
+      {showPasswordModal &&
+        createPortal(<ChangePasswordModal onClose={() => setShowPasswordModal(false)} />, document.body)}
     </header>
+  );
+}
+
+// Rendered via createPortal into document.body, not inline here — this
+// component sits inside <header>, which is position:sticky. A sticky
+// ancestor turned out to also constrain descendant position:fixed elements
+// in testing (the modal's overlay was clipped to the header's own 49px
+// height instead of covering the viewport) — verified by inspecting the
+// overlay's bounding box before the portal fix (0,0,1440,48 instead of the
+// full 1440x900 viewport). Portaling to body sidesteps that entirely,
+// which is also just the standard way to build a modal in React regardless
+// of what ancestor CSS might do.
+function ChangePasswordModal({ onClose }) {
+  const toast = useToast();
+  const [oldPassword, setOldPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (newPassword.length < 8) {
+      toast("Mật khẩu mới cần tối thiểu 8 ký tự", { tone: "error" });
+      return;
+    }
+    if (newPassword !== confirm) {
+      toast("Xác nhận mật khẩu không khớp", { tone: "error" });
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await apiFetch("/auth/me/password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        toast(body.detail || "Đổi mật khẩu thất bại", { tone: "error" });
+        return;
+      }
+      toast("Đã đổi mật khẩu thành công", { tone: "success" });
+      onClose();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <form
+        onSubmit={handleSubmit}
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-sm rounded-2xl border border-slate-800 bg-slate-950 p-5 shadow-2xl"
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-slate-100">Đổi mật khẩu</h3>
+          <button type="button" onClick={onClose} className="text-slate-600 hover:text-slate-300">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="space-y-3">
+          <label className="block">
+            <div className="mb-1 text-xs text-slate-500">Mật khẩu hiện tại</div>
+            <input
+              type="password"
+              autoFocus
+              value={oldPassword}
+              onChange={(e) => setOldPassword(e.target.value)}
+              autoComplete="current-password"
+              className="w-full rounded-lg border border-slate-700/80 bg-slate-900/70 px-3 py-2 text-sm text-slate-200 outline-none focus:border-cyan-400/50"
+            />
+          </label>
+          <label className="block">
+            <div className="mb-1 text-xs text-slate-500">Mật khẩu mới (tối thiểu 8 ký tự)</div>
+            <input
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              autoComplete="new-password"
+              className="w-full rounded-lg border border-slate-700/80 bg-slate-900/70 px-3 py-2 text-sm text-slate-200 outline-none focus:border-cyan-400/50"
+            />
+          </label>
+          <label className="block">
+            <div className="mb-1 text-xs text-slate-500">Xác nhận mật khẩu mới</div>
+            <input
+              type="password"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              autoComplete="new-password"
+              className="w-full rounded-lg border border-slate-700/80 bg-slate-900/70 px-3 py-2 text-sm text-slate-200 outline-none focus:border-cyan-400/50"
+            />
+          </label>
+        </div>
+        <button
+          type="submit"
+          disabled={busy || !oldPassword || !newPassword}
+          className="mt-4 w-full rounded-lg bg-cyan-500 px-3 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {busy ? "Đang lưu..." : "Lưu mật khẩu mới"}
+        </button>
+      </form>
+    </div>
   );
 }
 

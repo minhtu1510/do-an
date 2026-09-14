@@ -125,18 +125,38 @@ class EventService:
                 return event
         return None
 
-    def due_for_escalation(self, severity: str, schedule_minutes: list[int]) -> list[EventRecord]:
-        """ACTIVE events of the given severity, unacked, that have crossed
-        their NEXT escalation rung in `schedule_minutes` (e.g. [5, 15, 30,
-        120, 600, 1440] — 5m, 15m, 30m, 2h, 10h, 24h since the event fired,
-        like an alarm clock's snooze schedule rather than one single
-        reminder). Each event escalates through the ladder one rung at a
-        time as the loop ticks; once past the last rung, it stops — a
-        24h-old unacked alarm doesn't need a reminder every 60s forever."""
+    def due_for_escalation(
+        self,
+        severity: str | None,
+        schedule_minutes: list[int],
+        event_types: set[str] | None = None,
+    ) -> list[EventRecord]:
+        """ACTIVE events, unacked, that have crossed their NEXT escalation
+        rung in `schedule_minutes` (e.g. [5, 15, 30, 120, 600, 1440] — 5m,
+        15m, 30m, 2h, 10h, 24h since the event fired, like an alarm clock's
+        snooze schedule rather than one single reminder). Each event
+        escalates through the ladder one rung at a time as the loop ticks;
+        once past the last rung, it stops — a 24h-old unacked alarm doesn't
+        need a reminder every 60s forever.
+
+        Matched by `event_types` (a specific set of event_type strings) when
+        given, by `severity` otherwise. event_types exists because
+        "needs re-nagging" isn't really a function of severity: a real
+        detected attack (ATTACK_PCAP_DETECTED/IDS_ANOMALY_DETECTED) is
+        WARNING-severity for UI coloring, but if nobody acks it, it should
+        escalate just as hard as an ERROR — while most other WARNING events
+        (a single rejected/rate-limited command, a routine admin action)
+        are one-shot notices that would just be noise if nagged on a timer.
+        """
         now = datetime.now(TZ)
         due = []
         for event in self._events:
-            if event.status != "ACTIVE" or event.acked_by or event.severity != severity:
+            if event.status != "ACTIVE" or event.acked_by:
+                continue
+            if event_types is not None:
+                if event.event_type not in event_types:
+                    continue
+            elif event.severity != severity:
                 continue
             if event.escalation_level >= len(schedule_minutes):
                 continue

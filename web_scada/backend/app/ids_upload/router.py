@@ -1,14 +1,15 @@
+import re
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-from .. import control_lock
+from .. import control_lock, ip_allowlist
 from ..auth import require_role
 from ..events import event_service
 from ..events.models import EventRecord
-from .service import IdsUploadError, MODEL_DIR, analyze_pcap, model_configured
+from .service import UPLOAD_SCRATCH, IdsUploadError, MODEL_DIR, analyze_pcap, model_configured
 from .service_opcua import (
     IdsUploadOpcuaError,
     MODEL_DIR as MODEL_DIR_OPCUA,
@@ -20,6 +21,7 @@ ids_upload_router = APIRouter()
 
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024  # 200 MB — a few hours of ICS traffic, generous but bounded
 TZ = timezone(timedelta(hours=7))
+JOB_ID_RE = re.compile(r"^[0-9a-f]{12}$")  # matches uuid.uuid4().hex[:12] from service.py/service_opcua.py
 
 
 def _without_packet_detail(result: dict) -> dict:
@@ -124,6 +126,17 @@ WRITE_TAMPER_LABELS = {
     "s7comm": {"RWRITE", "SPOOF"},
     "opcua": {"OPCUA_MALICIOUS_WRITE"},
 }
+
+# Checked against real out-of-fold predictions (grouped CV, Day1-5,
+# 48,614 windows, same RF+XGBoost ensemble recipe as AttackClassifier),
+# not picked by feel. Swept 50%-99%: false-lock rate stayed ~0% across the
+# whole range (1 false lock out of 45,976 non-tamper windows, only at the
+# 50% end) — confidence is a much stronger signal here than expected, so
+# the threshold mostly trades recall, not false-lock risk. At 90%: 97.3%
+# recall (RWRITE 100%, the SPOOF misses mostly confused with STEALTHY).
+# 80% would recover to 97.8% recall at the same ~0% false-lock rate, so
+# there's headroom to go lower — 90% is kept for now as a safety-first
+# round number, not because 80% was shown to be worse.
 WRITE_LOCK_CONFIDENCE_THRESHOLD = 0.9
 
 
@@ -178,7 +191,7 @@ async def ids_status(_user=Depends(require_role("operator"))):
 async def ids_analyze(
     file: UploadFile = File(...),
     plc_ip: str = Form("192.168.210.211"),
-    window: float = Form(5.0),
+    window: float = Form(2.0),
     user=Depends(require_role("operator")),
 ):
     body = await file.read()
@@ -228,6 +241,46 @@ async def ids_analyze_opcua(
 
     await _record_analysis(result, "opcua", user.username)
     return result
+
+
+@ids_upload_router.get("/evidence/{job_id}")
+async def ids_evidence(job_id: str, _user=Depends(require_role("operator"))):
+    """Download the standalone .pcap packet_capture.extract_evidence_pcap()
+    cut from the sampled frames of a just-run analysis — real DFIR practice
+    is pivoting from an alert to the underlying capture, not just an
+    on-screen summary. Only available shortly after analysis (see
+    sweep_old_evidence, EVIDENCE_MAX_AGE_S in packet_capture.py) — reopening
+    an old row from Lịch sử phân tích PCAP won't have it anymore, same
+    tradeoff already made for the full Wireshark-style packet detail.
+    """
+    if not JOB_ID_RE.match(job_id):
+        return JSONResponse(status_code=400, content={"error": "invalid_job_id"})
+    path = UPLOAD_SCRATCH / f"{job_id}_evidence.pcap"
+    if not path.is_file():
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error": "evidence_not_found",
+                "message": "Bằng chứng pcap đã hết hạn hoặc chưa từng được tạo — chỉ giữ trong 2 giờ sau khi phân tích, không lưu vĩnh viễn.",
+            },
+        )
+    return FileResponse(path, media_type="application/vnd.tcpdump.pcap", filename=f"evidence_{job_id}.pcap")
+
+
+@ids_upload_router.get("/asset-inventory")
+async def ids_asset_inventory(_user=Depends(require_role("operator"))):
+    """IP addresses seen across recent pcap analyses' packet samples, cross-
+    referenced against the admin-managed allowlist (ip_allowlist.py) — see
+    list_ip_asset_inventory()'s docstring for the honest scope: this is what
+    read-only pcap analysis happened to sample, not a network-wide asset scan.
+    """
+    from ..database import list_ip_asset_inventory
+
+    known_ips = {e["ip"] for e in ip_allowlist.list_entries()}
+    inventory = list_ip_asset_inventory()
+    for entry in inventory:
+        entry["known"] = entry["ip"] in known_ips
+    return {"entries": inventory}
 
 
 @ids_upload_router.get("/history")

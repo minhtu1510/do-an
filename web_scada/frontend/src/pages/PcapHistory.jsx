@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FileClock, Loader2, ShieldAlert, ShieldCheck } from "lucide-react";
+import { FileClock, Loader2, Search, ShieldAlert, ShieldCheck } from "lucide-react";
 import { fetchIdsHistory, fetchIdsHistoryDetail } from "../services/api";
 import PageHeader from "../components/PageHeader";
 import { useToast } from "../components/Toast";
@@ -13,6 +13,9 @@ import { idsUploadStore, normalizeOpcuaResult } from "./idsUploadPersist";
 export default function PcapHistory() {
   const [analyses, setAnalyses] = useState(null);
   const [openingId, setOpeningId] = useState(null);
+  const [search, setSearch] = useState("");
+  const [protocolFilter, setProtocolFilter] = useState("ALL");
+  const [attackOnly, setAttackOnly] = useState(false);
   const navigate = useNavigate();
   const toast = useToast();
 
@@ -46,6 +49,13 @@ export default function PcapHistory() {
   const total = analyses?.length ?? 0;
   const withAttack = analyses?.filter((a) => a.attack_flows > 0).length ?? 0;
 
+  const filtered = (analyses || []).filter((a) => {
+    if (protocolFilter !== "ALL" && a.protocol !== protocolFilter) return false;
+    if (attackOnly && !(a.attack_flows > 0)) return false;
+    if (search.trim() && !a.source_file?.toLowerCase().includes(search.trim().toLowerCase())) return false;
+    return true;
+  });
+
   return (
     <div className="p-6 space-y-6">
       <PageHeader
@@ -60,13 +70,48 @@ export default function PcapHistory() {
       </div>
 
       <div className="overflow-hidden rounded-lg border border-gray-700 bg-gray-800 shadow-sm shadow-black/20">
-        <div className="border-b border-gray-700 px-4 py-3 text-sm font-semibold text-gray-200">Danh sách lần phân tích</div>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-700 px-4 py-3">
+          <div className="text-sm font-semibold text-gray-200">
+            Danh sách lần phân tích {analyses && filtered.length !== analyses.length && <span className="text-gray-500">({filtered.length}/{analyses.length})</span>}
+          </div>
+          {analyses && analyses.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative">
+                <Search size={12} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-600" />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Tìm theo tên file..."
+                  className="w-48 rounded border border-gray-700 bg-gray-900 py-1.5 pl-7 pr-2 text-xs text-gray-200 outline-none focus:border-cyan-500"
+                />
+              </div>
+              <select
+                value={protocolFilter}
+                onChange={(e) => setProtocolFilter(e.target.value)}
+                className="rounded border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300"
+              >
+                <option value="ALL">Mọi giao thức</option>
+                <option value="s7comm">s7comm</option>
+                <option value="opcua">opcua</option>
+              </select>
+              <label className="flex items-center gap-1.5 rounded border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300">
+                <input type="checkbox" checked={attackOnly} onChange={(e) => setAttackOnly(e.target.checked)} />
+                Chỉ có tấn công
+              </label>
+            </div>
+          )}
+        </div>
         {analyses === null ? (
           <div className="p-10 text-center text-sm text-gray-500">Đang tải...</div>
         ) : analyses.length === 0 ? (
           <div className="flex flex-col items-center gap-2 p-10 text-sm text-gray-500">
             <FileClock size={28} className="text-gray-700" />
             Chưa có lần phân tích pcap nào — trang này có dữ liệu sau khi ai đó tải file lên ở mục Phân tích lưu lượng mạng.
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 p-10 text-sm text-gray-500">
+            <Search size={28} className="text-gray-700" />
+            Không có lần phân tích nào khớp bộ lọc.
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -81,7 +126,7 @@ export default function PcapHistory() {
                 <div>Tỷ lệ</div>
               </div>
               <div className="divide-y divide-gray-700">
-                {analyses.map((a) => (
+                {filtered.map((a) => (
                   <HistoryRow key={a.id} row={a} onOpen={handleOpen} opening={openingId === a.id} />
                 ))}
               </div>

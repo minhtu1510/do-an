@@ -17,7 +17,7 @@ Cách dùng cơ bản:
   python extract_industrial_ids_features.py \
     --pcap capture.pcapng \
     --output industrial_features.csv \
-    --window 5 \
+    --window 2 \
     --plc-ip 192.168.0.1 \
     --label benign
 
@@ -25,7 +25,7 @@ Port scan / scan PLC:
   python extract_industrial_ids_features.py \
     --pcap scan.pcapng \
     --output scan_features.csv \
-    --window 5 \
+    --window 2 \
     --plc-ip 192.168.0.1 \
     --label port_scan
 
@@ -34,7 +34,7 @@ Có tag log:
     --pcap day2.pcapng \
     --tag-log tag_log.csv \
     --output day2_features.csv \
-    --window 5 \
+    --window 2 \
     --plc-ip 192.168.0.1 \
     --timeline timeline.csv
 
@@ -2263,9 +2263,9 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python extract_industrial_ids_features.py --pcap capture.pcapng --output features.csv --window 5 --plc-ip 192.168.0.1 --label benign
-  python extract_industrial_ids_features.py --pcap scan.pcapng --output scan.csv --window 5 --plc-ip 192.168.0.1 --label port_scan
-  python extract_industrial_ids_features.py --pcap day2.pcapng --tag-log tag_log.csv --timeline day2_timeline.csv --output day2_features.csv --window 5 --plc-ip 192.168.0.1
+  python extract_industrial_ids_features.py --pcap capture.pcapng --output features.csv --window 2 --plc-ip 192.168.0.1 --label benign
+  python extract_industrial_ids_features.py --pcap scan.pcapng --output scan.csv --window 2 --plc-ip 192.168.0.1 --label port_scan
+  python extract_industrial_ids_features.py --pcap day2.pcapng --tag-log tag_log.csv --timeline day2_timeline.csv --output day2_features.csv --window 2 --plc-ip 192.168.0.1
 
 Notes:
   - Output chính có cả metadata. Khi train model, dùng --ml-safe-copy để tạo bản drop metadata.
@@ -2275,7 +2275,7 @@ Notes:
     )
     parser.add_argument("--pcap", required=True, help="Input PCAP/PCAPNG file")
     parser.add_argument("--output", required=True, help="Output feature CSV")
-    parser.add_argument("--window", type=float, default=5.0, help="Time window size in seconds, default=5.0")
+    parser.add_argument("--window", type=float, default=2.0, help="Time window size in seconds, default=2.0 (matches SemanticAware-S7comm-Dataset 2s windows)")
     parser.add_argument("--plc-ip", default=None, help="PLC IP address for to/from PLC directional features")
     parser.add_argument("--role", default="unknown", choices=["attacker", "controller", "logger", "mirror", "unknown"], help="Capture role metadata")
     parser.add_argument("--label", default="unknown", help="Default label if no timeline is provided")

@@ -15,6 +15,7 @@ import os
 import subprocess
 import sys
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +43,21 @@ def model_configured() -> bool:
         and (MODEL_DIR / "layer3_classifier.joblib").is_file()
         and (MODEL_DIR / "features.json").is_file()
     )
+
+
+def _model_trained_at() -> str | None:
+    """No meta.json for the S7comm model (unlike model_opcua/, which records
+    trained_at directly) — train_eval.py's mode_train() never wrote one.
+    File mtime of the classifier artifact is a reasonable proxy: it's only
+    ever written by that same training run. Surfaced on the IDS Upload page
+    so model staleness is something the UI states plainly instead of
+    something only found by reading file timestamps on disk.
+    """
+    try:
+        mtime = (MODEL_DIR / "layer3_classifier.joblib").stat().st_mtime
+        return datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
+    except OSError:
+        return None
 
 
 def _load_pipeline():
@@ -174,8 +190,16 @@ def _to_native(value: Any) -> Any:
     return value
 
 
-def analyze_pcap(pcap_bytes: bytes, filename: str, plc_ip: str, window: float = 5.0) -> dict[str, Any]:
+def analyze_pcap(pcap_bytes: bytes, filename: str, plc_ip: str, window: float = 2.0) -> dict[str, Any]:
     pipeline = _load_pipeline()  # fail fast before writing any temp file if model missing
+
+    if pipeline.window_seconds is not None and abs(pipeline.window_seconds - window) > 0.05:
+        raise IdsUploadError(
+            f"Model được train với window={pipeline.window_seconds}s nhưng bạn đang trích xuất với "
+            f"window={window}s. Đặc trưng dạng đếm/tỷ lệ (packet count, byte rate...) sẽ sai lệch "
+            f"theo tỷ lệ kích thước cửa sổ nếu hai giá trị này khác nhau — hãy đặt lại Window = "
+            f"{pipeline.window_seconds}s rồi thử lại."
+        )
 
     job_id = uuid.uuid4().hex[:12]
     pcap_path = UPLOAD_SCRATCH / f"{job_id}_{Path(filename).name}"
@@ -216,11 +240,15 @@ def analyze_pcap(pcap_bytes: bytes, filename: str, plc_ip: str, window: float = 
         summary["job_id"] = job_id
         summary["source_file"] = filename
         summary["model_dir"] = str(MODEL_DIR)
+        summary["model_trained_at"] = _model_trained_at()
         try:
-            from .packet_capture import attach_attack_packets
+            from .packet_capture import attach_attack_packets, extract_evidence_pcap, sweep_old_evidence
+            sweep_old_evidence(UPLOAD_SCRATCH)
             attach_attack_packets(pcap_path, summary["flow_table"])
+            evidence_path = extract_evidence_pcap(pcap_path, summary["flow_table"], job_id)
+            summary["evidence_available"] = evidence_path is not None
         except Exception:
-            pass
+            summary["evidence_available"] = False
         return summary
     finally:
         pcap_path.unlink(missing_ok=True)

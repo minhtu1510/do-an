@@ -6,6 +6,8 @@
 >
 > **Nguyên tắc:** mọi số liệu trong tài liệu này đều là số đo thực từ code, không có số ước lượng hay dấu ~.
 
+> ⚠️ **CẬP NHẬT PHƯƠNG PHÁP LUẬN (mới nhất, 22/08/2026):** Theo quyết định của nhóm đề tài, **Day 6 không còn được dùng làm test set trong đánh giá chính thức** — xem lý do và số liệu mới ở **mục 2.0** (ngay trước mục 2.1). Toàn bộ mục 2.1–2.2 bên dưới (bảng "Group CV vs Day 6 OOD Holdout") là **tài liệu lịch sử** ghi lại quá trình sửa bug theo yêu cầu phản biện trước đó — vẫn giữ nguyên để tra cứu, nhưng **không còn là số liệu chính thức của báo cáo**.
+
 ---
 
 ## 1. Lỗi Nghiêm Trọng Đã Sửa Trong Code
@@ -185,7 +187,74 @@ Class counts Day 6 thực tế: STEALTHY=397, ENUM=470, RWRITE=365, SPOOF=299, S
 
 ---
 
-### 2.1 Bảng đối xứng — Binary Detection với `fbeta_oof` (số liệu THỰC ĐO)
+### 2.0 Cập nhật phương pháp luận (mới nhất): Group CV trong Day 1–5, loại bỏ Day 6
+
+**Quyết định:** Ngày 22/08/2026, nhóm đề tài quyết định **không dùng Day 6 làm test set** trong đánh giá chính thức nữa. Toàn bộ Day 6 bị loại khỏi train **và** test; đánh giá bây giờ chạy hoàn toàn trong nội bộ Day 1–5.
+
+**Lưu ý quan trọng cho người đọc bản thảo:** Day 6 **có nhãn đầy đủ** (không phải dữ liệu "chưa biết" theo nghĩa thiếu nhãn) — trước đây nó được giữ lại có chủ đích làm *external OOD holdout* để đo khả năng tổng quát hóa sang một ngày thu thập chưa từng thấy trong lúc train (đây là luận điểm rigor chính của toàn bộ mục 2.1–2.2 bên dưới). Việc đổi sang đánh giá trong Day 1–5 là lựa chọn có chủ đích của nhóm đề tài, **đánh đổi lấy một bài toán dễ hơn** (không còn đo temporal/OOD shift) để đổi lấy việc dữ liệu Day 6 được dùng cho mục đích khác (xem cách demo bên dưới). Đây không phải là bản sửa lỗi của mục 2.1, mà là một quyết định phạm vi khác.
+
+**Chuẩn bị dữ liệu:**
+- Từ `network.csv` / `process.csv` / `fusion.csv` gốc, loại toàn bộ hàng có `session_id == day6` (7,288 windows).
+- Trích thêm một đoạn riêng làm dữ liệu demo cho phần mềm (xem mục dưới) — 280 windows thuộc 1 episode RWRITE_BURST của Day 3 — và loại luôn đoạn này khỏi train/CV, để đảm bảo file dùng demo trên web app **chưa từng được model nhìn thấy ở bất kỳ fold nào**.
+- Kết quả: network/fusion còn 48,334 windows (194/355 cột), process-only còn 8,983 windows (174 cột).
+
+**Phương pháp:** `StratifiedGroupKFold`, `n_splits=5`, group key = `session_id|host_id|episode_id` (composite, giống hệt phương pháp Group CV gốc ở mục 2.1), `feature_profile=hybrid`, `binary_threshold_mode=fbeta_oof` (task binary), seeds 42–46. Lệnh chạy (mỗi view/task một lần, tách riêng để chống mất kết quả giữa chừng):
+
+```bash
+python scripts/train_ml.py --network-data processed/day1_5_split/network.csv \
+  --output-dir results/day1_5_split_group_cv/parts/network_only_binary \
+  --seeds 42 43 44 45 46 --tasks binary \
+  --binary-threshold-mode fbeta_oof --feature-profile hybrid
+# tương tự cho process_only (--process-data) và fusion (--fusion-data),
+# và cho --tasks multiclass
+```
+
+**Bảng 2.0a — Binary Detection, Group CV trong Day 1–5 (`fbeta_oof`, hybrid)**
+
+| View | Model | Macro-F1 | MCC | FPR/hour |
+|---|---|---:|---:|---:|
+| network_only | CatBoost | 0.997 ± 0.001 | 0.994 ± 0.003 | 1.252 ± 0.972 |
+| network_only | Logistic Reg. | 0.995 ± 0.002 | 0.989 ± 0.003 | 1.890 ± 1.769 |
+| network_only | Random Forest | 0.996 ± 0.002 | 0.992 ± 0.003 | 1.907 ± 1.290 |
+| network_only | XGBoost | 0.995 ± 0.005 | 0.989 ± 0.010 | 3.805 ± 4.017 |
+| fusion | CatBoost | **0.999 ± 0.001** | **0.998 ± 0.002** | 0.790 ± 0.645 |
+| fusion | Logistic Reg. | **0.999 ± 0.0005** | **0.999 ± 0.001** | **0.470 ± 0.394** |
+| fusion | Random Forest | 0.998 ± 0.003 | 0.996 ± 0.006 | 1.461 ± 2.602 |
+| fusion | XGBoost | 0.997 ± 0.003 | 0.994 ± 0.007 | 2.302 ± 2.741 |
+| process_only | CatBoost | 0.652 ± 0.206 | 0.325 ± 0.410 | 26.609 ± 35.584 |
+| process_only | Logistic Reg. | 0.696 ± 0.254 | 0.416 ± 0.487 | 0.210 ± 0.428 |
+| process_only | Random Forest | 0.797 ± 0.251 | 0.598 ± 0.498 | 0.598 ± 1.026 |
+| process_only | XGBoost | 0.782 ± 0.240 | 0.570 ± 0.476 | 8.955 ± 13.865 |
+
+**Bảng 2.0b — Multiclass, Group CV trong Day 1–5 (`hybrid`)**
+
+| View | Model | Macro-F1 | MCC (multiclass) | FPR/hour |
+|---|---|---:|---:|---:|
+| network_only | CatBoost | 0.852 ± 0.083 | 0.988 ± 0.009 | 2.008 ± 0.943 |
+| network_only | Logistic Reg. | 0.740 ± 0.077 | 0.903 ± 0.036 | 44.177 ± 17.792 |
+| network_only | Random Forest | 0.848 ± 0.093 | 0.987 ± 0.009 | 0.185 ± 0.267 |
+| network_only | XGBoost | 0.840 ± 0.091 | 0.991 ± 0.004 | 0.227 ± 0.264 |
+| fusion | CatBoost | 0.863 ± 0.084 | 0.996 ± 0.006 | 1.092 ± 2.202 |
+| fusion | Logistic Reg. | 0.826 ± 0.095 | 0.996 ± 0.005 | 0.941 ± 2.153 |
+| fusion | Random Forest | **0.917 ± 0.073** | 0.995 ± 0.008 | 0.135 ± 0.277 |
+| fusion | XGBoost | 0.892 ± 0.106 | **0.997 ± 0.006** | **0.151 ± 0.206** |
+| process_only | CatBoost | 0.454 ± 0.125 | 0.381 ± 0.477 | 8.900 ± 5.101 |
+| process_only | Logistic Reg. | 0.427 ± 0.102 | 0.341 ± 0.299 | 224.577 ± 115.720 |
+| process_only | Random Forest | 0.633 ± 0.223 | 0.398 ± 0.498 | 0.213 ± 0.435 |
+| process_only | XGBoost | 0.696 ± 0.223 | 0.574 ± 0.494 | 0.299 ± 0.579 |
+
+**Nguồn:** `results/day1_5_split_group_cv/parts/{view}_{task}/summary_mean_std.csv` (6 file độc lập, mỗi file 1 view×task, gộp thủ công vào 2 bảng trên).
+
+**Diễn giải — KHÔNG được đọc nhầm số này thành "model gần như hoàn hảo":**
+1. Macro-F1/MCC của network_only và fusion ở đây (≈0.995–0.999 binary) **cao hơn hẳn** cả Group CV gốc trên toàn bộ 6 ngày ở mục 2.1 (≈0.90–0.92) lẫn Day-6 OOD holdout (≈0.60–0.67). Lý do: fold test ở đây vẫn lấy mẫu từ **cùng 5 ngày** đã train (chỉ khác episode), nên đây là ước lượng in-distribution, không đo temporal/OOD shift. Loại bỏ hẳn Day 6 — vốn là ngày "khó" nhất, chứa toàn bộ 9 kịch bản theo thứ tự ngẫu nhiên — khỏi cả train lẫn test khiến phần còn lại đồng nhất hơn, dễ phân loại hơn.
+2. **process_only vẫn yếu và bất ổn định** (F1 0.65–0.80 binary, std rất lớn tới 0.25) — nhất quán với phát hiện đã có ở mục 2.2: chỉ STEALTHY có process signal phân biệt được, các windows khác gần như ngẫu nhiên. Đây là tín hiệu chéo-kiểm-tra tốt cho thấy số liệu near-ceiling của network_only/fusion không phải do bug (nếu là bug/leakage thì process_only nhiều khả năng cũng bị đẩy cao theo).
+3. Nếu bản thảo dùng bảng này, **bắt buộc phải ghi rõ đây là in-distribution Group CV trong Day 1–5, không phải OOD/generalization claim**, và không được dùng để thay thế luận điểm ở mục 2.1/2.2 khi nói về khả năng tổng quát hóa của model.
+
+**Dữ liệu demo cho phần mềm:** đoạn RWRITE_BURST 280 windows / ~11 phút traffic (Day 3, đã loại khỏi train/CV ở trên) được cắt thành file pcap `demo_rwrite_burst_day3.pcap`, đóng gói trong `web_scada/backend/app/ids_upload/demo_pcaps/`, phục vụ nút "Dùng file demo" trên trang IDS Upload của phần mềm — đảm bảo demo trên phần mềm luôn dùng dữ liệu model chưa từng thấy.
+
+---
+
+### 2.1 Bảng đối xứng — Binary Detection với `fbeta_oof` (số liệu THỰC ĐO) — *(lịch sử, xem cảnh báo đầu file)*
 
 Tất cả số liệu trong bảng này đều là kết quả đo thực từ code, không có số ước lượng.  
 Threshold mode: `fbeta_oof`. Feature profile: hybrid. Seeds: 42–46.
@@ -267,7 +336,7 @@ FPR/hour = số benign windows bị predict nhầm là attack / tổng số gi�
 
 ---
 
-### 2.2 Per-class F1 trên Day 6 — So sánh Network-only vs Fusion (CatBoost)
+### 2.2 Per-class F1 trên Day 6 — So sánh Network-only vs Fusion (CatBoost) — *(lịch sử, xem mục 2.0)*
 
 Bảng này **bắt buộc** phải có trong bản thảo theo yêu cầu reviewer.  
 Support = số windows trong Day 6 holdout.

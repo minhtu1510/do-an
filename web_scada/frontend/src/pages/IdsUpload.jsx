@@ -6,13 +6,14 @@ import {
 import { jsPDF } from "jspdf";
 import html2canvas from "html2canvas";
 import {
-  UploadCloud, Play, Pause, RotateCcw, FileDown, Loader2, AlertTriangle, X,
+  UploadCloud, Play, Pause, RotateCcw, FileDown, Loader2, AlertTriangle, X, Download,
 } from "lucide-react";
 import PageHeader from "../components/PageHeader";
 import Gauge from "../components/Gauge";
 import Sparkline from "../components/Sparkline";
 import NotConfiguredNotice from "../components/NotConfiguredNotice";
-import { analyzeIdsPcap, analyzeIdsPcapOpcua, fetchIdsStatus, fetchIdsStatusOpcua, fetchIpAllowlist, fetchProcessHistory } from "../services/api";
+import { useToast } from "../components/Toast";
+import { analyzeIdsPcap, analyzeIdsPcapOpcua, downloadIdsEvidence, fetchIdsStatus, fetchIdsStatusOpcua, fetchIpAllowlist, fetchProcessHistory } from "../services/api";
 import { idsUploadStore, normalizeOpcuaResult } from "./idsUploadPersist";
 
 // Same validated categorical order used in Trends.jsx — fixed, never cycled.
@@ -339,6 +340,8 @@ export default function IdsUpload() {
   const prevAttackCountRef = useRef(0);
   const reportRef = useRef(null);
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [downloadingEvidence, setDownloadingEvidence] = useState(false);
+  const toast = useToast();
   const [allowedIps, setAllowedIps] = useState(new Set());
 
   useEffect(() => {
@@ -408,6 +411,18 @@ export default function IdsUpload() {
   function handlePause() { setPlaying(false); }
   function handleSeek(e) { setVirtualMs(Number(e.target.value)); setPlaying(false); }
   function handleReset() { setVirtualMs(0); setPlaying(false); }
+
+  async function handleDownloadEvidence() {
+    if (!result?.job_id) return;
+    setDownloadingEvidence(true);
+    try {
+      await downloadIdsEvidence(result.job_id);
+    } catch (err) {
+      toast(err.message, { tone: "error" });
+    } finally {
+      setDownloadingEvidence(false);
+    }
+  }
 
   async function handleExportPdf() {
     if (!reportRef.current || !result) return;
@@ -645,15 +660,33 @@ export default function IdsUpload() {
 
       {result && (
         <>
-          <div className="flex justify-end animate-fade-in">
-            <button
-              onClick={handleExportPdf}
-              disabled={exportingPdf}
-              className="flex items-center gap-1.5 rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-300 transition-colors hover:border-blue-600 hover:text-blue-300 disabled:opacity-50"
-            >
-              {exportingPdf ? <Loader2 size={13} className="animate-spin" /> : <FileDown size={13} />}
-              {exportingPdf ? "Đang xuất..." : "Xuất báo cáo PDF"}
-            </button>
+          <div className="flex flex-wrap items-center justify-between gap-2 animate-fade-in">
+            <div className="text-[10px] text-slate-600">
+              {result.model_trained_at
+                ? `Model train lúc: ${new Date(result.model_trained_at).toLocaleString()}`
+                : "Không rõ thời điểm train model (thiếu metadata)."}
+            </div>
+            <div className="flex gap-2">
+              {result.evidence_available && (
+                <button
+                  onClick={handleDownloadEvidence}
+                  disabled={downloadingEvidence}
+                  title="Tải file pcap chỉ chứa các gói tin đã lấy mẫu ở bảng bên dưới — dùng để mở lại bằng Wireshark hoặc lưu làm bằng chứng."
+                  className="flex items-center gap-1.5 rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-300 transition-colors hover:border-emerald-600 hover:text-emerald-300 disabled:opacity-50"
+                >
+                  {downloadingEvidence ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+                  {downloadingEvidence ? "Đang tải..." : "Tải pcap bằng chứng"}
+                </button>
+              )}
+              <button
+                onClick={handleExportPdf}
+                disabled={exportingPdf}
+                className="flex items-center gap-1.5 rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-300 transition-colors hover:border-blue-600 hover:text-blue-300 disabled:opacity-50"
+              >
+                {exportingPdf ? <Loader2 size={13} className="animate-spin" /> : <FileDown size={13} />}
+                {exportingPdf ? "Đang xuất..." : "Xuất báo cáo PDF"}
+              </button>
+            </div>
           </div>
 
           {canPlay && (

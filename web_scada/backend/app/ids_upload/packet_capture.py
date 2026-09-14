@@ -8,8 +8,17 @@ one implementation covers both protocols.
 Scope, deliberately kept small: only the highest-confidence non-BENIGN
 windows get packet samples (not every flagged window — some uploads have
 hundreds), and only a handful of packets per window. This is meant to let
-an analyst SEE what a flagged window's real traffic actually looked like,
-not to be a full packet-capture export tool.
+an analyst SEE what a flagged window's real traffic actually looked like.
+
+extract_evidence_pcap() below is the one place this does become a real
+export: it re-cuts just those same sampled frames into a standalone .pcap
+an analyst can download and open in actual Wireshark, or hand off/archive
+as incident evidence (real DFIR practice — pivoting from an alert to the
+underlying packet capture, not just an on-screen summary). Written to
+UPLOAD_SCRATCH keyed by job_id, alongside the upload's own scratch files,
+and swept on a plain age check rather than deleted immediately like the
+source upload — the download request happens moments after analysis, from
+the browser, not inside this same function call.
 
 Two levels of detail, on purpose:
   - `packets[]` (this module's original scope): time/IPs/ports/len/protocol/
@@ -38,11 +47,13 @@ from __future__ import annotations
 
 import json
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
 MAX_PACKET_WINDOWS = 20
 MAX_PACKETS_PER_WINDOW = 8
+EVIDENCE_MAX_AGE_S = 2 * 60 * 60  # 2h — long enough to still be there when you go back for it
 TSHARK_TIMEOUT_S = 120
 
 
@@ -166,3 +177,49 @@ def _attach_full_detail(pcap_path: Path, packets: list[dict[str, Any]]) -> None:
         if d:
             p["detail"] = d["layers"]
             p["hex"] = d["hex"]
+
+
+def extract_evidence_pcap(pcap_path: Path, flow_table: list[dict[str, Any]], job_id: str) -> Path | None:
+    """Re-cut just the frames already sampled into flow_table[*]['packets']
+    into a standalone .pcap under UPLOAD_SCRATCH, named so router.py's
+    /evidence/{job_id} endpoint can find it by job_id alone. Best-effort,
+    same contract as the rest of this module: any failure returns None and
+    must not fail an analysis that already succeeded.
+    """
+    frame_numbers = sorted({
+        p["frame_number"]
+        for row in flow_table
+        for p in row.get("packets", [])
+        if p.get("frame_number")
+    })
+    if not frame_numbers:
+        return None
+
+    out_path = pcap_path.parent / f"{job_id}_evidence.pcap"
+    display_filter = "frame.number in {" + ",".join(str(n) for n in frame_numbers) + "}"
+    cmd = ["tshark", "-r", str(pcap_path), "-Y", display_filter, "-w", str(out_path)]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=TSHARK_TIMEOUT_S)
+    except Exception:
+        return None
+    if proc.returncode != 0 or not out_path.is_file():
+        return None
+    return out_path
+
+
+def sweep_old_evidence(scratch_dir: Path, max_age_s: float = EVIDENCE_MAX_AGE_S) -> None:
+    """Called at the start of each analyze_pcap() — cheap (glob over a
+    handful of files) and keeps UPLOAD_SCRATCH from growing unbounded across
+    repeated analyses, since evidence files (unlike the source upload) are
+    deliberately not deleted right after the request that created them.
+    """
+    now = time.time()
+    try:
+        for f in scratch_dir.glob("*_evidence.pcap"):
+            try:
+                if now - f.stat().st_mtime > max_age_s:
+                    f.unlink()
+            except OSError:
+                pass
+    except OSError:
+        pass

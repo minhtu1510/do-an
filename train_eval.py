@@ -166,21 +166,21 @@ class RuleBasedDetector:
         # đã đảm nhiệm, nên rule cứng ở đây bị bỏ để tránh trùng/chế ngưỡng.
 
         # Rule 3: FLOOD – ngập SYN trong 1 window
-        # Ngưỡng quy đổi từ mốc ~10 SYN/giây dùng cho luật IDS SCADA
-        # (arXiv:2412.07917, "Distributed Intrusion Detection System using
-        # Semantic-based Rules for SCADA in Smart Grid") — với window 2s:
-        # 10 SYN/s * 2s = 20.
-        # Đã bỏ 2 điều kiện AND cũ (cotp_cr>40, read_write_total==0): kiểm
-        # tra trên 2 file SYN_FLOOD/S7_FLOOD thật (samples/day6_synflood_
-        # real_slice.pcap, day6_s7flood_real_slice.pcap) thấy cotp_cr_count
-        # luôn = 0 suốt cuộc tấn công thật (bắt tay COTP không được ghi
-        # nhận) và s7_read_count không bao giờ về 0 (máy trạm hợp lệ vẫn
-        # đọc dữ liệu song song) — 2 điều kiện đó khiến luật không thể khớp
-        # trên dữ liệu thật bất kể ngưỡng. Chỉ còn syn_count: test trên file
-        # benign thật (day6_benign_check_slice.pcap) syn_count tối đa 2s là
-        # 4 → ngưỡng 20 không gây false positive trên mẫu benign đã kiểm.
+        # Ngưỡng ban đầu quy đổi từ mốc ~10 SYN/giây dùng cho luật IDS SCADA
+        # (arXiv:2412.07917) — với window 2s: 10 SYN/s * 2s = 20. Kiểm tra
+        # trên file benign thật lúc đó (day6_benign_check_slice.pcap, syn
+        # tối đa 4) không thấy false positive nên giữ ngưỡng 20.
+        # Nhưng ablation full-dataset sau đó (StratifiedGroupKFold thật,
+        # 48,614 cửa sổ Day1-5) lộ ra ngưỡng 20 quá thấp so với FUZZ thật,
+        # không chỉ benign: 391/410 (95%) cửa sổ FUZZ thật có tcp_syn_count
+        # 18-35 (trung bình 26) — vượt ngưỡng 20 nên bị rule FLOOD cướp mất
+        # trước khi Layer 3 kịp phân loại, kéo recall FUZZ từ mức bình
+        # thường xuống còn 4.6%. FLOOD thật thì nằm hẳn ở một khoảng khác:
+        # syn_count thấp nhất đo được là 166. Nâng ngưỡng lên 50 — có biên
+        # rộng cả hai phía (35 của FUZZ và 166 của FLOOD thật đều cách xa),
+        # vẫn cách xa benign (max 4) nên không đổi hành vi trên benign.
         syn_count = row.get("tcp_syn_count", 0)
-        if syn_count > 20:
+        if syn_count > 50:
             return "FLOOD"
 
         # Không match rule nào → return None
@@ -437,6 +437,7 @@ class IDSPipeline:
         self.layer2 = AnomalyDetector()
         self.layer3 = AttackClassifier()
         self.feature_cols: List[str] = []
+        self.window_seconds: float | None = None
 
     def fit(self, df: pd.DataFrame, feature_cols: List[str]) -> None:
         self.feature_cols = feature_cols
@@ -507,16 +508,26 @@ class IDSPipeline:
         os.makedirs(model_dir, exist_ok=True)
         self.layer2.save(os.path.join(model_dir, "layer2_anomaly.joblib"))
         self.layer3.save(os.path.join(model_dir, "layer3_classifier.joblib"))
-        # Save feature list
+        # Save feature list + the window size these features were extracted
+        # with (extract_s7_features.py --window), so a caller re-extracting a
+        # new pcap can be warned if it uses a different window and would
+        # silently feed the model out-of-scale counts/rates.
         with open(os.path.join(model_dir, "features.json"), "w") as f:
-            json.dump(self.feature_cols, f, indent=2)
+            json.dump({"feature_cols": self.feature_cols, "window_seconds": self.window_seconds}, f, indent=2)
         print(f"[IDS] Pipeline saved to {model_dir}/")
 
     def load(self, model_dir: str) -> None:
         self.layer2.load(os.path.join(model_dir, "layer2_anomaly.joblib"))
         self.layer3.load(os.path.join(model_dir, "layer3_classifier.joblib"))
         with open(os.path.join(model_dir, "features.json")) as f:
-            self.feature_cols = json.load(f)
+            data = json.load(f)
+        if isinstance(data, dict):
+            self.feature_cols = data["feature_cols"]
+            self.window_seconds = data.get("window_seconds")
+        else:
+            # Legacy format: features.json was a plain list of column names.
+            self.feature_cols = data
+            self.window_seconds = None
         print(f"[IDS] Pipeline loaded from {model_dir}/")
 
 
@@ -701,6 +712,13 @@ def mode_train(args) -> None:
     # Train pipeline
     pipeline = IDSPipeline()
     pipeline.fit(df_train, features)
+
+    # Record the window size this dataset was extracted with, so IDS Upload
+    # can warn instead of silently scoring a pcap re-extracted at a
+    # different --window (counts/rates would be off-scale).
+    if "window_start_ms" in df.columns and "window_end_ms" in df.columns:
+        pipeline.window_seconds = float((df["window_end_ms"] - df["window_start_ms"]).median() / 1000)
+        print(f"[DATA] Detected window size: {pipeline.window_seconds}s")
 
     # Save
     os.makedirs(args.output, exist_ok=True)

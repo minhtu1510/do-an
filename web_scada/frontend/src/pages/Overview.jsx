@@ -62,10 +62,18 @@ export default function Overview() {
 
   const bangTai = tags.bang_tai;
   const plcConnected = plcStatus?.connected !== false;
-  const noData = !bangTai || Object.keys(tags).length === 0;
+  // Waiting for the very first status/tag snapshot, not "PLC has no tags
+  // yet" — those are different: /api/tags only ever returns tags that got a
+  // real value from a live subscription, so with the PLC unreachable from
+  // startup (e.g. no physical testbed on hand — demo/judging day, this
+  // sandbox) `tags` stays permanently empty and plcStatus arrives fast
+  // (fetched directly, not waiting on OPC UA) reporting connected:false.
+  // Keying "loading" off tags-empty alone got stuck on ĐANG TẢI forever in
+  // exactly that case instead of ever reaching MẤT KẾT NỐI.
+  const noData = plcStatus === null;
   const conveyorStatus = noData
     ? "ĐANG TẢI"
-    : !plcConnected || bangTai.stale
+    : !plcConnected || !bangTai || bangTai.stale
       ? "MẤT KẾT NỐI"
       : bangTai.value
         ? "ĐANG CHẠY"

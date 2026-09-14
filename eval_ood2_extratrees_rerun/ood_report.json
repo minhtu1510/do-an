@@ -1,0 +1,43 @@
+{
+  "model_dir": "model_opcua",
+  "model_trained_on": "/home/sus/do-an/data_opc/day8_out/opcua_harvest_ext_aa.csv",
+  "model_cv_macro_f1_in_distribution": 0.9598513723766161,
+  "test_dataset": "data_opc/day8_out/opcua_ood2_ext_aa.csv",
+  "n_test_windows": 605,
+  "n_benign_windows": 480,
+  "n_attack_windows": 125,
+  "window_seconds": 5.0,
+  "labels_unseen_by_model": [],
+  "n_rows_with_unseen_label": 0,
+  "binary_benign_vs_attack": {
+    "tp": 124,
+    "fp": 23,
+    "tn": 457,
+    "fn": 1,
+    "recall": 0.992,
+    "precision": 0.8435,
+    "fpr": 0.0479,
+    "f1": 0.9118,
+    "fpr_per_hour": 34.5,
+    "fpr_steady_state": {
+      "fp": 0,
+      "n_benign": 444,
+      "fpr_per_hour": 0.0,
+      "note": "benign van hanh on dinh (poll co dinh) -- con so van hanh nen dan"
+    },
+    "fpr_transient_warmup": {
+      "fp": 23,
+      "n_benign": 36,
+      "pct_flagged": 63.9,
+      "note": "benign warmup/khoi dong phien -- trang thai bootstrap, FP o day la han che da biet"
+    }
+  },
+  "multiclass": {
+    "accuracy": 0.9471,
+    "macro_f1_raw": 0.5178,
+    "macro_f1_fair_known_classes": 0.5178,
+    "macro_precision": 0.5847,
+    "macro_recall": 0.5602,
+    "note": "macro_f1_raw bi phat boi lop model khong emit duoc + lop vang mat trong test; macro_f1_fair chi tinh tren lop model that su biet -> con so nen dung khi so voi in-distribution CV."
+  }
+}

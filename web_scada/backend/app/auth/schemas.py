@@ -35,3 +35,12 @@ class CreateUserRequest(BaseModel):
 
 class ChangeRoleRequest(BaseModel):
     role: str
+
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class AdminResetPasswordRequest(BaseModel):
+    new_password: str = Field(min_length=8, max_length=128)

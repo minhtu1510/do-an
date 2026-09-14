@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Optional, Callable
 
@@ -158,6 +159,27 @@ class OPCUAGateway:
 
     async def _connect_and_subscribe(self):
         self.client = Client(url=self.endpoint)
+
+        # Optional OPC UA security. Unset = Anonymous/None (current default,
+        # matches the No-Security testbed). Set these in .env when the S7-1500
+        # OPC UA server is hardened to Basic256Sha256 + user auth, so this
+        # monitoring gateway keeps connecting instead of being locked out.
+        #   OPCUA_SECURITY=Basic256Sha256,SignAndEncrypt,client_cert.der,client_key.pem
+        #   OPCUA_USER=<username>   OPCUA_PASSWORD=<password>
+        security = os.getenv("OPCUA_SECURITY", "").strip()
+        if security:
+            # application_uri MUST match the URI (subjectAltName) baked into the
+            # client certificate, or the server rejects with BadCertificateUriInvalid.
+            # Default matches the cert generated per HUONG_DAN_OPCUA_SECURITY_AB.md
+            # ("urn:web-scada:gateway"); override via OPCUA_APP_URI if your cert differs.
+            self.client.application_uri = os.getenv("OPCUA_APP_URI", "urn:web-scada:gateway")
+            await self.client.set_security_string(security)
+            logger.info(f"OPC UA security enabled: {security.split(',')[0]}")
+        user = os.getenv("OPCUA_USER", "").strip()
+        if user:
+            self.client.set_user(user)
+            self.client.set_password(os.getenv("OPCUA_PASSWORD", ""))
+
         await self.client.connect()
 
         self._connected = True

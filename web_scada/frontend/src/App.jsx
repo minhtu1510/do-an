@@ -16,7 +16,8 @@ import Login from "./pages/Login";
 import AdminUsers from "./pages/AdminUsers";
 import { AuthProvider, useAuth } from "./stores/authStore";
 import { ConfirmProvider } from "./components/ConfirmDialog";
-import { ToastProvider } from "./components/Toast";
+import { ToastProvider, useToast } from "./components/Toast";
+import { useIdleLogout } from "./lib/useIdleLogout";
 
 const NAV_GROUPS = [
   {
@@ -152,10 +153,10 @@ function Sidebar() {
         <div className="mt-8 border-t border-slate-800/70 pt-4">
           <div className="flex items-center gap-2 px-2 text-[11px] text-slate-600">
             <Database size={12} />
-            Event-backed monitoring
+            Giám sát theo sự kiện thật
           </div>
           <div className="mt-1 px-2 text-[10px] leading-relaxed text-slate-700">
-            Live PLC/OPC UA telemetry with scenario evidence and IDS analysis.
+            Dữ liệu PLC/OPC UA trực tiếp, kèm bằng chứng gói tin và kết quả phân tích IDS.
           </div>
         </div>
       </div>
@@ -184,6 +185,14 @@ function MobileNav() {
 }
 
 function Shell() {
+  const { isAuthenticated, logout } = useAuth();
+  const toast = useToast();
+
+  useIdleLogout(isAuthenticated, () => {
+    logout();
+    toast("Đã tự động đăng xuất do không thao tác trong 30 phút.", { tone: "info", duration: 6000 });
+  });
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <StatusBar />
