@@ -12,7 +12,7 @@ import { runbookFor } from "../lib/runbook";
 
 const DISPOSITION_LABEL = {
   investigating: "Đang xử lý",
-  false_positive: "Xác nhận false positive",
+  false_positive: "Xác nhận báo động giả",
   confirmed_new_pattern: "Xác nhận mẫu mới thật (admin)",
 };
 
@@ -408,7 +408,7 @@ function EventRow({ event, onAck }) {
             {[
               ["", "Đã xác nhận"],
               ["investigating", "Đang xử lý"],
-              ["false_positive", "False positive"],
+              ["false_positive", "Báo động giả"],
               ...(event.event_type === "IDS_ANOMALY_DETECTED" && hasRole("admin")
                 ? [["confirmed_new_pattern", "Xác nhận mẫu mới thật"]]
                 : []),

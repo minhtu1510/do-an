@@ -61,6 +61,17 @@ class EventRow(Base):
     disposition: Mapped[str | None] = mapped_column(String(24), nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     labels_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # How many rungs of the Telegram escalation ladder (ESCALATION_SCHEDULE_
+    # MINUTES in main.py) have already fired for this event. Used to be
+    # in-memory only ("only needs to survive one process's uptime" — same
+    # assumption control_lock.py made and got wrong): a still-ACTIVE, unacked
+    # event survives a backend restart just fine (this table), but its
+    # escalation counter reset to 0 every time — so a long-open alarm (e.g.
+    # PLC_DISCONNECTED sitting unacked for hours across several dev restarts)
+    # re-fired rung 1 (and then rungs 2, 3... one per 60s tick, since elapsed
+    # time already qualified) right after every restart, instead of only at
+    # its real next scheduled rung. Persisting it closes that gap.
+    escalation_level: Mapped[int] = mapped_column(Integer, default=0)
 
     def to_dict(self) -> dict:
         import json
@@ -80,6 +91,7 @@ class EventRow(Base):
             "disposition": self.disposition,
             "note": self.note,
             "labels": json.loads(self.labels_json) if self.labels_json else None,
+            "escalation_level": self.escalation_level,
         }
 
 

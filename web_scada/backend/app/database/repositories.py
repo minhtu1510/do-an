@@ -106,6 +106,7 @@ def insert_event(event: dict) -> None:
             disposition=event.get("disposition"),
             note=event.get("note"),
             labels_json=json.dumps(event["labels"]) if event.get("labels") else None,
+            escalation_level=event.get("escalation_level", 0),
         ))
         session.commit()
 
@@ -140,6 +141,17 @@ def update_event_ack(
             row.status = status
             row.disposition = disposition
             row.note = note
+            session.commit()
+    finally:
+        session.close()
+
+
+def update_event_escalation(event_id: str, escalation_level: int) -> None:
+    session = get_session()
+    try:
+        row = session.get(EventRow, event_id)
+        if row is not None:
+            row.escalation_level = escalation_level
             session.commit()
     finally:
         session.close()

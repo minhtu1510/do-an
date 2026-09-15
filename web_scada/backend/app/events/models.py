@@ -34,10 +34,13 @@ class EventRecord:
     # ATTACK_PCAP_DETECTED events — lets the UI show a runbook suggestion
     # per label without regex-parsing the free-text `message`.
     labels: list[str] | None = None
-    # In-memory only (not persisted, not in to_dict) — how many rungs of the
-    # escalation ladder (ESCALATION_SCHEDULE_MINUTES in main.py) have
-    # already fired for this still-unacked event, so each rung notifies
-    # exactly once instead of every 60s tick past its threshold.
+    # How many rungs of the escalation ladder (ESCALATION_SCHEDULE_MINUTES in
+    # main.py) have already fired for this still-unacked event, so each rung
+    # notifies exactly once instead of every 60s tick past its threshold.
+    # Persisted (database/models.py::EventRow.escalation_level) — used to be
+    # in-memory only, which reset this to 0 on every backend restart even
+    # for events that had already escalated several rungs, causing a burst
+    # of re-notifications right after each restart.
     escalation_level: int = 0
 
     def to_dict(self) -> dict[str, Any]:
@@ -56,4 +59,5 @@ class EventRecord:
             "disposition": self.disposition,
             "note": self.note,
             "labels": self.labels,
+            "escalation_level": self.escalation_level,
         }

@@ -100,11 +100,12 @@ async def lifespan(app: FastAPI):
 
     # Alarm escalation (ISA-18.2 style, alarm-clock snooze ladder): an
     # ERROR-severity event still ACTIVE and unacked gets re-pushed to
-    # Telegram at 5m, 15m, 30m, 2h, 10h, then 24h since it fired — spaced
-    # out instead of nagging every 5 minutes forever, and it stops once the
-    # ladder is exhausted. Checked every 60s; a rung firing a few seconds
-    # late doesn't matter in practice.
-    ESCALATION_SCHEDULE_MINUTES = [5, 15, 30, 120, 600, 1440]
+    # Telegram at 5m, 15m, 30m, 2h, 10h, 24h, then keeps going daily/weekly
+    # if truly nobody acks it (48h, +3 days -> day 5, +1 week -> day 12) —
+    # spaced out instead of nagging every 5 minutes forever, and it stops
+    # once the ladder is exhausted (day 12), not indefinitely. Checked every
+    # 60s; a rung firing a few seconds late doesn't matter in practice.
+    ESCALATION_SCHEDULE_MINUTES = [5, 15, 30, 120, 600, 1440, 2880, 7200, 17280]
 
     # A confirmed attack detection is WARNING-severity for UI coloring (it's
     # not a system fault), but if nobody acks it, it needs the same nagging
@@ -130,6 +131,11 @@ async def lifespan(app: FastAPI):
                 for event in due:
                     rung = event.escalation_level + 1
                     event.escalation_level = rung
+                    try:
+                        from .database import update_event_escalation
+                        update_event_escalation(event.id, rung)
+                    except Exception:
+                        pass  # Telegram push must still go out even if this write fails
                     escalated = dict(event.to_dict())
                     escalated["message"] = f"[NHẮC LẠI lần {rung} — chưa ai xác nhận] {escalated['message']}"
                     await notify_event(escalated)

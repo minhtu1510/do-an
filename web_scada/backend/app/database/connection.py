@@ -57,8 +57,9 @@ def _migrate_pcap_analyses_result_json() -> None:
 
 def _migrate_events_disposition_note() -> None:
     """Same reasoning as _migrate_pcap_analyses_result_json — an events
-    table from before disposition/note/labels_json existed needs these
-    columns added in place, not recreated (would lose the audit trail)."""
+    table from before disposition/note/labels_json/escalation_level existed
+    needs these columns added in place, not recreated (would lose the audit
+    trail)."""
     from sqlalchemy import inspect, text
 
     inspector = inspect(engine)
@@ -72,6 +73,8 @@ def _migrate_events_disposition_note() -> None:
             conn.execute(text("ALTER TABLE events ADD COLUMN note TEXT"))
         if "labels_json" not in columns:
             conn.execute(text("ALTER TABLE events ADD COLUMN labels_json TEXT"))
+        if "escalation_level" not in columns:
+            conn.execute(text("ALTER TABLE events ADD COLUMN escalation_level INTEGER DEFAULT 0"))
 
 
 def get_session() -> Session:

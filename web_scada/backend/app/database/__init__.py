@@ -12,6 +12,7 @@ from .repositories import (
     query_recent_pcap_analyses,
     query_tag_history,
     update_event_ack,
+    update_event_escalation,
     update_event_status,
 )
 
@@ -28,5 +29,6 @@ __all__ = [
     "query_recent_pcap_analyses",
     "query_tag_history",
     "update_event_ack",
+    "update_event_escalation",
     "update_event_status",
 ]

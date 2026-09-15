@@ -56,6 +56,7 @@ class EventService:
                 new_value=row["new_value"], status=row["status"], timestamp=row["timestamp"],
                 acked_by=row["acked_by"], acked_at=row["acked_at"],
                 disposition=row.get("disposition"), note=row.get("note"), labels=row.get("labels"),
+                escalation_level=row.get("escalation_level") or 0,
             )
             for row in rows
         ]
