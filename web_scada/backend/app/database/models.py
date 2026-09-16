@@ -72,6 +72,17 @@ class EventRow(Base):
     # time already qualified) right after every restart, instead of only at
     # its real next scheduled rung. Persisting it closes that gap.
     escalation_level: Mapped[int] = mapped_column(Integer, default=0)
+    # Human incident-handling workflow, all separate from `status` (condition-
+    # driven ACTIVE/CLEARED) and `disposition` (classification label):
+    #  - assignee: who is officially handling this incident (None = unassigned)
+    #  - resolved_by/resolved_at: who closed the incident and when (None = still open)
+    #  - audit_json: append-only list of every workflow action (ack, disposition
+    #    change, assign, resolve, reopen) with actor/time/from→to/note, so a
+    #    disposition can be changed after ack without losing what it was before.
+    assignee: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    resolved_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    audit_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     def to_dict(self) -> dict:
         import json
@@ -92,6 +103,10 @@ class EventRow(Base):
             "note": self.note,
             "labels": json.loads(self.labels_json) if self.labels_json else None,
             "escalation_level": self.escalation_level,
+            "assignee": self.assignee,
+            "resolved_by": self.resolved_by,
+            "resolved_at": self.resolved_at.isoformat() if self.resolved_at else None,
+            "audit": json.loads(self.audit_json) if self.audit_json else [],
         }
 
 

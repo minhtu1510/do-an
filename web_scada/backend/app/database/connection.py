@@ -75,6 +75,14 @@ def _migrate_events_disposition_note() -> None:
             conn.execute(text("ALTER TABLE events ADD COLUMN labels_json TEXT"))
         if "escalation_level" not in columns:
             conn.execute(text("ALTER TABLE events ADD COLUMN escalation_level INTEGER DEFAULT 0"))
+        if "assignee" not in columns:
+            conn.execute(text("ALTER TABLE events ADD COLUMN assignee VARCHAR(64)"))
+        if "resolved_by" not in columns:
+            conn.execute(text("ALTER TABLE events ADD COLUMN resolved_by VARCHAR(64)"))
+        if "resolved_at" not in columns:
+            conn.execute(text("ALTER TABLE events ADD COLUMN resolved_at DATETIME"))
+        if "audit_json" not in columns:
+            conn.execute(text("ALTER TABLE events ADD COLUMN audit_json TEXT"))
 
 
 def get_session() -> Session:

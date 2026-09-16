@@ -9,7 +9,7 @@ from collections import defaultdict
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response
 from dotenv import load_dotenv
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime, timezone, timedelta
 
 from ..alarms import alarm_engine
@@ -346,6 +346,128 @@ async def ack_event(event_id: str, body: AckEventRequest = AckEventRequest(), us
     payload["active_count"] = alarm_engine.active_alarm_count()
     await ws_manager.broadcast_event(payload)
     return payload
+
+
+class AckBulkRequest(BaseModel):
+    event_ids: list[str] = Field(min_length=1, max_length=200)
+    disposition: str | None = None
+    note: str | None = None
+
+
+@api_router.post("/events/ack-bulk")
+async def ack_events_bulk(body: AckBulkRequest, user=Depends(require_role("operator"))):
+    """Same ACK as /events/{id}/ack, applied to several events in one
+    request — for a run of same-cause repeat alarms (e.g. UNEXPECTED_HALT
+    firing once per test cycle) an operator would otherwise have to click
+    "Xác nhận" once per row. Each event still gets its own DB row/timestamp/
+    disposition (real audit trail, nothing merged or deleted) — this only
+    collapses the *action* of acknowledging them, not the records themselves.
+    """
+    from ..websocket.manager import ws_manager
+
+    if body.disposition not in ALLOWED_DISPOSITIONS:
+        return JSONResponse(status_code=400, content={"error": "invalid_disposition"})
+    if body.disposition in ADMIN_ONLY_DISPOSITIONS and user.role != "admin":
+        return JSONResponse(status_code=403, content={"error": "admin_only", "message": "Chỉ admin mới xác nhận được 'phát hiện mẫu mới thật'."})
+
+    acked, not_found = [], []
+    for event_id in body.event_ids:
+        event = event_service.ack(event_id, user.username, body.disposition, body.note)
+        if event is None:
+            not_found.append(event_id)
+            continue
+        acked.append(event.to_dict())
+        payload = event.to_dict()
+        payload["active_count"] = alarm_engine.active_alarm_count()
+        await ws_manager.broadcast_event(payload)
+
+    return {"acked": acked, "not_found": not_found}
+
+
+async def _broadcast_updated(event):
+    from ..websocket.manager import ws_manager
+    payload = event.to_dict()
+    payload["active_count"] = alarm_engine.active_alarm_count()
+    await ws_manager.broadcast_event(payload)
+    return payload
+
+
+# Chỉ giao vụ được cho người CÓ THỂ xử lý: role operator trở lên. viewer là
+# read-only (không ack/resolve được) nên giao cho viewer là vô nghĩa.
+ASSIGNABLE_MIN_ROLE = "operator"
+
+
+def _assignable_users() -> list[dict]:
+    """Danh sách người có thể nhận xử lý sự cố (operator+). Chỉ trả username +
+    role, KHÔNG bao giờ trả password hash hay field nhạy cảm khác."""
+    from sqlalchemy import select as _select
+    from ..auth.db import get_session as _get_auth_session
+    from ..auth.deps import ROLE_RANK
+    from ..auth.models import User
+
+    session = _get_auth_session()
+    try:
+        users = session.scalars(_select(User).order_by(User.username)).all()
+        return [
+            {"username": u.username, "role": u.role}
+            for u in users
+            if ROLE_RANK.get(u.role, 0) >= ROLE_RANK[ASSIGNABLE_MIN_ROLE]
+        ]
+    finally:
+        session.close()
+
+
+@api_router.get("/events/assignable-users")
+async def assignable_users(_user=Depends(require_role("operator"))):
+    """Ai được phép nhận giao xử lý — mở cho operator+ (chính những người đi
+    giao vụ), khác /auth/users vốn admin-only. Không lộ thông tin nhạy cảm."""
+    return {"users": _assignable_users()}
+
+
+class AssignEventRequest(BaseModel):
+    assignee: str | None = None  # username to assign, or None to clear
+
+
+@api_router.post("/events/{event_id}/assign")
+async def assign_event(event_id: str, body: AssignEventRequest = AssignEventRequest(), user=Depends(require_role("operator"))):
+    """Giao vụ cho một người xử lý (hoặc bỏ giao với assignee=null). Ai giao:
+    operator+ (thực hành SOC cho phép ca trực tự phân công). Giao cho ai:
+    BẮT BUỘC là user có thật với role operator+ — chặn giao cho tên bịa hoặc
+    cho viewer (read-only, không xử lý được). Ghi vết vào audit trail."""
+    assignee = (body.assignee or "").strip() or None
+    if assignee is not None and assignee not in {u["username"] for u in _assignable_users()}:
+        return JSONResponse(status_code=422, content={
+            "error": "invalid_assignee",
+            "message": "Chỉ giao được cho người dùng có thật với vai trò operator trở lên.",
+        })
+    event = event_service.assign(event_id, user.username, assignee)
+    if event is None:
+        return JSONResponse(status_code=404, content={"error": "event_not_found", "id": event_id})
+    return await _broadcast_updated(event)
+
+
+class ResolveEventRequest(BaseModel):
+    note: str | None = None
+
+
+@api_router.post("/events/{event_id}/resolve")
+async def resolve_event(event_id: str, body: ResolveEventRequest = ResolveEventRequest(), user=Depends(require_role("operator"))):
+    """Đóng vụ — trạng thái kết thúc của quy trình xử lý do con người bấm
+    (khác `status` ACTIVE/CLEARED do điều kiện vật lý điều khiển)."""
+    event = event_service.resolve(event_id, user.username, body.note)
+    if event is None:
+        return JSONResponse(status_code=404, content={"error": "event_not_found", "id": event_id})
+    return await _broadcast_updated(event)
+
+
+@api_router.post("/events/{event_id}/reopen")
+async def reopen_event(event_id: str, body: ResolveEventRequest = ResolveEventRequest(), user=Depends(require_role("operator"))):
+    """Mở lại một vụ đã đóng (bấm nhầm, hoặc sự cố tái diễn). Giữ nguyên audit
+    trail — bản ghi resolve cũ vẫn còn, thêm bản ghi reopen."""
+    event = event_service.reopen(event_id, user.username, body.note)
+    if event is None:
+        return JSONResponse(status_code=404, content={"error": "event_not_found", "id": event_id})
+    return await _broadcast_updated(event)
 
 
 @api_router.get("/events/export/csv")

@@ -144,6 +144,35 @@ async def lifespan(app: FastAPI):
 
     escalation_task = asyncio.create_task(escalation_loop())
 
+    # 2-way Telegram: "Xác nhận" button on the notification itself calls
+    # back into the exact same ack() the web UI uses, attributed to a fixed
+    # pseudo-user (never a guessed real identity — see notify/telegram.py).
+    # Long-polling (getUpdates blocks up to 30s server-side waiting for a
+    # tap), so this loop isn't a busy-wait even with no sleep between calls.
+    async def telegram_poll_loop():
+        from .notify import TELEGRAM_ACK_USERNAME, poll_telegram_updates, telegram_configured
+        if not telegram_configured():
+            return
+
+        async def on_ack(event_id: str) -> None:
+            event = event_service.ack(event_id, TELEGRAM_ACK_USERNAME, None, None)
+            if event is None:
+                return
+            try:
+                payload = event.to_dict()
+                payload["active_count"] = alarm_engine.active_alarm_count()
+                await ws_manager.broadcast_event(payload)
+            except Exception:
+                pass
+
+        while True:
+            try:
+                await poll_telegram_updates(on_ack)
+            except Exception:
+                await asyncio.sleep(5)  # back off on a real error so this can't spin hot
+
+    telegram_poll_task = asyncio.create_task(telegram_poll_loop())
+
     yield
 
     logger.info("Web-SCADA backend shutting down...")
@@ -151,6 +180,7 @@ async def lifespan(app: FastAPI):
     task.cancel()
     resources_task.cancel()
     escalation_task.cancel()
+    telegram_poll_task.cancel()
     try:
         await task
     except asyncio.CancelledError:
@@ -161,6 +191,10 @@ async def lifespan(app: FastAPI):
         pass
     try:
         await escalation_task
+    except asyncio.CancelledError:
+        pass
+    try:
+        await telegram_poll_task
     except asyncio.CancelledError:
         pass
     logger.info("Web-SCADA backend stopped cleanly")

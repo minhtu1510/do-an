@@ -85,7 +85,10 @@ async def _record_analysis(result: dict, protocol: str, username: str) -> None:
         if top_labels:
             labels_text = ", ".join(f"{k} x{v}" for k, v in top_labels[:3])
             try:
-                event_service.add(EventRecord(
+                from ..alarms import alarm_engine
+                from ..websocket.manager import ws_manager
+
+                event = event_service.add(EventRecord(
                     event_type="ATTACK_PCAP_DETECTED",
                     severity="WARNING",
                     message=(
@@ -95,6 +98,9 @@ async def _record_analysis(result: dict, protocol: str, username: str) -> None:
                     status="ACTIVE",
                     labels=[k for k, _ in top_labels[:3]],
                 ))
+                payload = event.to_dict()
+                payload["active_count"] = alarm_engine.active_alarm_count()
+                await ws_manager.broadcast_event(payload)
             except Exception:
                 pass
 
@@ -103,7 +109,10 @@ async def _record_analysis(result: dict, protocol: str, username: str) -> None:
         anomaly_count = result["prediction_counts"].get("ANOMALY", 0)
         if anomaly_count > 0:
             try:
-                event_service.add(EventRecord(
+                from ..alarms import alarm_engine
+                from ..websocket.manager import ws_manager
+
+                event = event_service.add(EventRecord(
                     event_type="IDS_ANOMALY_DETECTED",
                     severity="WARNING",
                     message=(
@@ -114,6 +123,9 @@ async def _record_analysis(result: dict, protocol: str, username: str) -> None:
                     status="ACTIVE",
                     labels=["ANOMALY"],
                 ))
+                payload = event.to_dict()
+                payload["active_count"] = alarm_engine.active_alarm_count()
+                await ws_manager.broadcast_event(payload)
             except Exception:
                 pass
 

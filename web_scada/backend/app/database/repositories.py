@@ -107,6 +107,10 @@ def insert_event(event: dict) -> None:
             note=event.get("note"),
             labels_json=json.dumps(event["labels"]) if event.get("labels") else None,
             escalation_level=event.get("escalation_level", 0),
+            assignee=event.get("assignee"),
+            resolved_by=event.get("resolved_by"),
+            resolved_at=datetime.fromisoformat(event["resolved_at"]) if event.get("resolved_at") else None,
+            audit_json=json.dumps(event["audit"]) if event.get("audit") else None,
         ))
         session.commit()
 
@@ -128,19 +132,28 @@ def insert_event(event: dict) -> None:
         session.close()
 
 
-def update_event_ack(
-    event_id: str, acked_by: str, acked_at: str, status: str,
-    disposition: str | None = None, note: str | None = None,
-) -> None:
+def update_event_workflow(event: dict) -> None:
+    """Persist every human-workflow field of an event at once (ack, disposition,
+    assignee, resolve/reopen, and the append-only audit trail). One function
+    instead of one-per-action because the caller (EventService) already holds
+    the fully-mutated record and the columns are cheap to overwrite together;
+    this keeps the durable row in lockstep with the in-memory record after any
+    workflow action."""
+    import json
+
     session = get_session()
     try:
-        row = session.get(EventRow, event_id)
+        row = session.get(EventRow, event["id"])
         if row is not None:
-            row.acked_by = acked_by
-            row.acked_at = datetime.fromisoformat(acked_at)
-            row.status = status
-            row.disposition = disposition
-            row.note = note
+            row.acked_by = event.get("acked_by")
+            row.acked_at = datetime.fromisoformat(event["acked_at"]) if event.get("acked_at") else None
+            row.status = event["status"]
+            row.disposition = event.get("disposition")
+            row.note = event.get("note")
+            row.assignee = event.get("assignee")
+            row.resolved_by = event.get("resolved_by")
+            row.resolved_at = datetime.fromisoformat(event["resolved_at"]) if event.get("resolved_at") else None
+            row.audit_json = json.dumps(event["audit"]) if event.get("audit") else None
             session.commit()
     finally:
         session.close()

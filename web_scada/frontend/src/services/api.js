@@ -136,6 +136,56 @@ export async function ackEvent(eventId, { disposition = null, note = null } = {}
   return res.json();
 }
 
+export async function ackEventsBulk(eventIds, { disposition = null, note = null } = {}) {
+  const res = await apiFetch("/events/ack-bulk", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ event_ids: eventIds, disposition, note }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.message || body.detail || "Xác nhận hàng loạt thất bại");
+  return body;
+}
+
+export async function fetchAssignableUsers() {
+  const res = await apiFetch("/events/assignable-users");
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Failed to load assignable users");
+  return res.json();
+}
+
+export async function assignEvent(eventId, assignee) {
+  const res = await apiFetch(`/events/${eventId}/assign`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ assignee }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.message || body.detail || "Giao vụ thất bại");
+  return body;
+}
+
+export async function resolveEvent(eventId, note = null) {
+  const res = await apiFetch(`/events/${eventId}/resolve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ note }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.message || body.detail || "Đóng vụ thất bại");
+  return body;
+}
+
+export async function reopenEvent(eventId, note = null) {
+  const res = await apiFetch(`/events/${eventId}/reopen`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ note }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.message || body.detail || "Mở lại vụ thất bại");
+  return body;
+}
+
 export async function fetchMlStatus() {
   const res = await apiFetch("/ml/status");
   return res.json();

@@ -40,8 +40,13 @@ class ConnectionManager:
             except Exception:
                 pass
 
+        # Telegram must only ping for events nobody has acked yet — re-broadcasting
+        # an event after ack() (e.g. to push the ack to other web clients) would
+        # otherwise re-fire this same check and spam a fresh "unread" message with
+        # a new button for something that was JUST acknowledged.
         is_notify_worthy = event.get("severity") == "ERROR" or str(event.get("event_type", "")).startswith("ATTACK_")
-        if is_notify_worthy and telegram_configured():
+        is_unacked = event.get("status") == "ACTIVE" and not event.get("acked_by")
+        if is_notify_worthy and is_unacked and telegram_configured():
             await notify_event(event)
 
     async def broadcast_scenario_result(self, result: dict):

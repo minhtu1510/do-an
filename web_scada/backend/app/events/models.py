@@ -42,6 +42,14 @@ class EventRecord:
     # for events that had already escalated several rungs, causing a burst
     # of re-notifications right after each restart.
     escalation_level: int = 0
+    # Human incident-handling workflow (see database/models.py::EventRow for the
+    # durable side). assignee = ai đang lo vụ này; resolved_by/at = ai đã đóng
+    # vụ, lúc nào; audit = nhật ký mọi thao tác xử lý (append-only) để đổi
+    # disposition sau khi ack mà vẫn giữ được giá trị cũ.
+    assignee: str | None = None
+    resolved_by: str | None = None
+    resolved_at: str | None = None
+    audit: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -60,4 +68,8 @@ class EventRecord:
             "note": self.note,
             "labels": self.labels,
             "escalation_level": self.escalation_level,
+            "assignee": self.assignee,
+            "resolved_by": self.resolved_by,
+            "resolved_at": self.resolved_at,
+            "audit": self.audit,
         }

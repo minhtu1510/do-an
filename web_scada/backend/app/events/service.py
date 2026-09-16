@@ -57,6 +57,8 @@ class EventService:
                 acked_by=row["acked_by"], acked_at=row["acked_at"],
                 disposition=row.get("disposition"), note=row.get("note"), labels=row.get("labels"),
                 escalation_level=row.get("escalation_level") or 0,
+                assignee=row.get("assignee"), resolved_by=row.get("resolved_by"),
+                resolved_at=row.get("resolved_at"), audit=row.get("audit") or [],
             )
             for row in rows
         ]
@@ -108,23 +110,96 @@ class EventService:
             return event
         return None
 
+    def _find(self, event_id: str) -> EventRecord | None:
+        for event in self._events:
+            if event.id == event_id:
+                return event
+        return None
+
+    def _audit(self, event: EventRecord, action: str, by: str,
+               frm: str | None = None, to: str | None = None,
+               note: str | None = None) -> None:
+        entry = {"action": action, "by": by, "at": datetime.now(TZ).isoformat()}
+        if frm is not None or to is not None:
+            entry["from"] = frm
+            entry["to"] = to
+        if note:
+            entry["note"] = note
+        event.audit.append(entry)
+
+    def _persist(self, event: EventRecord) -> None:
+        try:
+            from ..database import update_event_workflow
+            update_event_workflow(event.to_dict())
+        except Exception:
+            pass  # live UI must keep working even if the DB write fails
+
     def ack(
         self, event_id: str, username: str,
         disposition: str | None = None, note: str | None = None,
     ) -> EventRecord | None:
-        for event in self._events:
-            if event.id == event_id:
-                event.acked_by = username
-                event.acked_at = datetime.now(TZ).isoformat()
-                event.disposition = disposition
-                event.note = note
-                try:
-                    from ..database import update_event_ack
-                    update_event_ack(event_id, username, event.acked_at, event.status, disposition, note)
-                except Exception:
-                    pass
-                return event
-        return None
+        """Acknowledge an event, or re-classify an already-acked one. Calling
+        again with a different disposition is allowed and records the change in
+        the audit trail (old → new) instead of silently overwriting — this is
+        how "đổi phân loại sau khi ack" works end to end."""
+        event = self._find(event_id)
+        if event is None:
+            return None
+        prev_disp = event.disposition
+        first_ack = event.acked_by is None
+        event.acked_by = username
+        event.acked_at = datetime.now(TZ).isoformat()
+        event.disposition = disposition
+        event.note = note
+        if first_ack:
+            self._audit(event, "ack", username, to=disposition, note=note)
+        elif prev_disp != disposition:
+            self._audit(event, "disposition", username, frm=prev_disp, to=disposition, note=note)
+        else:
+            self._audit(event, "note", username, note=note)
+        self._persist(event)
+        return event
+
+    def assign(self, event_id: str, username: str, assignee: str | None) -> EventRecord | None:
+        """Set (or clear, with assignee=None) who is officially handling this
+        incident. Recorded in the audit trail."""
+        event = self._find(event_id)
+        if event is None:
+            return None
+        prev = event.assignee
+        event.assignee = assignee or None
+        self._audit(event, "assign", username, frm=prev, to=event.assignee)
+        self._persist(event)
+        return event
+
+    def resolve(self, event_id: str, username: str, note: str | None = None) -> EventRecord | None:
+        """Mark the incident as handled/closed by a human — the terminal state
+        of the handling workflow, separate from `status` (condition-driven).
+        Auto-acks first if nobody had, since resolving implies you've seen it."""
+        event = self._find(event_id)
+        if event is None:
+            return None
+        if event.acked_by is None:
+            event.acked_by = username
+            event.acked_at = datetime.now(TZ).isoformat()
+            self._audit(event, "ack", username, to=event.disposition)
+        event.resolved_by = username
+        event.resolved_at = datetime.now(TZ).isoformat()
+        self._audit(event, "resolve", username, note=note)
+        self._persist(event)
+        return event
+
+    def reopen(self, event_id: str, username: str, note: str | None = None) -> EventRecord | None:
+        """Undo a resolve (mis-click, or the incident came back). Keeps the
+        audit trail — the resolve entry stays, a reopen entry is appended."""
+        event = self._find(event_id)
+        if event is None:
+            return None
+        event.resolved_by = None
+        event.resolved_at = None
+        self._audit(event, "reopen", username, note=note)
+        self._persist(event)
+        return event
 
     def due_for_escalation(
         self,

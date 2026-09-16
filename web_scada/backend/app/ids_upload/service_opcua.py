@@ -170,6 +170,12 @@ def _summarize(df: pd.DataFrame, predictions: np.ndarray, confidences: np.ndarra
         "timeline": timeline,
         "flow_table": flow_table,
         "model_cv_macro_f1": meta.get("cv_macro_f1"),
+        # Surfaced so the frontend never has to hardcode a model name —
+        # it did before this field existed ("RandomForest" baked into the
+        # label), and went stale the moment someone retrained model_opcua/
+        # with a different algorithm (ExtraTreesClassifier) without anyone
+        # noticing, since nothing broke — the label just quietly lied.
+        "model_type": meta.get("model"),
     })
 
 

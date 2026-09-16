@@ -818,7 +818,7 @@ export default function IdsUpload() {
                   <div className="font-mono text-3xl font-bold text-cyan-300">
                     {result.model_cv_macro_f1 != null ? `${(result.model_cv_macro_f1 * 100).toFixed(1)}%` : "—"}
                   </div>
-                  <div className="text-xs text-slate-500">CV macro-F1 (RandomForest, GroupKFold theo episode)</div>
+                  <div className="text-xs text-slate-500">CV macro-F1 ({result.model_type || "model đã train"}, GroupKFold theo episode)</div>
                 </div>
               </ChartPanel>
             ) : (

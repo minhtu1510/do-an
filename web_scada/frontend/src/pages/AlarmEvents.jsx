@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { jsPDF } from "jspdf";
-import { Bell, Check, ChevronRight, ClipboardList, FileDown, Inbox, Lock, Search, ShieldAlert, ShieldCheck, ShieldX, Unlock } from "lucide-react";
-import { ackEvent, fetchEvents, fetchWriteLock, releaseWriteLock } from "../services/api";
+import { Bell, Check, CheckCircle2, ChevronRight, ClipboardList, FileDown, History, Inbox, Lock, RotateCcw, Search, ShieldAlert, ShieldCheck, ShieldX, Unlock, UserPlus } from "lucide-react";
+import { ackEvent, ackEventsBulk, assignEvent, fetchAssignableUsers, fetchEvents, fetchWriteLock, releaseWriteLock, reopenEvent, resolveEvent } from "../services/api";
 import { connectWebSocket } from "../services/websocket";
 import PageHeader from "../components/PageHeader";
 import ExportCsvButton from "../components/ExportCsvButton";
@@ -15,6 +15,19 @@ const DISPOSITION_LABEL = {
   false_positive: "Xác nhận báo động giả",
   confirmed_new_pattern: "Xác nhận mẫu mới thật (admin)",
 };
+
+const AUDIT_ACTION_LABEL = {
+  ack: "Xác nhận",
+  disposition: "Đổi phân loại",
+  note: "Cập nhật ghi chú",
+  assign: "Giao vụ",
+  resolve: "Đóng vụ",
+  reopen: "Mở lại vụ",
+};
+
+function dispositionText(value) {
+  return value ? DISPOSITION_LABEL[value] || value : "Đã xác nhận";
+}
 
 // One-event incident PDF — plain pdf.text() calls, not a screenshot: a
 // single event's fields don't need a rendered-page capture, and text is
@@ -55,7 +68,17 @@ function exportEventPdf(event) {
   line(`Người xác nhận: ${event.acked_by || "chưa ai xác nhận"}`);
   if (event.acked_at) line(`Lúc xác nhận: ${formatTime(event.acked_at)}`);
   if (event.disposition) line(`Trạng thái xử lý: ${DISPOSITION_LABEL[event.disposition] || event.disposition}`);
+  if (event.assignee) line(`Người được giao xử lý: ${event.assignee}`);
+  line(`Đóng vụ: ${event.resolved_by ? `${event.resolved_by} lúc ${formatTime(event.resolved_at)}` : "chưa đóng"}`);
   if (event.note) line(`Ghi chú: ${event.note}`);
+  if (event.audit?.length) {
+    y += 4;
+    line("Nhật ký xử lý:", 11, 18);
+    for (const a of event.audit) {
+      const chg = a.from !== undefined || a.to !== undefined ? ` (${dispositionText(a.from)} -> ${dispositionText(a.to)})` : "";
+      line(`- ${formatTime(a.at)} — ${AUDIT_ACTION_LABEL[a.action] || a.action} bởi ${a.by}${chg}${a.note ? ` — ${a.note}` : ""}`, 9, 14);
+    }
+  }
   if (event.event_type === "ATTACK_PCAP_DETECTED") {
     line("Tra cứu chi tiết đầy đủ lần phân tích liên quan tại trang Lịch sử phân tích PCAP.", 9);
   }
@@ -77,6 +100,9 @@ export default function AlarmEvents() {
   const [search, setSearch] = useState("");
   const [severityFilter, setSeverityFilter] = useState("ALL");
   const [statusFilter, setStatusFilter] = useState("ALL");
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [bulkAcking, setBulkAcking] = useState(false);
+  const [users, setUsers] = useState([]);
   const activeCount = events.filter((e) => e.status === "ACTIVE").length;
 
   const filteredEvents = events.filter((e) => {
@@ -89,6 +115,10 @@ export default function AlarmEvents() {
     return true;
   });
 
+  // Only rows an operator could individually ACK are selectable — matches
+  // EventRow's own needsAck check (ACTIVE + not yet acked).
+  const pendingIds = filteredEvents.filter((e) => e.status === "ACTIVE" && !e.acked_by).map((e) => e.id);
+
   useEffect(() => {
     fetchEvents(500).then((data) => {
       const all = data.events || [];
@@ -97,6 +127,12 @@ export default function AlarmEvents() {
       setLastUpdate(data.timestamp || null);
     });
     fetchWriteLock().then(setLock).catch(() => {});
+    // Danh sách người CÓ THỂ nhận giao xử lý (operator+). Endpoint riêng mở
+    // cho operator+ (khác /auth/users admin-only), trả về [{username, role}].
+    // Chỉ operator+ mới thấy/ dùng phần giao vụ.
+    if (hasRole("operator")) {
+      fetchAssignableUsers().then((data) => setUsers(data.users || [])).catch(() => {});
+    }
 
     const unsub = connectWebSocket((data) => {
       if (data.type !== "event" || !data.event) return;
@@ -122,12 +158,45 @@ export default function AlarmEvents() {
     return unsub;
   }, []);
 
+  function applyUpdate(updated) {
+    setEvents((prev) => prev.map((e) => (e.id === updated.id ? updated : e)));
+  }
+
   async function handleAck(eventId, { disposition, note } = {}) {
     try {
       const updated = await ackEvent(eventId, { disposition, note });
-      setEvents((prev) => prev.map((e) => (e.id === eventId ? updated : e)));
+      applyUpdate(updated);
     } catch (err) {
       toast(err.message, { tone: "error" });
+    }
+  }
+
+  function toggleSelect(eventId) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(eventId)) next.delete(eventId);
+      else next.add(eventId);
+      return next;
+    });
+  }
+
+  function selectAllPending() {
+    setSelectedIds(new Set(pendingIds));
+  }
+
+  async function handleAckBulk(disposition) {
+    if (selectedIds.size === 0) return;
+    setBulkAcking(true);
+    try {
+      const { acked, not_found } = await ackEventsBulk([...selectedIds], { disposition });
+      const ackedById = new Map(acked.map((e) => [e.id, e]));
+      setEvents((prev) => prev.map((e) => ackedById.get(e.id) || e));
+      setSelectedIds(new Set());
+      toast(`Đã xác nhận ${acked.length} sự kiện.${not_found.length ? ` (${not_found.length} không tìm thấy)` : ""}`, { tone: "success" });
+    } catch (err) {
+      toast(err.message, { tone: "error" });
+    } finally {
+      setBulkAcking(false);
     }
   }
 
@@ -191,10 +260,49 @@ export default function AlarmEvents() {
         <SummaryCard label="Sự kiện đã lưu" value={events.length} icon={Inbox} />
       </div>
 
+      {hasRole("operator") && selectedIds.size > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-cyan-700/60 bg-cyan-950/30 px-4 py-3 text-sm">
+          <span className="font-semibold text-cyan-200">Đã chọn {selectedIds.size} sự kiện</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => handleAckBulk(null)}
+              disabled={bulkAcking}
+              className="rounded bg-cyan-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-cyan-500 disabled:opacity-50"
+            >
+              Xác nhận tất cả
+            </button>
+            <button
+              onClick={() => handleAckBulk("investigating")}
+              disabled={bulkAcking}
+              className="rounded border border-gray-600 bg-gray-800 px-3 py-1.5 text-xs text-gray-200 transition-colors hover:border-gray-500 disabled:opacity-50"
+            >
+              Đang xử lý
+            </button>
+            <button
+              onClick={() => handleAckBulk("false_positive")}
+              disabled={bulkAcking}
+              className="rounded border border-gray-600 bg-gray-800 px-3 py-1.5 text-xs text-gray-200 transition-colors hover:border-gray-500 disabled:opacity-50"
+            >
+              Báo động giả
+            </button>
+          </div>
+          <button onClick={() => setSelectedIds(new Set())} className="ml-auto text-xs text-gray-500 hover:text-gray-300">
+            Bỏ chọn
+          </button>
+        </div>
+      )}
+
       <div className="overflow-hidden rounded-lg border border-gray-700 bg-gray-800 shadow-sm shadow-black/20">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-700 px-4 py-3">
-          <div className="text-sm font-semibold text-gray-200">
-            Sự kiện gần đây {filteredEvents.length !== events.length && <span className="text-gray-500">({filteredEvents.length}/{events.length})</span>}
+          <div className="flex items-center gap-3">
+            <div className="text-sm font-semibold text-gray-200">
+              Sự kiện gần đây {filteredEvents.length !== events.length && <span className="text-gray-500">({filteredEvents.length}/{events.length})</span>}
+            </div>
+            {hasRole("operator") && pendingIds.length > 0 && (
+              <button onClick={selectAllPending} className="text-xs text-cyan-400 hover:text-cyan-300">
+                Chọn tất cả {pendingIds.length} sự kiện đang chờ xác nhận
+              </button>
+            )}
           </div>
           {events.length > 0 && (
             <div className="flex flex-wrap items-center gap-2">
@@ -242,7 +350,15 @@ export default function AlarmEvents() {
         ) : (
           <div className="max-h-[600px] divide-y divide-gray-700 overflow-y-auto">
             {filteredEvents.map((event) => (
-              <EventRow key={event.id} event={event} onAck={handleAck} />
+              <EventRow
+                key={event.id}
+                event={event}
+                onAck={handleAck}
+                onUpdate={applyUpdate}
+                users={users}
+                selected={selectedIds.has(event.id)}
+                onToggleSelect={toggleSelect}
+              />
             ))}
           </div>
         )}
@@ -304,13 +420,17 @@ function SummaryCard({ label, value, color = "text-white", icon: Icon }) {
   );
 }
 
-function EventRow({ event, onAck }) {
+function EventRow({ event, onAck, onUpdate, users, selected, onToggleSelect }) {
   const { hasRole } = useAuth();
-  const [formOpen, setFormOpen] = useState(false);
+  const toast = useToast();
+  const [panelOpen, setPanelOpen] = useState(false);
   const [suggestionOpen, setSuggestionOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [note, setNote] = useState("");
   const [disposition, setDisposition] = useState("");
+  const [assignVal, setAssignVal] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   const severityColor = {
     INFO: "text-blue-300 bg-blue-950/40",
@@ -319,21 +439,56 @@ function EventRow({ event, onAck }) {
   }[event.severity] || "text-gray-300 bg-gray-900";
   const statusColor = event.status === "ACTIVE" ? "text-red-400" : "text-green-400";
   const needsAck = event.status === "ACTIVE" && !event.acked_by;
+  const acked = !!event.acked_by;
+  const resolved = !!event.resolved_by;
   const suggestion = event.labels?.map((l) => [l, runbookFor(l)]).find(([, s]) => s);
+  const canOperate = hasRole("operator");
+
+  function openPanel() {
+    // Nạp sẵn phân loại/ghi chú hiện tại để re-classify hiển thị đúng giá trị cũ.
+    setDisposition(event.disposition || "");
+    setNote(event.note || "");
+    setAssignVal(event.assignee || "");
+    setPanelOpen((v) => !v);
+  }
 
   async function submitAck() {
     setSubmitting(true);
     try {
       await onAck(event.id, { disposition: disposition || null, note: note.trim() || null });
-      setFormOpen(false);
+      setPanelOpen(false);
     } finally {
       setSubmitting(false);
     }
   }
 
+  async function runAction(fn, okMsg) {
+    setBusy(true);
+    try {
+      const updated = await fn();
+      onUpdate(updated);
+      if (okMsg) toast(okMsg, { tone: "success" });
+    } catch (err) {
+      toast(err.message, { tone: "error" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="px-4 py-3 transition-colors hover:bg-gray-900/40">
-      <div className="grid gap-3 md:grid-cols-[140px_110px_1fr_100px_150px_60px] md:items-center">
+      <div className="grid gap-3 md:grid-cols-[20px_140px_110px_1fr_100px_170px_60px] md:items-center">
+        <div>
+          {needsAck && canOperate && (
+            <input
+              type="checkbox"
+              checked={!!selected}
+              onChange={() => onToggleSelect(event.id)}
+              className="h-3.5 w-3.5 accent-cyan-500"
+              title="Chọn để xác nhận hàng loạt"
+            />
+          )}
+        </div>
         <div className="text-xs text-gray-500">{formatTime(event.timestamp)}</div>
         <div>
           <span className={`rounded px-2 py-1 text-[10px] font-bold ${severityColor}`}>{event.severity}</span>
@@ -345,19 +500,30 @@ function EventRow({ event, onAck }) {
         </div>
         <div className={`text-xs font-bold ${statusColor}`}>{event.status}</div>
         <div className="text-xs">
-          {event.acked_by ? (
+          {acked ? (
             <div className="text-gray-500">
               <div className="text-green-400">Đã xác nhận: {event.acked_by}</div>
               <div className="text-[10px] text-gray-600">{formatTime(event.acked_at)}</div>
-              {event.disposition && (
-                <div className={`mt-0.5 text-[10px] font-semibold ${event.disposition === "false_positive" ? "text-gray-500" : "text-amber-400"}`}>
-                  {DISPOSITION_LABEL[event.disposition]}
+              <div className={`mt-0.5 text-[10px] font-semibold ${event.disposition === "false_positive" ? "text-gray-500" : "text-amber-400"}`}>
+                {dispositionText(event.disposition)}
+              </div>
+              {event.assignee && <div className="text-[10px] text-cyan-400">Giao: {event.assignee}</div>}
+              {resolved ? (
+                <div className="mt-0.5 flex items-center gap-1 text-[10px] font-semibold text-emerald-400">
+                  <CheckCircle2 size={10} /> Đã đóng · {event.resolved_by}
                 </div>
+              ) : (
+                <div className="text-[10px] text-orange-400/80">Chưa đóng vụ</div>
+              )}
+              {canOperate && (
+                <button onClick={openPanel} className="mt-1 text-[10px] text-blue-400 hover:text-blue-300">
+                  {panelOpen ? "Ẩn xử lý" : "Xử lý ▾"}
+                </button>
               )}
             </div>
-          ) : needsAck && hasRole("operator") ? (
+          ) : needsAck && canOperate ? (
             <button
-              onClick={() => setFormOpen((v) => !v)}
+              onClick={openPanel}
               className="flex items-center gap-1 rounded border border-gray-700 bg-gray-900 px-2 py-1 text-[10px] font-semibold text-gray-300 transition-colors hover:border-blue-600 hover:text-blue-300"
             >
               <Check size={11} />
@@ -401,48 +567,145 @@ function EventRow({ event, onAck }) {
         </div>
       )}
 
-      {formOpen && (
-        <div className="mt-2 space-y-2 rounded border border-gray-700 bg-gray-900/60 p-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[11px] text-gray-500">Trạng thái xử lý:</span>
-            {[
-              ["", "Đã xác nhận"],
-              ["investigating", "Đang xử lý"],
-              ["false_positive", "Báo động giả"],
-              ...(event.event_type === "IDS_ANOMALY_DETECTED" && hasRole("admin")
-                ? [["confirmed_new_pattern", "Xác nhận mẫu mới thật"]]
-                : []),
-            ].map(([val, lbl]) => (
+      {panelOpen && canOperate && (
+        <div className="mt-2 space-y-3 rounded border border-gray-700 bg-gray-900/60 p-3">
+          {/* 1. Phân loại — dùng cho cả lần xác nhận đầu và đổi phân loại sau khi ack */}
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[11px] text-gray-500">Phân loại:</span>
+              {[
+                ["", "Đã xác nhận"],
+                ["investigating", "Đang xử lý"],
+                ["false_positive", "Báo động giả"],
+                ...(event.event_type === "IDS_ANOMALY_DETECTED" && hasRole("admin")
+                  ? [["confirmed_new_pattern", "Xác nhận mẫu mới thật"]]
+                  : []),
+              ].map(([val, lbl]) => (
+                <button
+                  key={val}
+                  onClick={() => setDisposition(val)}
+                  className={`rounded px-2 py-1 text-[10px] font-semibold transition-colors ${
+                    disposition === val ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:text-gray-200"
+                  }`}
+                >
+                  {lbl}
+                </button>
+              ))}
+            </div>
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Ghi chú (tùy chọn) — vì sao, đã làm gì..."
+              rows={2}
+              className="w-full rounded border border-gray-700 bg-gray-950 px-2 py-1.5 text-xs text-gray-200 placeholder:text-gray-600 focus:border-blue-600 focus:outline-none"
+            />
+            <div className="flex items-center gap-2">
               <button
-                key={val}
-                onClick={() => setDisposition(val)}
-                className={`rounded px-2 py-1 text-[10px] font-semibold transition-colors ${
-                  disposition === val ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:text-gray-200"
-                }`}
+                onClick={submitAck}
+                disabled={submitting}
+                className="rounded bg-blue-600 px-3 py-1 text-[11px] font-semibold text-white transition-colors hover:bg-blue-500 disabled:opacity-50"
               >
-                {lbl}
+                {submitting ? "Đang gửi..." : acked ? "Cập nhật phân loại" : "Gửi xác nhận"}
               </button>
-            ))}
+              <button onClick={() => setPanelOpen(false)} className="text-[11px] text-gray-500 hover:text-gray-300">
+                Đóng
+              </button>
+            </div>
           </div>
-          <textarea
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="Ghi chú (tùy chọn) — vì sao, đã làm gì..."
-            rows={2}
-            className="w-full rounded border border-gray-700 bg-gray-950 px-2 py-1.5 text-xs text-gray-200 placeholder:text-gray-600 focus:border-blue-600 focus:outline-none"
-          />
-          <div className="flex items-center gap-2">
-            <button
-              onClick={submitAck}
-              disabled={submitting}
-              className="rounded bg-blue-600 px-3 py-1 text-[11px] font-semibold text-white transition-colors hover:bg-blue-500 disabled:opacity-50"
-            >
-              {submitting ? "Đang gửi..." : "Gửi xác nhận"}
-            </button>
-            <button onClick={() => setFormOpen(false)} className="text-[11px] text-gray-500 hover:text-gray-300">
-              Hủy
-            </button>
-          </div>
+
+          {/* 2 & 3 chỉ có nghĩa sau khi đã xác nhận */}
+          {acked && (
+            <div className="flex flex-wrap items-end gap-4 border-t border-gray-800 pt-3">
+              {/* Giao xử lý */}
+              <div className="space-y-1">
+                <div className="flex items-center gap-1 text-[11px] text-gray-500"><UserPlus size={11} /> Giao cho</div>
+                <div className="flex items-center gap-1">
+                  {users.length > 0 ? (
+                    <>
+                      <select
+                        value={assignVal}
+                        onChange={(e) => setAssignVal(e.target.value)}
+                        className="rounded border border-gray-700 bg-gray-950 px-2 py-1 text-[11px] text-gray-200"
+                      >
+                        <option value="">— chọn người —</option>
+                        {users.map((u) => (
+                          <option key={u.username} value={u.username}>{u.username} ({u.role})</option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={() => runAction(() => assignEvent(event.id, assignVal || null), "Đã cập nhật người xử lý.")}
+                        disabled={busy}
+                        className="rounded bg-cyan-700 px-2 py-1 text-[10px] font-semibold text-white hover:bg-cyan-600 disabled:opacity-50"
+                      >
+                        Giao
+                      </button>
+                      {event.assignee && (
+                        <button
+                          onClick={() => { setAssignVal(""); runAction(() => assignEvent(event.id, null), "Đã bỏ giao."); }}
+                          disabled={busy}
+                          className="text-[10px] text-gray-500 hover:text-gray-300"
+                        >
+                          Bỏ giao
+                        </button>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-[10px] text-gray-600">Chưa có người dùng operator+ nào để giao.</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Đóng / mở lại vụ */}
+              <div className="space-y-1">
+                <div className="text-[11px] text-gray-500">Kết thúc</div>
+                {resolved ? (
+                  <button
+                    onClick={() => runAction(() => reopenEvent(event.id), "Đã mở lại vụ.")}
+                    disabled={busy}
+                    className="flex items-center gap-1 rounded border border-orange-700 bg-orange-950/40 px-2 py-1 text-[10px] font-semibold text-orange-300 hover:bg-orange-900/40 disabled:opacity-50"
+                  >
+                    <RotateCcw size={11} /> Mở lại vụ
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => runAction(() => resolveEvent(event.id, note.trim() || null), "Đã đóng vụ.")}
+                    disabled={busy}
+                    className="flex items-center gap-1 rounded bg-emerald-700 px-2 py-1 text-[10px] font-semibold text-white hover:bg-emerald-600 disabled:opacity-50"
+                  >
+                    <CheckCircle2 size={11} /> Đã xử lý xong
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Nhật ký xử lý (audit trail) — luôn xem được nếu đã có thao tác */}
+      {event.audit?.length > 0 && (
+        <div className="mt-2">
+          <button
+            onClick={() => setHistoryOpen((v) => !v)}
+            className="flex items-center gap-1 text-[11px] text-gray-500 transition-colors hover:text-gray-300"
+          >
+            <History size={11} className={`transition-transform ${historyOpen ? "rotate-0" : ""}`} />
+            Nhật ký xử lý ({event.audit.length})
+          </button>
+          {historyOpen && (
+            <ul className="mt-1 space-y-1 rounded border border-gray-700 bg-gray-900/60 px-3 py-2 text-[11px] text-gray-400">
+              {event.audit.map((a, i) => (
+                <li key={i} className="flex flex-wrap gap-x-2">
+                  <span className="text-gray-600">{formatTime(a.at)}</span>
+                  <span className="font-semibold text-gray-300">{AUDIT_ACTION_LABEL[a.action] || a.action}</span>
+                  <span className="text-gray-500">bởi {a.by}</span>
+                  {(a.from !== undefined || a.to !== undefined) && (
+                    <span className="text-gray-500">({dispositionText(a.from)} → {dispositionText(a.to)})</span>
+                  )}
+                  {a.note && <span className="text-gray-400">— {a.note}</span>}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
     </div>
