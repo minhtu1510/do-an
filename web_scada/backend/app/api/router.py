@@ -18,6 +18,7 @@ from .. import control_lock
 from .. import ip_allowlist
 from ..events import event_service
 from ..events.models import EventRecord
+from ..events.service import ResolveBlockedError
 from ..ids_upload.service import model_configured as ids_model_configured
 from ..opcua.gateway import TagWriteError
 from ..scenarios import scenario_catalog, scenario_store
@@ -313,24 +314,37 @@ async def get_events(limit: int = 100, _user=Depends(require_role("viewer"))):
     }
 
 
-ALLOWED_DISPOSITIONS = {None, "investigating", "false_positive", "confirmed_new_pattern"}
-# "confirmed_new_pattern" is a bigger call than the other two (operator can
-# self-serve investigating/false_positive) — it's the explicit human
-# validation step real human-in-the-loop anomaly-detection practice calls
-# for before treating a flagged case as real signal instead of noise
-# (default assumption stays false-positive-like until someone with
-# authority says otherwise). Reserved for admin, same tier as this app's
-# other consequential-judgment actions (release write-lock, manage users).
+# "investigating" used to be a 3rd choice here ("đang điều tra") but it was
+# a intermediate WORKFLOW state, not a conclusion — it overlapped with (and
+# could silently drift from) assignee: an event could be "investigating"
+# with no assignee, or have an assignee while disposition stayed blank.
+# "Đang xử lý" is now derived purely from assignee (see EventRow's "Đang xử
+# lý: {assignee}" line in AlarmEvents.jsx) instead of a separately-picked
+# value here. Only real CONCLUSIONS remain choosable: the event either
+# turned out to be nothing (false_positive) or a confirmed real pattern
+# (confirmed_new_pattern). Old DB rows may still carry "investigating" from
+# before this change — still displayed fine, just no longer selectable.
+ALLOWED_DISPOSITIONS = {None, "false_positive", "confirmed_new_pattern"}
+# "confirmed_new_pattern" is a bigger call than false_positive (operator can
+# self-serve that one) — it's the explicit human validation step real
+# human-in-the-loop anomaly-detection practice calls for before treating a
+# flagged case as real signal instead of noise (default assumption stays
+# false-positive-like until someone with authority says otherwise).
+# Reserved for admin, same tier as this app's other consequential-judgment
+# actions (release write-lock, manage users).
 ADMIN_ONLY_DISPOSITIONS = {"confirmed_new_pattern"}
 
 
 class AckEventRequest(BaseModel):
-    disposition: str | None = None  # None (đã xác nhận) | "investigating" | "false_positive" | "confirmed_new_pattern"
+    disposition: str | None = None  # None (đã xác nhận) | "false_positive" | "confirmed_new_pattern"
     note: str | None = None
 
 
 @api_router.post("/events/{event_id}/ack")
 async def ack_event(event_id: str, body: AckEventRequest = AckEventRequest(), user=Depends(require_role("operator"))):
+    """"Xác nhận" trên web = claim (ACK + tự nhận làm người xử lý nếu chưa
+    ai nhận) — xem event_service.claim() để biết vì sao khác với ACK qua
+    Telegram."""
     from ..websocket.manager import ws_manager
 
     if body.disposition not in ALLOWED_DISPOSITIONS:
@@ -338,7 +352,7 @@ async def ack_event(event_id: str, body: AckEventRequest = AckEventRequest(), us
     if body.disposition in ADMIN_ONLY_DISPOSITIONS and user.role != "admin":
         return JSONResponse(status_code=403, content={"error": "admin_only", "message": "Chỉ admin mới xác nhận được 'phát hiện mẫu mới thật'."})
 
-    event = event_service.ack(event_id, user.username, body.disposition, body.note)
+    event = event_service.claim(event_id, user.username, body.disposition, body.note)
     if event is None:
         return JSONResponse(status_code=404, content={"error": "event_not_found", "id": event_id})
 
@@ -372,7 +386,7 @@ async def ack_events_bulk(body: AckBulkRequest, user=Depends(require_role("opera
 
     acked, not_found = [], []
     for event_id in body.event_ids:
-        event = event_service.ack(event_id, user.username, body.disposition, body.note)
+        event = event_service.claim(event_id, user.username, body.disposition, body.note)
         if event is None:
             not_found.append(event_id)
             continue
@@ -397,14 +411,20 @@ async def _broadcast_updated(event):
 ASSIGNABLE_MIN_ROLE = "operator"
 
 
-def _assignable_users() -> list[dict]:
-    """Danh sách người có thể nhận xử lý sự cố (operator+). Chỉ trả username +
-    role, KHÔNG bao giờ trả password hash hay field nhạy cảm khác."""
+def _assignable_users(caller_role: str) -> list[dict]:
+    """Danh sách người có thể nhận xử lý sự cố — operator+, VÀ cấp bậc không
+    cao hơn người đang giao (caller_role). Không cho "cấp dưới giao ngược lên
+    cấp trên" (operator giao thẳng cho admin) — nếu cần admin để ý, dùng
+    "Yêu cầu hỗ trợ" (request_support) thay vì chuyển hẳn quyền sở hữu vụ.
+    admin (rank cao nhất) vẫn giao được cho bất kỳ ai operator+. Chỉ trả
+    username + role, KHÔNG bao giờ trả password hash hay field nhạy cảm khác.
+    """
     from sqlalchemy import select as _select
     from ..auth.db import get_session as _get_auth_session
     from ..auth.deps import ROLE_RANK
     from ..auth.models import User
 
+    caller_rank = ROLE_RANK.get(caller_role, 0)
     session = _get_auth_session()
     try:
         users = session.scalars(_select(User).order_by(User.username)).all()
@@ -412,16 +432,18 @@ def _assignable_users() -> list[dict]:
             {"username": u.username, "role": u.role}
             for u in users
             if ROLE_RANK.get(u.role, 0) >= ROLE_RANK[ASSIGNABLE_MIN_ROLE]
+            and ROLE_RANK.get(u.role, 0) <= caller_rank
         ]
     finally:
         session.close()
 
 
 @api_router.get("/events/assignable-users")
-async def assignable_users(_user=Depends(require_role("operator"))):
+async def assignable_users(user=Depends(require_role("operator"))):
     """Ai được phép nhận giao xử lý — mở cho operator+ (chính những người đi
-    giao vụ), khác /auth/users vốn admin-only. Không lộ thông tin nhạy cảm."""
-    return {"users": _assignable_users()}
+    giao vụ), khác /auth/users vốn admin-only. Danh sách đã lọc theo cấp bậc
+    của chính người gọi (xem _assignable_users). Không lộ thông tin nhạy cảm."""
+    return {"users": _assignable_users(user.role)}
 
 
 class AssignEventRequest(BaseModel):
@@ -432,15 +454,31 @@ class AssignEventRequest(BaseModel):
 async def assign_event(event_id: str, body: AssignEventRequest = AssignEventRequest(), user=Depends(require_role("operator"))):
     """Giao vụ cho một người xử lý (hoặc bỏ giao với assignee=null). Ai giao:
     operator+ (thực hành SOC cho phép ca trực tự phân công). Giao cho ai:
-    BẮT BUỘC là user có thật với role operator+ — chặn giao cho tên bịa hoặc
-    cho viewer (read-only, không xử lý được). Ghi vết vào audit trail."""
+    BẮT BUỘC là user có thật với role operator+ VÀ cấp bậc không cao hơn
+    người giao (chặn "cấp dưới giao ngược lên cấp trên" — xem
+    _assignable_users). Ghi vết vào audit trail."""
     assignee = (body.assignee or "").strip() or None
-    if assignee is not None and assignee not in {u["username"] for u in _assignable_users()}:
+    if assignee is not None and assignee not in {u["username"] for u in _assignable_users(user.role)}:
         return JSONResponse(status_code=422, content={
             "error": "invalid_assignee",
-            "message": "Chỉ giao được cho người dùng có thật với vai trò operator trở lên.",
+            "message": "Chỉ giao được cho người dùng có thật, vai trò operator trở lên, và cấp bậc không cao hơn bạn.",
         })
     event = event_service.assign(event_id, user.username, assignee)
+    if event is None:
+        return JSONResponse(status_code=404, content={"error": "event_not_found", "id": event_id})
+    return await _broadcast_updated(event)
+
+
+class SupportRequestBody(BaseModel):
+    requested: bool = True
+
+
+@api_router.post("/events/{event_id}/support-request")
+async def support_request(event_id: str, body: SupportRequestBody = SupportRequestBody(), user=Depends(require_role("operator"))):
+    """Cờ "Yêu cầu hỗ trợ" — khác assign(): KHÔNG chuyển quyền sở hữu vụ,
+    chỉ đánh dấu để admin để ý (StatusBar hiện số lượng đang chờ). Bất kỳ
+    operator+ nào cũng gọi được (kể cả để hủy yêu cầu của chính mình)."""
+    event = event_service.request_support(event_id, user.username, body.requested)
     if event is None:
         return JSONResponse(status_code=404, content={"error": "event_not_found", "id": event_id})
     return await _broadcast_updated(event)
@@ -453,11 +491,47 @@ class ResolveEventRequest(BaseModel):
 @api_router.post("/events/{event_id}/resolve")
 async def resolve_event(event_id: str, body: ResolveEventRequest = ResolveEventRequest(), user=Depends(require_role("operator"))):
     """Đóng vụ — trạng thái kết thúc của quy trình xử lý do con người bấm
-    (khác `status` ACTIVE/CLEARED do điều kiện vật lý điều khiển)."""
-    event = event_service.resolve(event_id, user.username, body.note)
+    (khác `status` ACTIVE/CLEARED do điều kiện vật lý điều khiển). Chặn với
+    409 nếu đây là alarm có điều kiện vật lý thật và vẫn đang ACTIVE — xem
+    CONDITION_BASED_EVENT_TYPES trong events/service.py."""
+    try:
+        event = event_service.resolve(event_id, user.username, body.note)
+    except ResolveBlockedError as e:
+        return JSONResponse(status_code=409, content={"error": "still_active", "message": str(e)})
     if event is None:
         return JSONResponse(status_code=404, content={"error": "event_not_found", "id": event_id})
     return await _broadcast_updated(event)
+
+
+class ResolveBulkRequest(BaseModel):
+    event_ids: list[str] = Field(min_length=1, max_length=200)
+    note: str | None = None
+
+
+@api_router.post("/events/resolve-bulk")
+async def resolve_events_bulk(body: ResolveBulkRequest, user=Depends(require_role("operator"))):
+    """Same "Đóng vụ" as /events/{id}/resolve, applied to several events in
+    one request (a batch of pcap uploads producing several incidents at
+    once shouldn't need one click per row). Each blocked item (condition-
+    based alarm still ACTIVE) is reported, not silently skipped."""
+    from ..websocket.manager import ws_manager
+
+    resolved, not_found, blocked = [], [], []
+    for event_id in body.event_ids:
+        try:
+            event = event_service.resolve(event_id, user.username, body.note)
+        except ResolveBlockedError as e:
+            blocked.append({"id": event_id, "message": str(e)})
+            continue
+        if event is None:
+            not_found.append(event_id)
+            continue
+        resolved.append(event.to_dict())
+        payload = event.to_dict()
+        payload["active_count"] = alarm_engine.active_alarm_count()
+        await ws_manager.broadcast_event(payload)
+
+    return {"resolved": resolved, "not_found": not_found, "blocked": blocked}
 
 
 @api_router.post("/events/{event_id}/reopen")

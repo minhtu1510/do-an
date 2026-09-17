@@ -110,6 +110,8 @@ def insert_event(event: dict) -> None:
             assignee=event.get("assignee"),
             resolved_by=event.get("resolved_by"),
             resolved_at=datetime.fromisoformat(event["resolved_at"]) if event.get("resolved_at") else None,
+            support_requested_by=event.get("support_requested_by"),
+            support_requested_at=datetime.fromisoformat(event["support_requested_at"]) if event.get("support_requested_at") else None,
             audit_json=json.dumps(event["audit"]) if event.get("audit") else None,
         ))
         session.commit()
@@ -153,6 +155,8 @@ def update_event_workflow(event: dict) -> None:
             row.assignee = event.get("assignee")
             row.resolved_by = event.get("resolved_by")
             row.resolved_at = datetime.fromisoformat(event["resolved_at"]) if event.get("resolved_at") else None
+            row.support_requested_by = event.get("support_requested_by")
+            row.support_requested_at = datetime.fromisoformat(event["support_requested_at"]) if event.get("support_requested_at") else None
             row.audit_json = json.dumps(event["audit"]) if event.get("audit") else None
             session.commit()
     finally:

@@ -123,6 +123,21 @@ async def poll_telegram_updates(on_ack: Callable[[str], Awaitable[None]]) -> Non
             await _clear_buttons(client, event_id)
 
 
+async def clear_pending_buttons(event_id: str) -> None:
+    """Public entry point for a NON-Telegram ack (web "Xác nhận"/claim,
+    ack-bulk, or resolve()'s own auto-ack) to remove the "Xác nhận" button
+    from any Telegram message still showing it for this event. Without
+    this, acking on the web leaves a live button on the phone — tapping it
+    afterwards would silently overwrite acked_by back to "telegram-bot" and
+    erase the record of who really acked it first. No-op if Telegram isn't
+    configured or no message is pending for this event."""
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    if not bot_token or event_id not in _sent_messages:
+        return
+    async with httpx.AsyncClient(timeout=5) as client:
+        await _clear_buttons(client, event_id)
+
+
 async def _answer_callback(client: httpx.AsyncClient, callback_query_id: str, text: str) -> None:
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
     try:

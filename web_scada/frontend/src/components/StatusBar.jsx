@@ -1,20 +1,36 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { Cpu, Radio, Wifi, LogOut, AlertTriangle, ShieldCheck, KeyRound, X } from "lucide-react";
-import { apiFetch, fetchPlcStatus } from "../services/api";
+import { Link } from "react-router-dom";
+import { Cpu, LifeBuoy, Radio, Wifi, LogOut, AlertTriangle, ShieldCheck, KeyRound, X } from "lucide-react";
+import { apiFetch, fetchEvents, fetchPlcStatus } from "../services/api";
 import { connectWebSocket } from "../services/websocket";
 import { useAuth } from "../stores/authStore";
 import { useToast } from "./Toast";
 
 export default function StatusBar() {
-  const { username, role, logout } = useAuth();
+  const { username, role, logout, hasRole } = useAuth();
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [plcStatus, setPlcStatus] = useState(null);
   const [tags, setTags] = useState({});
   const [wsOpen, setWsOpen] = useState(false);
+  // Đếm số sự kiện đang "Yêu cầu hỗ trợ" chưa đóng vụ — hiển thị mọi lúc
+  // mọi nơi (không chỉ trang Cảnh báo & Sự kiện) đúng tinh thần "Admin
+  // không trực màn hình 24/7 nhưng vẫn phải thấy ngay khi có người cần".
+  // Trang riêng tự fetch/theo dõi events của chính nó — cái này là bản
+  // rút gọn CHỈ giữ 3 field cần cho việc đếm, không lặp lại toàn bộ state.
+  const [supportEvents, setSupportEvents] = useState(() => new Map());
 
   useEffect(() => {
     fetchPlcStatus().then(setPlcStatus);
+    if (hasRole("operator")) {
+      fetchEvents(500).then((data) => {
+        const map = new Map();
+        for (const e of data.events || []) {
+          if (e.support_requested_by) map.set(e.id, e);
+        }
+        setSupportEvents(map);
+      }).catch(() => {});
+    }
     const unsub = connectWebSocket((data) => {
       if (data.type === "tag_update") setTags((prev) => ({ ...prev, [data.key]: data.data }));
       if (data.type === "full_state") {
@@ -25,12 +41,22 @@ export default function StatusBar() {
           setTags(map);
         }
       }
+      if (data.type === "event" && data.event) {
+        setSupportEvents((prev) => {
+          const next = new Map(prev);
+          if (data.event.support_requested_by) next.set(data.event.id, data.event);
+          else next.delete(data.event.id);
+          return next;
+        });
+      }
       if (data.type === "ws_open") setWsOpen(true);
       if (data.type === "ws_close") setWsOpen(false);
     });
     const timer = setInterval(() => fetchPlcStatus().then(setPlcStatus), 10000);
     return () => { unsub(); clearInterval(timer); };
   }, []);
+
+  const supportCount = supportEvents.size;
 
   const plcConnected = plcStatus?.connected ?? null;
   const anyStale = Object.values(tags).length > 0 && Object.values(tags).some((t) => t.stale);
@@ -72,6 +98,15 @@ export default function StatusBar() {
           <span className={`font-mono font-semibold ${allStale ? "text-red-300" : "text-emerald-300"}`}>{healthyTags}/{Object.values(tags).length}</span>
         </div>
 
+        {supportCount > 0 && (
+          <Link
+            to="/alarms"
+            title={`${supportCount} sự kiện đang yêu cầu hỗ trợ`}
+            className="flex animate-pulse items-center gap-1.5 rounded-lg border border-rose-500/20 bg-rose-500/10 px-2.5 py-1.5 text-[10px] font-bold text-rose-300 transition-colors hover:bg-rose-500/20"
+          >
+            <LifeBuoy size={11} /> HỖ TRỢ ({supportCount})
+          </Link>
+        )}
         {plcDisconnected && (
           <span className="flex animate-pulse items-center gap-1.5 rounded-lg border border-red-500/20 bg-red-500/10 px-2.5 py-1.5 text-[10px] font-bold text-red-300">
             <AlertTriangle size={11} /> PLC OFFLINE

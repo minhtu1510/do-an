@@ -22,12 +22,15 @@ class EventRecord:
     id: str = field(default_factory=lambda: str(uuid4()))
     acked_by: str | None = None
     acked_at: str | None = None
-    # disposition: human-assigned handling state, separate from `status`
+    # disposition: human CONCLUSION about the event, separate from `status`
     # (which alarms/engine.py flips ACTIVE<->CLEARED based on the real
-    # physical condition for condition-based alarms). None = chưa xử lý,
-    # "investigating" = đang xử lý, "false_positive" = xác nhận không phải
-    # sự cố thật. Kept independent so a manual disposition on a one-shot
-    # event (PCAP attack, rate-limited, etc.) is never silently overwritten.
+    # physical condition) and separate from assignee ("đang xử lý" is
+    # derived from assignee being set, not a disposition value — see
+    # ALLOWED_DISPOSITIONS in api/router.py). None = chưa kết luận gì,
+    # "false_positive" = xác nhận không phải sự cố thật, "confirmed_new_
+    # pattern" = xác nhận đúng là 1 kiểu tấn công/lỗi thật (admin only).
+    # May still be "investigating" on rows persisted before that value was
+    # retired as a selectable disposition — kept displayable, not writable.
     disposition: str | None = None
     note: str | None = None
     # Structured attack labels (e.g. ["RWRITE", "SPOOF"]) for
@@ -49,6 +52,14 @@ class EventRecord:
     assignee: str | None = None
     resolved_by: str | None = None
     resolved_at: str | None = None
+    # "Yêu cầu hỗ trợ" — the assignee (or anyone operator+) flags this needs
+    # admin eyes, WITHOUT handing over ownership the way assign() would.
+    # Deliberately separate from assignee: assigning to admin directly reads
+    # as "cấp dưới chỉ đạo cấp trên" (see assign()'s rank check below), while
+    # this is a plain request an admin can notice and choose to act on.
+    # Auto-cleared when the event is resolved (see resolve()).
+    support_requested_by: str | None = None
+    support_requested_at: str | None = None
     audit: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -71,5 +82,7 @@ class EventRecord:
             "assignee": self.assignee,
             "resolved_by": self.resolved_by,
             "resolved_at": self.resolved_at,
+            "support_requested_by": self.support_requested_by,
+            "support_requested_at": self.support_requested_at,
             "audit": self.audit,
         }

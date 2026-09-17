@@ -83,6 +83,10 @@ def _migrate_events_disposition_note() -> None:
             conn.execute(text("ALTER TABLE events ADD COLUMN resolved_at DATETIME"))
         if "audit_json" not in columns:
             conn.execute(text("ALTER TABLE events ADD COLUMN audit_json TEXT"))
+        if "support_requested_by" not in columns:
+            conn.execute(text("ALTER TABLE events ADD COLUMN support_requested_by VARCHAR(64)"))
+        if "support_requested_at" not in columns:
+            conn.execute(text("ALTER TABLE events ADD COLUMN support_requested_at DATETIME"))
 
 
 def get_session() -> Session:

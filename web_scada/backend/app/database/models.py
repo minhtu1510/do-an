@@ -82,6 +82,10 @@ class EventRow(Base):
     assignee: Mapped[str | None] = mapped_column(String(64), nullable=True)
     resolved_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # "Yêu cầu hỗ trợ" flag — see EventRecord.support_requested_by in
+    # events/models.py for why this is separate from assignee.
+    support_requested_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    support_requested_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     audit_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     def to_dict(self) -> dict:
@@ -106,6 +110,8 @@ class EventRow(Base):
             "assignee": self.assignee,
             "resolved_by": self.resolved_by,
             "resolved_at": self.resolved_at.isoformat() if self.resolved_at else None,
+            "support_requested_by": self.support_requested_by,
+            "support_requested_at": self.support_requested_at.isoformat() if self.support_requested_at else None,
             "audit": json.loads(self.audit_json) if self.audit_json else [],
         }
 

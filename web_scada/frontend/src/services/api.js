@@ -164,6 +164,17 @@ export async function assignEvent(eventId, assignee) {
   return body;
 }
 
+export async function requestSupport(eventId, requested = true) {
+  const res = await apiFetch(`/events/${eventId}/support-request`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ requested }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.message || body.detail || "Yêu cầu hỗ trợ thất bại");
+  return body;
+}
+
 export async function resolveEvent(eventId, note = null) {
   const res = await apiFetch(`/events/${eventId}/resolve`, {
     method: "POST",
@@ -172,6 +183,17 @@ export async function resolveEvent(eventId, note = null) {
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.message || body.detail || "Đóng vụ thất bại");
+  return body;
+}
+
+export async function resolveEventsBulk(eventIds, note = null) {
+  const res = await apiFetch("/events/resolve-bulk", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ event_ids: eventIds, note }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.message || body.detail || "Đóng vụ hàng loạt thất bại");
   return body;
 }
 

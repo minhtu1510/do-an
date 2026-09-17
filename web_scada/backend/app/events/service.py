@@ -8,6 +8,7 @@ startup rebuilds the in-memory cache from it.
 
 from __future__ import annotations
 
+import asyncio
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from typing import Iterable
@@ -32,6 +33,33 @@ AUTO_CLEAR_MAP: dict[str, list[tuple[str, bool]]] = {
     "ATTACK_SENSOR_SPOOF_CLEARED": [("ATTACK_SENSOR_SPOOF_SUSPECTED", False)],
     "WRITE_LOCK_RELEASED": [("WRITE_LOCK_ENGAGED", False)],
 }
+
+# Event types with a real physical "recovered" signal (the left-hand side of
+# AUTO_CLEAR_MAP above eventually flips them CLEARED). "Đóng vụ" on one of
+# these must wait for that to happen — closing the human ticket while the
+# underlying condition (PLC still disconnected, write-lock still engaged...)
+# is literally still true would hide an ongoing problem. Derived from
+# AUTO_CLEAR_MAP instead of hand-duplicated so the two can't drift apart.
+#
+# Forensic/one-shot event types (ATTACK_PCAP_DETECTED, IDS_ANOMALY_DETECTED,
+# COMMAND_* ...) are NOT in here on purpose: they have no future physical
+# event that will ever clear them (a pcap analysis is a fact about the past,
+# not a live condition), so for those "Đóng vụ" IS the terminal state —
+# gating them on status=="CLEARED" would make them permanently unclosable.
+CONDITION_BASED_EVENT_TYPES: set[str] = {
+    closed_type for pairs in AUTO_CLEAR_MAP.values() for closed_type, _ in pairs
+}
+
+
+class ResolveBlockedError(Exception):
+    """Raised by resolve() when the event is a condition-based alarm still
+    ACTIVE — see CONDITION_BASED_EVENT_TYPES above."""
+
+    def __init__(self, event_type: str):
+        self.event_type = event_type
+        super().__init__(
+            f"Không thể đóng vụ khi sự cố '{event_type}' vẫn đang tiếp diễn (status=ACTIVE)."
+        )
 
 
 class EventService:
@@ -58,7 +86,10 @@ class EventService:
                 disposition=row.get("disposition"), note=row.get("note"), labels=row.get("labels"),
                 escalation_level=row.get("escalation_level") or 0,
                 assignee=row.get("assignee"), resolved_by=row.get("resolved_by"),
-                resolved_at=row.get("resolved_at"), audit=row.get("audit") or [],
+                resolved_at=row.get("resolved_at"),
+                support_requested_by=row.get("support_requested_by"),
+                support_requested_at=row.get("support_requested_at"),
+                audit=row.get("audit") or [],
             )
             for row in rows
         ]
@@ -116,6 +147,12 @@ class EventService:
                 return event
         return None
 
+    def get(self, event_id: str) -> EventRecord | None:
+        """Public read-only lookup — for callers (e.g. Telegram's on_ack)
+        that need to check current state before deciding whether to act,
+        without going through the mutating ack()/assign()/resolve() calls."""
+        return self._find(event_id)
+
     def _audit(self, event: EventRecord, action: str, by: str,
                frm: str | None = None, to: str | None = None,
                note: str | None = None) -> None:
@@ -134,6 +171,25 @@ class EventService:
         except Exception:
             pass  # live UI must keep working even if the DB write fails
 
+    def _clear_telegram_buttons(self, event_id: str, acked_by: str) -> None:
+        """Fire-and-forget: an event was just acked by something OTHER than
+        a Telegram tap (web claim, bulk ack, resolve()'s own auto-ack) — any
+        "Xác nhận" button still live on a Telegram message for this event
+        must be removed now, or a later tap on that stale button would
+        silently overwrite acked_by back to "telegram-bot". Scheduled on the
+        running loop since this method itself is sync (called from plain
+        request handlers, not awaited) — same pattern as main.py's
+        on_tag_update. Best-effort: no running loop / Telegram not
+        configured must never break the ack that triggered this.
+        """
+        try:
+            from ..notify import TELEGRAM_ACK_USERNAME, clear_pending_buttons
+            if acked_by == TELEGRAM_ACK_USERNAME:
+                return  # Telegram's own poll loop already clears its buttons after this tap
+            asyncio.get_event_loop().create_task(clear_pending_buttons(event_id))
+        except Exception:
+            pass
+
     def ack(
         self, event_id: str, username: str,
         disposition: str | None = None, note: str | None = None,
@@ -141,18 +197,31 @@ class EventService:
         """Acknowledge an event, or re-classify an already-acked one. Calling
         again with a different disposition is allowed and records the change in
         the audit trail (old → new) instead of silently overwriting — this is
-        how "đổi phân loại sau khi ack" works end to end."""
+        how "đổi phân loại sau khi ack" works end to end. acked_by/acked_at are
+        set ONCE, on the first ack, and never touched again — they record who
+        first saw it, not who most recently re-classified it (assignee tracks
+        current ownership separately, see assign())."""
+        from .. import notify as _notify  # lazy: avoids a module-load-order cycle
+
         event = self._find(event_id)
         if event is None:
             return None
-        prev_disp = event.disposition
         first_ack = event.acked_by is None
-        event.acked_by = username
-        event.acked_at = datetime.now(TZ).isoformat()
+        if not first_ack and username == _notify.TELEGRAM_ACK_USERNAME:
+            # A stale phone button, tapped after this was already acked some
+            # other way (web claim, a different Telegram message for the same
+            # event, ...) — silently do nothing rather than let a late tap
+            # revert a human's disposition or steal the "who acked" credit.
+            return event
+        prev_disp = event.disposition
+        if first_ack:
+            event.acked_by = username
+            event.acked_at = datetime.now(TZ).isoformat()
         event.disposition = disposition
         event.note = note
         if first_ack:
             self._audit(event, "ack", username, to=disposition, note=note)
+            self._clear_telegram_buttons(event_id, username)
         elif prev_disp != disposition:
             self._audit(event, "disposition", username, frm=prev_disp, to=disposition, note=note)
         else:
@@ -160,15 +229,66 @@ class EventService:
         self._persist(event)
         return event
 
+    def claim(
+        self, event_id: str, username: str,
+        disposition: str | None = None, note: str | None = None,
+    ) -> EventRecord | None:
+        """Web "Xác nhận" button on a NEW event: ACK + auto-assign to the
+        clicking engineer in one action (the "claim the alert" pattern —
+        PagerDuty/Opsgenie do the same, so nobody has to separately "giao
+        việc" cho chính mình right after acking it). Only sets assignee if
+        nobody already has it, so re-classifying an already-claimed event
+        (or one already handed to someone else) never silently reassigns it.
+
+        Telegram's ack (notify/telegram.py -> main.py's on_ack) deliberately
+        calls ack() directly instead of this — a phone tap should silence
+        the nagging, but a bot pseudo-identity ("telegram-bot") must never
+        become the recorded incident owner. A real engineer claims it on
+        the web afterwards (assign() below, used by the "Tiếp nhận vụ này"
+        quick action when an event is already acked but still unassigned).
+        """
+        event = self.ack(event_id, username, disposition, note)
+        if event is not None and event.assignee is None:
+            self.assign(event_id, username, username)
+        return event
+
     def assign(self, event_id: str, username: str, assignee: str | None) -> EventRecord | None:
         """Set (or clear, with assignee=None) who is officially handling this
-        incident. Recorded in the audit trail."""
+        incident. Recorded in the audit trail. No-op (no audit entry, no DB
+        write) if the target is already the current assignee — otherwise
+        re-confirming the same person in the UI would spam the audit trail
+        with pointless "assign: X -> X" entries."""
         event = self._find(event_id)
         if event is None:
             return None
         prev = event.assignee
-        event.assignee = assignee or None
+        normalized = assignee or None
+        if normalized == prev:
+            return event
+        event.assignee = normalized
         self._audit(event, "assign", username, frm=prev, to=event.assignee)
+        self._persist(event)
+        return event
+
+    def request_support(self, event_id: str, username: str, requested: bool) -> EventRecord | None:
+        """Flag (or un-flag) this event as needing admin attention — WITHOUT
+        transferring ownership the way assign() does. Kept deliberately
+        separate from assign(): handing an incident straight to an admin
+        account reads as "cấp dưới chỉ đạo cấp trên" (see the rank check on
+        /events/{id}/assign in api/router.py), whereas this is just a plain
+        request an admin can notice (StatusBar badge) and choose to act on —
+        the operator keeps ownership of their own case the whole time."""
+        event = self._find(event_id)
+        if event is None:
+            return None
+        if requested:
+            event.support_requested_by = username
+            event.support_requested_at = datetime.now(TZ).isoformat()
+            self._audit(event, "request_support", username)
+        else:
+            event.support_requested_by = None
+            event.support_requested_at = None
+            self._audit(event, "cancel_support", username)
         self._persist(event)
         return event
 
@@ -179,12 +299,19 @@ class EventService:
         event = self._find(event_id)
         if event is None:
             return None
+        if event.event_type in CONDITION_BASED_EVENT_TYPES and event.status != "CLEARED":
+            raise ResolveBlockedError(event.event_type)
         if event.acked_by is None:
             event.acked_by = username
             event.acked_at = datetime.now(TZ).isoformat()
             self._audit(event, "ack", username, to=event.disposition)
+            self._clear_telegram_buttons(event_id, username)
         event.resolved_by = username
         event.resolved_at = datetime.now(TZ).isoformat()
+        # A resolved case has nothing left to "need help with" — clear any
+        # standing support request so it doesn't linger in the StatusBar badge.
+        event.support_requested_by = None
+        event.support_requested_at = None
         self._audit(event, "resolve", username, note=note)
         self._persist(event)
         return event

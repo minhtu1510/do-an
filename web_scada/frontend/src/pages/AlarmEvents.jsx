@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { jsPDF } from "jspdf";
-import { Bell, Check, CheckCircle2, ChevronRight, ClipboardList, FileDown, History, Inbox, Lock, RotateCcw, Search, ShieldAlert, ShieldCheck, ShieldX, Unlock, UserPlus } from "lucide-react";
-import { ackEvent, ackEventsBulk, assignEvent, fetchAssignableUsers, fetchEvents, fetchWriteLock, releaseWriteLock, reopenEvent, resolveEvent } from "../services/api";
+import { Bell, Check, CheckCircle2, ChevronRight, ClipboardList, FileDown, History, Inbox, LifeBuoy, Lock, RotateCcw, Search, ShieldAlert, ShieldCheck, ShieldX, Unlock, UserPlus, UserCheck } from "lucide-react";
+import { ackEvent, ackEventsBulk, assignEvent, fetchAssignableUsers, fetchEvents, fetchWriteLock, releaseWriteLock, reopenEvent, requestSupport, resolveEvent, resolveEventsBulk } from "../services/api";
 import { connectWebSocket } from "../services/websocket";
 import PageHeader from "../components/PageHeader";
 import ExportCsvButton from "../components/ExportCsvButton";
@@ -10,8 +10,19 @@ import { useToast } from "../components/Toast";
 import { COMMAND_EVENT_TYPES } from "../constants/events";
 import { runbookFor } from "../lib/runbook";
 
+// Phải khớp CONDITION_BASED_EVENT_TYPES ở backend (events/service.py) — các
+// loại cảnh báo có tín hiệu vật lý "đã phục hồi" thật (khác sự kiện pháp y
+// một-lần như ATTACK_PCAP_DETECTED, không có gì tự chuyển CLEARED cho nó).
+const CONDITION_BASED_EVENT_TYPES = new Set([
+  "PLC_DISCONNECTED",
+  "OPCUA_STALE",
+  "STAGE_TIMER_OUT_OF_RANGE",
+  "ATTACK_SENSOR_SPOOF_SUSPECTED",
+  "WRITE_LOCK_ENGAGED",
+]);
+
 const DISPOSITION_LABEL = {
-  investigating: "Đang xử lý",
+  investigating: "Đang điều tra",
   false_positive: "Xác nhận báo động giả",
   confirmed_new_pattern: "Xác nhận mẫu mới thật (admin)",
 };
@@ -23,6 +34,8 @@ const AUDIT_ACTION_LABEL = {
   assign: "Giao vụ",
   resolve: "Đóng vụ",
   reopen: "Mở lại vụ",
+  request_support: "Yêu cầu hỗ trợ",
+  cancel_support: "Hủy yêu cầu hỗ trợ",
 };
 
 function dispositionText(value) {
@@ -90,7 +103,7 @@ function exportEventPdf(event) {
 // gọi 2 lần, và gộp chung 1 trang thay vì 2 trang riêng vì cả hai đều chỉ là
 // "chuyện gì vừa xảy ra" và cùng yêu cầu role operator+ để thấy phần nhật ký.
 export default function AlarmEvents() {
-  const { hasRole } = useAuth();
+  const { hasRole, username } = useAuth();
   const toast = useToast();
   const [events, setEvents] = useState([]);
   const [commandEvents, setCommandEvents] = useState([]);
@@ -100,6 +113,7 @@ export default function AlarmEvents() {
   const [search, setSearch] = useState("");
   const [severityFilter, setSeverityFilter] = useState("ALL");
   const [statusFilter, setStatusFilter] = useState("ALL");
+  const [mineOnly, setMineOnly] = useState(false);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [bulkAcking, setBulkAcking] = useState(false);
   const [users, setUsers] = useState([]);
@@ -108,6 +122,7 @@ export default function AlarmEvents() {
   const filteredEvents = events.filter((e) => {
     if (severityFilter !== "ALL" && e.severity !== severityFilter) return false;
     if (statusFilter !== "ALL" && e.status !== statusFilter) return false;
+    if (mineOnly && e.assignee !== username) return false;
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       if (!e.message?.toLowerCase().includes(q) && !e.event_type?.toLowerCase().includes(q)) return false;
@@ -118,6 +133,10 @@ export default function AlarmEvents() {
   // Only rows an operator could individually ACK are selectable — matches
   // EventRow's own needsAck check (ACTIVE + not yet acked).
   const pendingIds = filteredEvents.filter((e) => e.status === "ACTIVE" && !e.acked_by).map((e) => e.id);
+  // Đã xác nhận nhưng chưa đóng vụ — mutually exclusive với pendingIds
+  // (một sự kiện không thể vừa "chưa xác nhận" vừa "đã xác nhận"), nên dùng
+  // chung 1 checkbox/selectedIds cho cả 2 nhóm là an toàn.
+  const resolvableIds = filteredEvents.filter((e) => e.acked_by && !e.resolved_by).map((e) => e.id);
 
   useEffect(() => {
     fetchEvents(500).then((data) => {
@@ -184,6 +203,10 @@ export default function AlarmEvents() {
     setSelectedIds(new Set(pendingIds));
   }
 
+  function selectAllResolvable() {
+    setSelectedIds(new Set(resolvableIds));
+  }
+
   async function handleAckBulk(disposition) {
     if (selectedIds.size === 0) return;
     setBulkAcking(true);
@@ -193,6 +216,26 @@ export default function AlarmEvents() {
       setEvents((prev) => prev.map((e) => ackedById.get(e.id) || e));
       setSelectedIds(new Set());
       toast(`Đã xác nhận ${acked.length} sự kiện.${not_found.length ? ` (${not_found.length} không tìm thấy)` : ""}`, { tone: "success" });
+    } catch (err) {
+      toast(err.message, { tone: "error" });
+    } finally {
+      setBulkAcking(false);
+    }
+  }
+
+  async function handleResolveBulk() {
+    if (selectedIds.size === 0) return;
+    setBulkAcking(true);
+    try {
+      const { resolved, not_found, blocked } = await resolveEventsBulk([...selectedIds]);
+      const resolvedById = new Map(resolved.map((e) => [e.id, e]));
+      setEvents((prev) => prev.map((e) => resolvedById.get(e.id) || e));
+      setSelectedIds(new Set());
+      const extra = [
+        not_found.length ? `${not_found.length} không tìm thấy` : null,
+        blocked.length ? `${blocked.length} chưa đóng được vì sự cố còn ACTIVE` : null,
+      ].filter(Boolean).join(", ");
+      toast(`Đã đóng vụ ${resolved.length} sự kiện.${extra ? ` (${extra})` : ""}`, { tone: resolved.length ? "success" : "error" });
     } catch (err) {
       toast(err.message, { tone: "error" });
     } finally {
@@ -272,18 +315,18 @@ export default function AlarmEvents() {
               Xác nhận tất cả
             </button>
             <button
-              onClick={() => handleAckBulk("investigating")}
-              disabled={bulkAcking}
-              className="rounded border border-gray-600 bg-gray-800 px-3 py-1.5 text-xs text-gray-200 transition-colors hover:border-gray-500 disabled:opacity-50"
-            >
-              Đang xử lý
-            </button>
-            <button
               onClick={() => handleAckBulk("false_positive")}
               disabled={bulkAcking}
               className="rounded border border-gray-600 bg-gray-800 px-3 py-1.5 text-xs text-gray-200 transition-colors hover:border-gray-500 disabled:opacity-50"
             >
               Báo động giả
+            </button>
+            <button
+              onClick={handleResolveBulk}
+              disabled={bulkAcking}
+              className="rounded bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-emerald-600 disabled:opacity-50"
+            >
+              Đóng vụ hàng loạt
             </button>
           </div>
           <button onClick={() => setSelectedIds(new Set())} className="ml-auto text-xs text-gray-500 hover:text-gray-300">
@@ -301,6 +344,11 @@ export default function AlarmEvents() {
             {hasRole("operator") && pendingIds.length > 0 && (
               <button onClick={selectAllPending} className="text-xs text-cyan-400 hover:text-cyan-300">
                 Chọn tất cả {pendingIds.length} sự kiện đang chờ xác nhận
+              </button>
+            )}
+            {hasRole("operator") && resolvableIds.length > 0 && (
+              <button onClick={selectAllResolvable} className="text-xs text-emerald-400 hover:text-emerald-300">
+                Chọn tất cả {resolvableIds.length} sự kiện đang chờ đóng vụ
               </button>
             )}
           </div>
@@ -334,6 +382,16 @@ export default function AlarmEvents() {
                 <option value="ACTIVE">ACTIVE</option>
                 <option value="CLEARED">CLEARED</option>
               </select>
+              {hasRole("operator") && (
+                <button
+                  onClick={() => setMineOnly((v) => !v)}
+                  className={`flex items-center gap-1 rounded border px-2 py-1.5 text-xs transition-colors ${
+                    mineOnly ? "border-cyan-500 bg-cyan-950/40 text-cyan-300" : "border-gray-700 bg-gray-900 text-gray-300 hover:border-gray-600"
+                  }`}
+                >
+                  <UserCheck size={12} /> Việc của tôi
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -421,7 +479,7 @@ function SummaryCard({ label, value, color = "text-white", icon: Icon }) {
 }
 
 function EventRow({ event, onAck, onUpdate, users, selected, onToggleSelect }) {
-  const { hasRole } = useAuth();
+  const { hasRole, username } = useAuth();
   const toast = useToast();
   const [panelOpen, setPanelOpen] = useState(false);
   const [suggestionOpen, setSuggestionOpen] = useState(false);
@@ -441,6 +499,9 @@ function EventRow({ event, onAck, onUpdate, users, selected, onToggleSelect }) {
   const needsAck = event.status === "ACTIVE" && !event.acked_by;
   const acked = !!event.acked_by;
   const resolved = !!event.resolved_by;
+  const needsClaim = acked && !resolved && !event.assignee;
+  const selectable = needsAck || (acked && !resolved);
+  const resolveBlocked = CONDITION_BASED_EVENT_TYPES.has(event.event_type) && event.status === "ACTIVE";
   const suggestion = event.labels?.map((l) => [l, runbookFor(l)]).find(([, s]) => s);
   const canOperate = hasRole("operator");
 
@@ -479,13 +540,13 @@ function EventRow({ event, onAck, onUpdate, users, selected, onToggleSelect }) {
     <div className="px-4 py-3 transition-colors hover:bg-gray-900/40">
       <div className="grid gap-3 md:grid-cols-[20px_140px_110px_1fr_100px_170px_60px] md:items-center">
         <div>
-          {needsAck && canOperate && (
+          {selectable && canOperate && (
             <input
               type="checkbox"
               checked={!!selected}
               onChange={() => onToggleSelect(event.id)}
               className="h-3.5 w-3.5 accent-cyan-500"
-              title="Chọn để xác nhận hàng loạt"
+              title={needsAck ? "Chọn để xác nhận hàng loạt" : "Chọn để đóng vụ hàng loạt"}
             />
           )}
         </div>
@@ -494,7 +555,14 @@ function EventRow({ event, onAck, onUpdate, users, selected, onToggleSelect }) {
           <span className={`rounded px-2 py-1 text-[10px] font-bold ${severityColor}`}>{event.severity}</span>
         </div>
         <div>
-          <div className="text-sm font-semibold text-gray-200">{event.event_type}</div>
+          <div className="flex items-center gap-1.5">
+            <div className="text-sm font-semibold text-gray-200">{event.event_type}</div>
+            {event.support_requested_by && (
+              <span title={`${event.support_requested_by} yêu cầu admin hỗ trợ`} className="flex items-center gap-0.5 rounded bg-rose-950/50 px-1 py-0.5 text-[9px] font-bold text-rose-300">
+                <LifeBuoy size={9} /> HỖ TRỢ
+              </span>
+            )}
+          </div>
           <div className="text-xs text-gray-500">{event.message}</div>
           {event.tag_key && <div className="text-[10px] text-gray-600">Tag: {event.tag_key}</div>}
         </div>
@@ -504,10 +572,22 @@ function EventRow({ event, onAck, onUpdate, users, selected, onToggleSelect }) {
             <div className="text-gray-500">
               <div className="text-green-400">Đã xác nhận: {event.acked_by}</div>
               <div className="text-[10px] text-gray-600">{formatTime(event.acked_at)}</div>
-              <div className={`mt-0.5 text-[10px] font-semibold ${event.disposition === "false_positive" ? "text-gray-500" : "text-amber-400"}`}>
-                {dispositionText(event.disposition)}
-              </div>
-              {event.assignee && <div className="text-[10px] text-cyan-400">Giao: {event.assignee}</div>}
+              {event.disposition && (
+                <div className={`mt-0.5 text-[10px] font-semibold ${event.disposition === "false_positive" ? "text-gray-500" : "text-amber-400"}`}>
+                  {dispositionText(event.disposition)}
+                </div>
+              )}
+              {event.assignee ? (
+                <div className="mt-0.5 text-[10px] font-semibold text-amber-400">Đang xử lý: {event.assignee}</div>
+              ) : needsClaim && canOperate ? (
+                <button
+                  onClick={() => runAction(() => assignEvent(event.id, username), "Đã tiếp nhận vụ này.")}
+                  disabled={busy}
+                  className="mt-0.5 flex items-center gap-1 rounded border border-cyan-700 bg-cyan-950/40 px-1.5 py-0.5 text-[10px] font-semibold text-cyan-300 hover:bg-cyan-900/40 disabled:opacity-50"
+                >
+                  <UserPlus size={10} /> Tiếp nhận vụ này
+                </button>
+              ) : null}
               {resolved ? (
                 <div className="mt-0.5 flex items-center gap-1 text-[10px] font-semibold text-emerald-400">
                   <CheckCircle2 size={10} /> Đã đóng · {event.resolved_by}
@@ -569,13 +649,16 @@ function EventRow({ event, onAck, onUpdate, users, selected, onToggleSelect }) {
 
       {panelOpen && canOperate && (
         <div className="mt-2 space-y-3 rounded border border-gray-700 bg-gray-900/60 p-3">
-          {/* 1. Phân loại — dùng cho cả lần xác nhận đầu và đổi phân loại sau khi ack */}
+          {/* 1. Phân loại — chỉ 2 KẾT LUẬN có ý nghĩa khác nhau thật (không phải
+          trạng thái trung gian): Báo động giả, hoặc Xác nhận mẫu mới thật
+          (admin). "Đang xử lý" không còn là 1 lựa chọn tay ở đây nữa — nó tự
+          suy ra từ việc có assignee hay chưa (xem "Đang xử lý: {assignee}"
+          phía trên), tránh 2 field lệch nhau. */}
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-[11px] text-gray-500">Phân loại:</span>
               {[
                 ["", "Đã xác nhận"],
-                ["investigating", "Đang xử lý"],
                 ["false_positive", "Báo động giả"],
                 ...(event.event_type === "IDS_ANOMALY_DETECTED" && hasRole("admin")
                   ? [["confirmed_new_pattern", "Xác nhận mẫu mới thật"]]
@@ -655,6 +738,33 @@ function EventRow({ event, onAck, onUpdate, users, selected, onToggleSelect }) {
                 </div>
               </div>
 
+              {/* Yêu cầu hỗ trợ — khác "Giao cho": KHÔNG chuyển quyền sở hữu,
+              chỉ đánh dấu để admin để ý (badge HỖ TRỢ + StatusBar). Không
+              cần chuyển hẳn vụ cho admin (điều mà assign() giờ chặn theo
+              cấp bậc) mới báo được là cần admin xem qua. */}
+              {!resolved && (
+                <div className="space-y-1">
+                  <div className="flex items-center gap-1 text-[11px] text-gray-500"><LifeBuoy size={11} /> Hỗ trợ</div>
+                  {event.support_requested_by ? (
+                    <button
+                      onClick={() => runAction(() => requestSupport(event.id, false), "Đã hủy yêu cầu hỗ trợ.")}
+                      disabled={busy}
+                      className="flex items-center gap-1 rounded border border-rose-700 bg-rose-950/40 px-2 py-1 text-[10px] font-semibold text-rose-300 hover:bg-rose-900/40 disabled:opacity-50"
+                    >
+                      <LifeBuoy size={11} /> Hủy yêu cầu ({event.support_requested_by})
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => runAction(() => requestSupport(event.id, true), "Đã gửi yêu cầu hỗ trợ tới admin.")}
+                      disabled={busy}
+                      className="flex items-center gap-1 rounded border border-gray-600 bg-gray-800 px-2 py-1 text-[10px] font-semibold text-gray-300 hover:border-rose-600 hover:text-rose-300 disabled:opacity-50"
+                    >
+                      <LifeBuoy size={11} /> Yêu cầu admin hỗ trợ
+                    </button>
+                  )}
+                </div>
+              )}
+
               {/* Đóng / mở lại vụ */}
               <div className="space-y-1">
                 <div className="text-[11px] text-gray-500">Kết thúc</div>
@@ -667,13 +777,21 @@ function EventRow({ event, onAck, onUpdate, users, selected, onToggleSelect }) {
                     <RotateCcw size={11} /> Mở lại vụ
                   </button>
                 ) : (
-                  <button
-                    onClick={() => runAction(() => resolveEvent(event.id, note.trim() || null), "Đã đóng vụ.")}
-                    disabled={busy}
-                    className="flex items-center gap-1 rounded bg-emerald-700 px-2 py-1 text-[10px] font-semibold text-white hover:bg-emerald-600 disabled:opacity-50"
-                  >
-                    <CheckCircle2 size={11} /> Đã xử lý xong
-                  </button>
+                  <div>
+                    <button
+                      onClick={() => runAction(() => resolveEvent(event.id, note.trim() || null), "Đã đóng vụ.")}
+                      disabled={busy || resolveBlocked}
+                      title={resolveBlocked ? "Không thể đóng vụ khi sự cố vẫn đang tiếp diễn (status=ACTIVE)." : undefined}
+                      className="flex items-center gap-1 rounded bg-emerald-700 px-2 py-1 text-[10px] font-semibold text-white hover:bg-emerald-600 disabled:opacity-50 disabled:hover:bg-emerald-700"
+                    >
+                      <CheckCircle2 size={11} /> Đã xử lý xong
+                    </button>
+                    {resolveBlocked && (
+                      <div className="mt-1 max-w-[220px] text-[10px] text-orange-400/80">
+                        Sự cố vẫn đang tiếp diễn (ACTIVE) — chờ tự phục hồi rồi mới đóng được vụ.
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
