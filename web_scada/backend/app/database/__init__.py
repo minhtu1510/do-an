@@ -2,6 +2,7 @@
 
 from .connection import database_configured, init_db
 from .repositories import (
+    get_event_by_id,
     get_pcap_analysis,
     insert_event,
     insert_pcap_analysis,
@@ -18,6 +19,7 @@ from .repositories import (
 
 __all__ = [
     "database_configured",
+    "get_event_by_id",
     "get_pcap_analysis",
     "init_db",
     "insert_event",

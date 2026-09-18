@@ -63,6 +63,22 @@ WRITABLE_TEST_NODE = os.getenv("DAY8_WRITABLE_TEST_NODE", 'ns=3;s="Nhap"')
 CONFIG_MANIPULATION_NODE = os.getenv("DAY8_CONFIG_NODE", "").strip()
 MALICIOUS_WRITE_DELTA = int(os.getenv("DAY8_MALICIOUS_WRITE_DELTA", "3"))
 
+
+async def _write_value_no_timestamp(node, value, varianttype=None) -> None:
+    """asyncua's Node.write_value() routes every value through
+    value_to_datavalue(), which auto-attaches SourceTimestamp=datetime.now(...)
+    to anything that isn't already a ua.DataValue. The S7-1500 rejects a
+    client-supplied SourceTimestamp with BadWriteNotSupported -- this made
+    OPCUA_WRITE_DENIED/OPCUA_MALICIOUS_WRITE misreport genuine, unauthenticated
+    writes as protocol-level rejections (same bug found and fixed in
+    attacks_ext/concealed_stop_attack.py:write_value_only). Build the
+    DataValue with only the Value field set so value_to_datavalue() passes it
+    through untouched -- no timestamp added, matching what a real OPC UA
+    client on this Anonymous/No-Security endpoint would send."""
+    from asyncua import ua
+
+    await node.write_value(ua.DataValue(ua.Variant(value, varianttype)))
+
 # Tags this run's results with the OPC UA server security policy that was
 # actually active when the run happened (e.g. "Anonymous", "Basic256Sha256").
 # Set by the operator per run -- never inferred -- so the Security/IDS
@@ -235,8 +251,9 @@ async def opcua_write_denied() -> list[str]:
             for node_id in nodes:
                 node = client.get_node(node_id)
                 try:
-                    before = await node.read_value()
-                    await node.write_value(before)
+                    before_dv = await node.read_data_value()
+                    before = before_dv.Value.Value
+                    await _write_value_no_timestamp(node, before, before_dv.Value.VariantType)
                     after = await node.read_value()
                     evidence.append(f"{node_id}: UNEXPECTED_WRITE_SUCCESS same_value={before!r} after={after!r}")
                 except Exception as exc:
@@ -698,12 +715,14 @@ async def _attempt_write_and_rollback(client, node_id: str, compute_new_value, e
     cannot be missed when reviewing a run.
     """
     node = client.get_node(node_id)
-    baseline = await node.read_value()
+    baseline_dv = await node.read_data_value()
+    baseline = baseline_dv.Value.Value
+    varianttype = baseline_dv.Value.VariantType
     new_value = compute_new_value(baseline)
     evidence.append(f"baseline_value={baseline!r} target_node={node_id} attempted_value={new_value!r}")
 
     try:
-        await node.write_value(new_value)
+        await _write_value_no_timestamp(node, new_value, varianttype)
     except Exception as exc:
         evidence.append(f"write_rejected={type(exc).__name__}: {exc}; no process impact occurred")
         return False
@@ -712,7 +731,7 @@ async def _attempt_write_and_rollback(client, node_id: str, compute_new_value, e
     evidence.append(f"WRITE_SUCCEEDED: wrote={new_value!r} confirmed_value={confirmed!r}")
 
     try:
-        await node.write_value(baseline)
+        await _write_value_no_timestamp(node, baseline, varianttype)
         restored = await node.read_value()
         if restored == baseline:
             evidence.append(f"rollback_confirmed: restored_value={restored!r}")

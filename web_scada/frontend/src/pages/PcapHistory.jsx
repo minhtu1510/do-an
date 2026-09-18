@@ -34,7 +34,13 @@ export default function PcapHistory() {
       // Stored result_json is the raw pre-normalization payload from the
       // backend — same reason a fresh OPC UA analysis needs normalizing in
       // IdsUpload.jsx's handleSubmit (lowercase "benign", no layer_used).
-      idsUploadStore.result = detail.protocol === "opcua" ? normalizeOpcuaResult(detail) : { ...detail, protocol: "s7comm" };
+      // fromHistory: true — history rows keep packet summaries (time/IP/port/
+      // info) but never the full detail/hex bytes (see _without_packet_detail
+      // in ids_upload/router.py, to avoid bloating the DB with megabytes per
+      // row). IdsUpload.jsx uses this flag to explain the empty expand state
+      // instead of silently showing nothing when a packet row is clicked.
+      const base = detail.protocol === "opcua" ? normalizeOpcuaResult(detail) : { ...detail, protocol: "s7comm" };
+      idsUploadStore.result = { ...base, fromHistory: true };
       idsUploadStore.protocol = detail.protocol || "s7comm";
       idsUploadStore.file = null;
       idsUploadStore.historian = null;

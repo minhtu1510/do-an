@@ -207,6 +207,52 @@ def extract_evidence_pcap(pcap_path: Path, flow_table: list[dict[str, Any]], job
     return out_path
 
 
+def detect_protocol(pcap_path: Path) -> dict[str, Any]:
+    """Which of the 2 supported protocols (if any) this pcap actually
+    contains — a single fast `tshark -z io,phs` pass (protocol hierarchy
+    stats), not a model: this is exactly the kind of thing rule-based DPI is
+    for, not ML. Used both to auto-route an upload to the right analysis
+    pipeline without the operator needing to already know S7comm vs OPC UA,
+    and to give OPC UA the same "wrong protocol, don't silently produce a
+    meaningless result" guard S7comm's decode_level check already has (see
+    service.py's analyze_pcap) — OPC UA had no equivalent until now.
+
+    Returns {"detected": "s7comm"|"opcua"|"both"|"none",
+             "s7comm_packets": int, "opcua_packets": int}.
+    "both" means real traffic for both protocols was found in the same
+    file — deliberately NOT auto-analyzed together (the 2 protocols have
+    unrelated feature schemas/models/result shapes); the caller should ask
+    the operator to pick one explicitly in that case.
+    """
+    try:
+        proc = subprocess.run(
+            ["tshark", "-r", str(pcap_path), "-q", "-z", "io,phs"],
+            capture_output=True, text=True, timeout=TSHARK_TIMEOUT_S,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return {"detected": "none", "s7comm_packets": 0, "opcua_packets": 0}
+
+    counts = {"s7comm": 0, "opcua": 0}
+    for line in proc.stdout.splitlines():
+        parts = line.strip().split()
+        if len(parts) >= 2 and parts[0] in counts and parts[1].startswith("frames:"):
+            try:
+                counts[parts[0]] = int(parts[1].split(":", 1)[1])
+            except ValueError:
+                pass
+
+    s7, opcua = counts["s7comm"], counts["opcua"]
+    if s7 > 0 and opcua > 0:
+        detected = "both"
+    elif s7 > 0:
+        detected = "s7comm"
+    elif opcua > 0:
+        detected = "opcua"
+    else:
+        detected = "none"
+    return {"detected": detected, "s7comm_packets": s7, "opcua_packets": opcua}
+
+
 def sweep_old_evidence(scratch_dir: Path, max_age_s: float = EVIDENCE_MAX_AGE_S) -> None:
     """Called at the start of each analyze_pcap() — cheap (glob over a
     handful of files) and keeps UPLOAD_SCRATCH from growing unbounded across

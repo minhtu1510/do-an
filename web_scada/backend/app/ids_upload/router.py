@@ -199,6 +199,33 @@ async def ids_status(_user=Depends(require_role("operator"))):
     return {"configured": model_configured(), "model_dir": str(MODEL_DIR)}
 
 
+@ids_upload_router.post("/detect-protocol")
+async def ids_detect_protocol(file: UploadFile = File(...), _user=Depends(require_role("operator"))):
+    """Fast pre-check (tshark protocol hierarchy, not a model) so the upload
+    UI can tell the operator which pipeline (S7comm/OPC UA) a pcap belongs to
+    before they have to pick one themselves — see packet_capture.detect_protocol
+    for why this doesn't need AI. Re-uploads/re-parses the file independently
+    of the real /analyze call that follows (no shared state to clean up),
+    which is a fine tradeoff for pcaps this size (IDS Upload caps at 200MB,
+    typical analysis files are small slices)."""
+    import uuid
+    from .packet_capture import detect_protocol
+
+    body = await file.read()
+    if len(body) > MAX_UPLOAD_BYTES:
+        return JSONResponse(status_code=413, content={"error": "file_too_large", "max_bytes": MAX_UPLOAD_BYTES})
+    if not body:
+        return JSONResponse(status_code=400, content={"error": "empty_file"})
+
+    tmp_path = UPLOAD_SCRATCH / f"{uuid.uuid4().hex[:12]}_{file.filename or 'upload.pcap'}"
+    try:
+        tmp_path.write_bytes(body)
+        result = await run_in_threadpool(detect_protocol, tmp_path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+    return result
+
+
 @ids_upload_router.post("/analyze")
 async def ids_analyze(
     file: UploadFile = File(...),

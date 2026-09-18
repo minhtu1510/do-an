@@ -66,6 +66,22 @@ class EventService:
     def __init__(self, max_events: int = 1000):
         self._events: deque[EventRecord] = deque(maxlen=max_events)
 
+    @staticmethod
+    def _record_from_row(row: dict) -> EventRecord:
+        return EventRecord(
+            id=row["id"], event_type=row["event_type"], message=row["message"],
+            severity=row["severity"], tag_key=row["tag_key"], old_value=row["old_value"],
+            new_value=row["new_value"], status=row["status"], timestamp=row["timestamp"],
+            acked_by=row["acked_by"], acked_at=row["acked_at"],
+            disposition=row.get("disposition"), note=row.get("note"), labels=row.get("labels"),
+            escalation_level=row.get("escalation_level") or 0,
+            assignee=row.get("assignee"), resolved_by=row.get("resolved_by"),
+            resolved_at=row.get("resolved_at"),
+            support_requested_by=row.get("support_requested_by"),
+            support_requested_at=row.get("support_requested_at"),
+            audit=row.get("audit") or [],
+        )
+
     def load_from_db(self) -> None:
         """Rebuild the in-memory cache from the persistent table — called
         once at backend startup so history from before a restart is not
@@ -77,22 +93,7 @@ class EventService:
             rows = query_recent_events(self._events.maxlen or 1000)
         except Exception:
             return
-        records = [
-            EventRecord(
-                id=row["id"], event_type=row["event_type"], message=row["message"],
-                severity=row["severity"], tag_key=row["tag_key"], old_value=row["old_value"],
-                new_value=row["new_value"], status=row["status"], timestamp=row["timestamp"],
-                acked_by=row["acked_by"], acked_at=row["acked_at"],
-                disposition=row.get("disposition"), note=row.get("note"), labels=row.get("labels"),
-                escalation_level=row.get("escalation_level") or 0,
-                assignee=row.get("assignee"), resolved_by=row.get("resolved_by"),
-                resolved_at=row.get("resolved_at"),
-                support_requested_by=row.get("support_requested_by"),
-                support_requested_at=row.get("support_requested_at"),
-                audit=row.get("audit") or [],
-            )
-            for row in rows
-        ]
+        records = [self._record_from_row(row) for row in rows]
         self._events = deque(records, maxlen=self._events.maxlen)
 
     def add(self, event: EventRecord) -> EventRecord:
@@ -145,7 +146,25 @@ class EventService:
         for event in self._events:
             if event.id == event_id:
                 return event
-        return None
+        # Not in the bounded in-memory cache (max_events, default 1000) —
+        # could just be a stale/unknown id, but could also be a genuinely
+        # real, still-open event that aged out because enough newer events
+        # (e.g. OPC UA reconnect noise, which fires often in this lab) piled
+        # up after it. A browser tab open since before that eviction would
+        # still show the row and let someone click "Xác nhận"/"Giao"/"Yêu
+        # cầu hỗ trợ" on it — that used to 404 even though the record was
+        # still perfectly intact in the DB. Fall back to a direct DB lookup
+        # and re-admit it into the cache so it isn't lost again immediately.
+        try:
+            from ..database import get_event_by_id
+            row = get_event_by_id(event_id)
+        except Exception:
+            return None
+        if row is None:
+            return None
+        event = self._record_from_row(row)
+        self._events.appendleft(event)
+        return event
 
     def get(self, event_id: str) -> EventRecord | None:
         """Public read-only lookup — for callers (e.g. Telegram's on_ack)

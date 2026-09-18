@@ -293,6 +293,15 @@ export async function fetchIdsStatus() {
   return res.json();
 }
 
+export async function detectPcapProtocol(file) {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await apiFetch("/ids/detect-protocol", { method: "POST", body: formData });
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.message || body.detail || "Nhận diện giao thức thất bại");
+  return body;
+}
+
 export async function analyzeIdsPcap(file, plcIp, window) {
   const formData = new FormData();
   formData.append("file", file);

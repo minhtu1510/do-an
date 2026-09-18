@@ -187,6 +187,21 @@ def analyze_pcap(pcap_bytes: bytes, filename: str, plc_ip: str, window: float = 
     csv_path = None
     try:
         pcap_path.write_bytes(pcap_bytes)
+
+        # S7comm's analyze_pcap has a decode_level check that rejects a file
+        # with zero real S7comm traffic instead of silently producing a
+        # meaningless result — OPC UA had no equivalent, so uploading e.g. an
+        # S7comm pcap here would just as silently score garbage. Same DPI
+        # helper used for the auto-detect pre-check (see ids_upload/router.py
+        # detect_pcap_protocol) closes that gap here too.
+        from .packet_capture import detect_protocol
+        detection = detect_protocol(pcap_path)
+        if detection["opcua_packets"] == 0:
+            raise IdsUploadOpcuaError(
+                "File pcap này không có gói tin OPC UA nào — có thể bạn đã chọn nhầm giao thức "
+                "(thử lại với giao thức S7comm) hoặc file không chứa lưu lượng OPC UA thật."
+            )
+
         csv_path = _extract_features(pcap_path, plc_ip, window)
 
         df = pd.read_csv(csv_path, low_memory=False)

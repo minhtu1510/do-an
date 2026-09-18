@@ -7,13 +7,14 @@ import { jsPDF } from "jspdf";
 import html2canvas from "html2canvas";
 import {
   UploadCloud, Play, Pause, RotateCcw, FileDown, Loader2, AlertTriangle, X, Download,
+  CheckCircle2, ChevronDown, ScanSearch,
 } from "lucide-react";
 import PageHeader from "../components/PageHeader";
 import Gauge from "../components/Gauge";
 import Sparkline from "../components/Sparkline";
 import NotConfiguredNotice from "../components/NotConfiguredNotice";
 import { useToast } from "../components/Toast";
-import { analyzeIdsPcap, analyzeIdsPcapOpcua, downloadIdsEvidence, fetchIdsStatus, fetchIdsStatusOpcua, fetchIpAllowlist, fetchProcessHistory } from "../services/api";
+import { analyzeIdsPcap, analyzeIdsPcapOpcua, detectPcapProtocol, downloadIdsEvidence, fetchIdsStatus, fetchIdsStatusOpcua, fetchIpAllowlist, fetchProcessHistory } from "../services/api";
 import { idsUploadStore, normalizeOpcuaResult } from "./idsUploadPersist";
 
 // Same validated categorical order used in Trends.jsx — fixed, never cycled.
@@ -321,6 +322,12 @@ export default function IdsUpload() {
   };
   const [file, setFileState] = useState(idsUploadStore.file);
   const setFile = (v) => { idsUploadStore.file = v; setFileState(v); };
+  // Tự nhận diện giao thức (tshark protocol hierarchy — rule-based, không
+  // phải model) ngay khi chọn file, để operator không cần tự biết pcap này
+  // là S7comm hay OPC UA trước khi phân tích. detection: null (chưa chọn
+  // file) | {detecting:true} | {detected, s7comm_packets, opcua_packets}.
+  const [detection, setDetection] = useState(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [plcIp, setPlcIpState] = useState(idsUploadStore.plcIp);
   const setPlcIp = (v) => { idsUploadStore.plcIp = v; setPlcIpState(v); };
   const [windowS, setWindowSState] = useState(idsUploadStore.windowS);
@@ -470,6 +477,25 @@ export default function IdsUpload() {
   const buckets = useMemo(() => bucketTimeline(result?.timeline), [result]);
   const densitySeries = useMemo(() => bucketTimelineByTime(revealedTimeline, tMin, tMax), [revealedTimeline, tMin, tMax]);
 
+  async function handleFileChange(f) {
+    setFile(f || null);
+    setDetection(null);
+    if (!f) return;
+    setDetection({ detecting: true });
+    try {
+      const d = await detectPcapProtocol(f);
+      setDetection(d);
+      // Chỉ tự chọn giao thức khi kết quả rõ ràng (đúng 1 trong 2) — "both"
+      // hoặc "none" để nguyên giao thức đang chọn, operator tự quyết định
+      // qua Tùy chọn nâng cao thay vì đoán giúp sai.
+      if (d.detected === "s7comm" || d.detected === "opcua") {
+        setProtocol(d.detected);
+      }
+    } catch {
+      setDetection(null); // nhận diện lỗi (vd. mất mạng) — không chặn phân tích, chỉ mất gợi ý
+    }
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
     if (!file) return;
@@ -491,6 +517,7 @@ export default function IdsUpload() {
 
   function handleClearAll() {
     setFile(null);
+    setDetection(null);
     setResult(null);
     setHistorian(null);
     setError(null);
@@ -588,33 +615,13 @@ export default function IdsUpload() {
       <form onSubmit={handleSubmit} className="rounded-lg border border-slate-700 bg-slate-800 p-4 shadow-sm shadow-black/20">
         <div className="flex flex-wrap items-end gap-3">
           <label className="flex flex-col gap-1">
-            <span className="text-xs uppercase text-slate-500">Giao thức</span>
-            <div className="flex overflow-hidden rounded border border-slate-700">
-              <button
-                type="button"
-                onClick={() => setProtocol("s7comm")}
-                className={`px-3 py-1.5 text-xs font-semibold transition-colors ${protocol === "s7comm" ? "bg-blue-600 text-white" : "bg-slate-950 text-slate-400 hover:text-slate-200"}`}
-              >
-                S7comm
-              </button>
-              <button
-                type="button"
-                onClick={() => setProtocol("opcua")}
-                className={`px-3 py-1.5 text-xs font-semibold transition-colors ${protocol === "opcua" ? "bg-blue-600 text-white" : "bg-slate-950 text-slate-400 hover:text-slate-200"}`}
-              >
-                OPC UA
-              </button>
-            </div>
-          </label>
-          <label className="flex flex-col gap-1">
             <span className="text-xs uppercase text-slate-500">File pcap/pcapng</span>
             <input
               type="file"
               accept=".pcap,.pcapng"
-              onChange={(e) => setFile(e.target.files?.[0] || null)}
+              onChange={(e) => handleFileChange(e.target.files?.[0] || null)}
               className="text-xs text-slate-300 file:mr-2 file:rounded file:border-0 file:bg-slate-900 file:px-3 file:py-1.5 file:text-xs file:text-slate-300 file:transition-colors file:hover:bg-slate-800"
             />
-            {file && <span className="text-[10px] text-cyan-400">Đang giữ: {file.name}</span>}
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-xs uppercase text-slate-500">PLC IP</span>
@@ -644,10 +651,70 @@ export default function IdsUpload() {
             </button>
           )}
         </div>
+        {/* Trạng thái nhận diện giao thức — rule-based (tshark protocol
+        hierarchy), không phải model AI: chỉ đọc xem pcap có gói tin S7comm/
+        OPC UA thật hay không, để operator không cần tự biết trước file này
+        thuộc giao thức nào. */}
+        {detection?.detecting && (
+          <div className="mt-2 flex items-center gap-1.5 text-xs text-slate-400">
+            <Loader2 size={12} className="animate-spin" /> Đang kiểm tra giao thức...
+          </div>
+        )}
+        {detection && !detection.detecting && (
+          <div className="mt-2 text-xs">
+            {detection.detected === "none" ? (
+              <div className="flex items-center gap-1.5 text-amber-400">
+                <AlertTriangle size={12} />
+                Không tìm thấy lưu lượng S7comm/OPC UA được hỗ trợ trong file này — kiểm tra lại file, hoặc bấm Phân tích để xem thông báo lỗi chi tiết.
+              </div>
+            ) : detection.detected === "both" ? (
+              <div className="flex items-center gap-1.5 text-amber-400">
+                <AlertTriangle size={12} />
+                Phát hiện cả 2 giao thức (S7comm {detection.s7comm_packets.toLocaleString()} gói · OPC UA {detection.opcua_packets.toLocaleString()} gói) — 2 giao thức dùng 2 model riêng, không phân tích gộp được. Chọn 1 giao thức ở "Tùy chọn nâng cao" bên dưới.
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 text-emerald-400">
+                <CheckCircle2 size={12} />
+                Đã nhận diện: {detection.detected === "opcua" ? "OPC UA" : "S7comm"} ({(detection.detected === "opcua" ? detection.opcua_packets : detection.s7comm_packets).toLocaleString()} gói tin phù hợp)
+              </div>
+            )}
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={() => setAdvancedOpen((v) => !v)}
+          className="mt-2 flex items-center gap-1 text-[11px] text-slate-500 transition-colors hover:text-slate-300"
+        >
+          <ChevronDown size={12} className={`transition-transform ${advancedOpen ? "rotate-180" : ""}`} />
+          Tùy chọn nâng cao — chọn giao thức thủ công
+        </button>
+        {advancedOpen && (
+          <div className="mt-2 flex items-center gap-2">
+            <ScanSearch size={12} className="text-slate-600" />
+            <span className="text-[11px] text-slate-500">Ép giao thức (ghi đè kết quả tự nhận diện):</span>
+            <div className="flex overflow-hidden rounded border border-slate-700">
+              <button
+                type="button"
+                onClick={() => setProtocol("s7comm")}
+                className={`px-3 py-1 text-xs font-semibold transition-colors ${protocol === "s7comm" ? "bg-blue-600 text-white" : "bg-slate-950 text-slate-400 hover:text-slate-200"}`}
+              >
+                S7comm
+              </button>
+              <button
+                type="button"
+                onClick={() => setProtocol("opcua")}
+                className={`px-3 py-1 text-xs font-semibold transition-colors ${protocol === "opcua" ? "bg-blue-600 text-white" : "bg-slate-950 text-slate-400 hover:text-slate-200"}`}
+              >
+                OPC UA
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="mt-2 text-[10px] text-slate-600">
-          Model hiện tại train trên cửa sổ 2s — đổi giá trị này sẽ lệch phân bố đặc trưng. Chọn đúng giao thức của file
-          đang tải lên: {protocol === "opcua" ? "OPC UA" : "S7comm"} dùng model và bộ trích xuất đặc trưng riêng, pcap
-          sai giao thức sẽ không trích được cửa sổ nào (báo lỗi rõ, không đoán bừa).
+          Đang dùng pipeline: {protocol === "opcua" ? "OPC UA" : "S7comm"} (model + bộ trích đặc trưng riêng, cửa sổ mặc định {protocol === "opcua" ? "5s" : "2s"}) —
+          đổi giá trị Window sẽ lệch phân bố đặc trưng so với lúc train. Pcap sai giao thức sẽ báo lỗi rõ, không đoán bừa.
         </div>
       </form>
 
@@ -660,6 +727,12 @@ export default function IdsUpload() {
 
       {result && (
         <>
+          {result.fromHistory && (
+            <div className="flex items-start gap-2 rounded-lg border border-amber-900/50 bg-amber-950/20 px-4 py-2.5 text-xs text-amber-300 animate-fade-in">
+              <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+              Đang xem lại từ lịch sử: danh sách gói tin (thời điểm/IP/cổng) vẫn còn, nhưng chi tiết đầy đủ (cây phân lớp giao thức + hex byte thô) chỉ lưu ngay lúc phân tích, không giữ trong lịch sử để tránh phình cơ sở dữ liệu — bấm vào 1 gói tin sẽ không mở rộng được. Muốn xem chi tiết đầy đủ, phân tích lại file pcap gốc.
+            </div>
+          )}
           <div className="flex flex-wrap items-center justify-between gap-2 animate-fade-in">
             <div className="text-[10px] text-slate-600">
               {result.model_trained_at

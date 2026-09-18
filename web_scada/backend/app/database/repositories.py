@@ -194,6 +194,19 @@ def query_recent_events(limit: int = 1000) -> list[dict]:
         session.close()
 
 
+def get_event_by_id(event_id: str) -> dict | None:
+    """Single-row lookup by primary key — the fallback path for EventService._find()
+    when an event has aged out of the bounded in-memory cache (max_events, default
+    1000) but a user still has it open in their browser and tries to act on it. See
+    EventService._find() for why this matters."""
+    session = get_session()
+    try:
+        row = session.get(EventRow, event_id)
+        return row.to_dict() if row is not None else None
+    finally:
+        session.close()
+
+
 MAX_PCAP_ANALYSIS_ROWS = 500
 
 
