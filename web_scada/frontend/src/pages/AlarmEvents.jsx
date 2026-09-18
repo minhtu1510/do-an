@@ -9,6 +9,7 @@ import { useAuth } from "../stores/authStore";
 import { useToast } from "../components/Toast";
 import { COMMAND_EVENT_TYPES } from "../constants/events";
 import { runbookFor } from "../lib/runbook";
+import { useVietnameseFont } from "../lib/pdfFont";
 
 // Phải khớp CONDITION_BASED_EVENT_TYPES ở backend (events/service.py) — các
 // loại cảnh báo có tín hiệu vật lý "đã phục hồi" thật (khác sự kiện pháp y
@@ -44,27 +45,17 @@ function dispositionText(value) {
 
 // One-event incident PDF — plain pdf.text() calls, not a screenshot: a
 // single event's fields don't need a rendered-page capture, and text is
-// crisper and more reliable than html2canvas for this.
-// jsPDF's built-in fonts (Helvetica etc.) only support WinAnsi encoding —
-// no Vietnamese diacritics. Feeding them accented text silently renders
-// garbled bytes ("Báo cáo sự cố" -> "Báo cáo sñ cÑ") instead of erroring,
-// so this went unnoticed until someone actually opened the PDF. Stripping
-// diacritics before every pdf.text() call is the same fix already used in
-// IdsUpload.jsx's PDF export for this identical jsPDF limitation.
-function stripDiacritics(text) {
-  return String(text)
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/đ/g, "d")
-    .replace(/Đ/g, "D");
-}
-
+// crisper and more reliable than html2canvas for this. Uses DejaVu Sans
+// (see lib/pdfFont.js) instead of jsPDF's built-in Helvetica — Helvetica is
+// WinAnsi-only and silently garbles Vietnamese diacritics, which used to be
+// worked around by stripping them (reads like txt-speak in a formal report).
 function exportEventPdf(event) {
   const pdf = new jsPDF({ orientation: "p", unit: "pt", format: "a4" });
+  useVietnameseFont(pdf);
   let y = 50;
   const line = (text, size = 10, gap = 18) => {
     pdf.setFontSize(size);
-    const wrapped = pdf.splitTextToSize(stripDiacritics(text), 500);
+    const wrapped = pdf.splitTextToSize(String(text), 500);
     pdf.text(wrapped, 40, y);
     y += gap * wrapped.length;
   };
@@ -132,7 +123,7 @@ export default function AlarmEvents() {
 
   // Only rows an operator could individually ACK are selectable — matches
   // EventRow's own needsAck check (ACTIVE + not yet acked).
-  const pendingIds = filteredEvents.filter((e) => e.status === "ACTIVE" && !e.acked_by).map((e) => e.id);
+  const pendingIds = filteredEvents.filter((e) => !e.acked_by).map((e) => e.id);
   // Đã xác nhận nhưng chưa đóng vụ — mutually exclusive với pendingIds
   // (một sự kiện không thể vừa "chưa xác nhận" vừa "đã xác nhận"), nên dùng
   // chung 1 checkbox/selectedIds cho cả 2 nhóm là an toàn.
@@ -496,7 +487,13 @@ function EventRow({ event, onAck, onUpdate, users, selected, onToggleSelect }) {
     ERROR: "text-red-300 bg-red-950/40",
   }[event.severity] || "text-gray-300 bg-gray-900";
   const statusColor = event.status === "ACTIVE" ? "text-red-400" : "text-green-400";
-  const needsAck = event.status === "ACTIVE" && !event.acked_by;
+  // Cần xác nhận không phụ thuộc status — một sự kiện tự CLEARED (điều kiện
+  // vật lý đã phục hồi) TRƯỚC KHI có ai xác nhận vẫn cần được xác nhận, nếu
+  // không thì không còn cách nào mở lại panel Xử lý cho nó nữa (không thấy
+  // "Xác nhận" vì lúc đó status không còn ACTIVE, cũng không thấy "Xử lý ▾"
+  // vì chưa ACK — kẹt cứng, kể cả khi nó vẫn còn "Yêu cầu hỗ trợ" treo trên
+  // đó cần hủy hoặc cần đóng vụ).
+  const needsAck = !event.acked_by;
   const acked = !!event.acked_by;
   const resolved = !!event.resolved_by;
   const needsClaim = acked && !resolved && !event.assignee;

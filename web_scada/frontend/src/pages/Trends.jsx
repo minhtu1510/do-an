@@ -9,6 +9,7 @@ import { fetchAllTags, fetchProcessHistory } from "../services/api";
 import PageHeader from "../components/PageHeader";
 import Gauge from "../components/Gauge";
 import Sparkline from "../components/Sparkline";
+import { useVietnameseFont } from "../lib/pdfFont";
 
 // Validated categorical slots (dark mode) — fixed order, never cycled per series identity.
 const BLUE = "#3987e5";
@@ -170,15 +171,16 @@ export default function Trends() {
       const imgData = canvas.toDataURL("image/png");
 
       const pdf = new jsPDF({ orientation: "p", unit: "pt", format: "a4" });
+      useVietnameseFont(pdf);
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
 
       pdf.setFontSize(16);
-      pdf.text("Trends & History — Bao cao lich su tag", 40, 50);
+      pdf.text("Báo cáo Xu hướng & Lịch sử — Web-SCADA IDS", 40, 50);
       pdf.setFontSize(10);
-      pdf.text(`Thoi gian xuat: ${new Date().toLocaleString()}`, 40, 75);
-      pdf.text(`Tong diem du lieu: ${totalPoints}`, 40, 90);
-      pdf.text("Du lieu historian that (SQLite/Postgres) — khong noi suy so lieu gia.", 40, 110);
+      pdf.text(`Thời gian xuất: ${new Date().toLocaleString()}`, 40, 75);
+      pdf.text(`Tổng điểm dữ liệu: ${totalPoints}`, 40, 90);
+      pdf.text("Dữ liệu historian thật (SQLite/Postgres) — không nội suy số liệu giả.", 40, 110);
 
       const imgWidth = pageWidth;
       const imgHeight = (canvas.height * imgWidth) / canvas.width;

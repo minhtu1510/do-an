@@ -16,6 +16,7 @@ import NotConfiguredNotice from "../components/NotConfiguredNotice";
 import { useToast } from "../components/Toast";
 import { analyzeIdsPcap, analyzeIdsPcapOpcua, detectPcapProtocol, downloadIdsEvidence, fetchIdsStatus, fetchIdsStatusOpcua, fetchIpAllowlist, fetchProcessHistory } from "../services/api";
 import { idsUploadStore, normalizeOpcuaResult } from "./idsUploadPersist";
+import { useVietnameseFont } from "../lib/pdfFont";
 
 // Same validated categorical order used in Trends.jsx — fixed, never cycled.
 const CATEGORICAL = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"];
@@ -439,17 +440,18 @@ export default function IdsUpload() {
       const imgData = canvas.toDataURL("image/png");
 
       const pdf = new jsPDF({ orientation: "p", unit: "pt", format: "a4" });
+      useVietnameseFont(pdf);
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
 
       pdf.setFontSize(16);
-      pdf.text("IDS Upload — Bao cao phan tich", 40, 50);
+      pdf.text("Báo cáo phân tích lưu lượng mạng — Web-SCADA IDS", 40, 50);
       pdf.setFontSize(10);
       pdf.text(`File pcap: ${result.source_file || "-"}`, 40, 75);
       pdf.text(`Model: ${result.model_dir || "-"}`, 40, 90);
-      pdf.text(`Thoi gian xuat: ${new Date().toLocaleString()}`, 40, 105);
-      pdf.text(`Tong cua so: ${result.total_flows}  |  Cua so tan cong: ${result.attack_flows} (${(result.attack_ratio * 100).toFixed(1)}%)`, 40, 120);
-      pdf.text("Toan bo bieu do/bang duoi day la trang thai dang hien thi tren man hinh (ke ca vi tri phat lai neu dang tua).", 40, 140);
+      pdf.text(`Thời gian xuất: ${new Date().toLocaleString()}`, 40, 105);
+      pdf.text(`Tổng số cửa sổ: ${result.total_flows}  |  Cửa sổ bị dự đoán là tấn công: ${result.attack_flows} (${(result.attack_ratio * 100).toFixed(1)}%)`, 40, 120);
+      pdf.text("Toàn bộ biểu đồ/bảng dưới đây là trạng thái đang hiển thị trên màn hình (kể cả vị trí phát lại nếu đang tua).", 40, 140);
 
       const imgWidth = pageWidth;
       const imgHeight = (canvas.height * imgWidth) / canvas.width;

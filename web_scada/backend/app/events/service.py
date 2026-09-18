@@ -126,8 +126,13 @@ class EventService:
 
     def clear_active(self, event_type: str, tag_key: str | None = None) -> EventRecord | None:
         """Flip the newest still-ACTIVE event of this type (and, if given,
-        same tag_key) to CLEARED. Called both directly (releasing the write
-        lock) and automatically from add() via AUTO_CLEAR_MAP above."""
+        same tag_key) to CLEARED. Called automatically from add() via
+        AUTO_CLEAR_MAP above (e.g. WRITE_LOCK_RELEASED clearing the matching
+        WRITE_LOCK_ENGAGED). Broadcasts the change — without this, a
+        connected browser's local copy of the cleared event stays stale
+        (still shows ACTIVE, "Đóng vụ" stays disabled for condition-based
+        alarms) until the page is reloaded, even though the server and DB
+        already have the right status."""
         for event in self._events:
             if event.event_type != event_type or event.status != "ACTIVE":
                 continue
@@ -139,8 +144,25 @@ class EventService:
                 update_event_status(event.id, "CLEARED")
             except Exception:
                 pass
+            self._broadcast_cleared(event)
             return event
         return None
+
+    def _broadcast_cleared(self, event: EventRecord) -> None:
+        """Fire-and-forget websocket push for clear_active()'s mutation —
+        same reasoning/pattern as _clear_telegram_buttons: this method is
+        sync (called from both sync and async call sites via add()), so the
+        actual broadcast is scheduled on the running loop instead of
+        awaited directly."""
+        try:
+            from ..alarms import alarm_engine
+            from ..websocket.manager import ws_manager
+
+            payload = event.to_dict()
+            payload["active_count"] = alarm_engine.active_alarm_count()
+            asyncio.get_event_loop().create_task(ws_manager.broadcast_event(payload))
+        except Exception:
+            pass
 
     def _find(self, event_id: str) -> EventRecord | None:
         for event in self._events:
