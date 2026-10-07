@@ -1,0 +1,567 @@
+{
+  "pcap": "data_opc/day8_out/ood2_merged.pcap",
+  "timeline": "test_results/day8/timeline_ood2.csv",
+  "dataset": "data_opc/day8_out/opcua_ood2_ext_aa.csv",
+  "interval_rule": "start <= packet timestamp truncated to ms < end",
+  "scope": "TCP 4840 involving PLC 192.168.210.211 and attacker 192.168.210.32",
+  "missing_episodes": [
+    {
+      "episode": "day8_train_attacker_host_c001_OPCUA_ENDPOINT_DISCOVERY_fixed",
+      "label": "OPCUA_ENDPOINT_DISCOVERY",
+      "duration_ms": 431,
+      "attacker_related_packets_in_interval": 29,
+      "pipeline_scope_packets_in_interval": 29,
+      "attacker_originated_scope_payload_packets": 8,
+      "service_ids": {
+        "446": 2,
+        "449": 2,
+        "461": 1,
+        "467": 1,
+        "470": 1,
+        "428": 1,
+        "452": 1
+      },
+      "service_results": {
+        "0x00000000": 3
+      },
+      "status_codes": {},
+      "write_response_results": {},
+      "packet_numbers": [
+        3382,
+        3386,
+        3387,
+        3388,
+        3389,
+        3390,
+        3391,
+        3392,
+        3393,
+        3394,
+        3395,
+        3404,
+        3405,
+        3406,
+        3407,
+        3408,
+        3413,
+        3414,
+        3423,
+        3424,
+        3426,
+        3427,
+        3428,
+        3429,
+        3430,
+        3431,
+        3432,
+        3433,
+        3434
+      ],
+      "overlapping_csv_windows": [
+        {
+          "start_ms": "1788840820000",
+          "label": "BENIGN_NORMAL",
+          "episode_id": "day8_train_attacker_host_c001_BENIGN_cooldown"
+        }
+      ]
+    },
+    {
+      "episode": "day8_train_attacker_host_c003_OPCUA_PROTOCOL_FUZZ_slow",
+      "label": "OPCUA_PROTOCOL_FUZZ",
+      "duration_ms": 3038,
+      "attacker_related_packets_in_interval": 9,
+      "pipeline_scope_packets_in_interval": 9,
+      "attacker_originated_scope_payload_packets": 1,
+      "service_ids": {},
+      "service_results": {},
+      "status_codes": {},
+      "write_response_results": {},
+      "packet_numbers": [
+        23376,
+        23377,
+        23378,
+        23379,
+        23397,
+        23577,
+        23578,
+        23579,
+        23580
+      ],
+      "overlapping_csv_windows": [
+        {
+          "start_ms": "1788841010000",
+          "label": "BENIGN_NORMAL",
+          "episode_id": "day8_train_attacker_host_c003_BENIGN_warmup"
+        },
+        {
+          "start_ms": "1788841015000",
+          "label": "BENIGN_NORMAL",
+          "episode_id": "day8_train_attacker_host_c003_BENIGN_cooldown"
+        }
+      ]
+    },
+    {
+      "episode": "day8_train_attacker_host_c008_OPCUA_INVALID_WRITE_fixed",
+      "label": "OPCUA_INVALID_WRITE",
+      "duration_ms": 64,
+      "attacker_related_packets_in_interval": 10,
+      "pipeline_scope_packets_in_interval": 10,
+      "attacker_originated_scope_payload_packets": 3,
+      "service_ids": {
+        "634": 1,
+        "673": 1,
+        "676": 1,
+        "473": 1,
+        "476": 1,
+        "452": 1
+      },
+      "service_results": {
+        "0x00000000": 3
+      },
+      "status_codes": {
+        "0x00000000": 1
+      },
+      "write_response_results": {
+        "0x80740000": 1
+      },
+      "packet_numbers": [
+        61178,
+        61179,
+        61190,
+        61193,
+        61194,
+        61195,
+        61196,
+        61197,
+        61210,
+        61211
+      ],
+      "overlapping_csv_windows": [
+        {
+          "start_ms": "1788841430000",
+          "label": "BENIGN_NORMAL",
+          "episode_id": "day8_train_attacker_host_c008_BENIGN_warmup"
+        },
+        {
+          "start_ms": "1788841435000",
+          "label": "benign",
+          "episode_id": "benign#chunk7"
+        }
+      ]
+    },
+    {
+      "episode": "day8_train_attacker_host_c012_OPCUA_ENDPOINT_DISCOVERY_fixed",
+      "label": "OPCUA_ENDPOINT_DISCOVERY",
+      "duration_ms": 51,
+      "attacker_related_packets_in_interval": 13,
+      "pipeline_scope_packets_in_interval": 13,
+      "attacker_originated_scope_payload_packets": 3,
+      "service_ids": {
+        "446": 1,
+        "449": 1,
+        "428": 1,
+        "452": 1
+      },
+      "service_results": {
+        "0x00000000": 1
+      },
+      "status_codes": {},
+      "write_response_results": {},
+      "packet_numbers": [
+        100953,
+        100954,
+        100955,
+        100956,
+        100957,
+        100958,
+        100959,
+        100960,
+        100961,
+        100962,
+        100963,
+        100964,
+        100973
+      ],
+      "overlapping_csv_windows": [
+        {
+          "start_ms": "1788841870000",
+          "label": "BENIGN_NORMAL",
+          "episode_id": "day8_train_attacker_host_c012_BENIGN_cooldown"
+        }
+      ]
+    },
+    {
+      "episode": "day8_train_attacker_host_c017_OPCUA_WRITE_DENIED_fixed",
+      "label": "OPCUA_WRITE_DENIED",
+      "duration_ms": 53,
+      "attacker_related_packets_in_interval": 10,
+      "pipeline_scope_packets_in_interval": 10,
+      "attacker_originated_scope_payload_packets": 3,
+      "service_ids": {
+        "634": 1,
+        "673": 1,
+        "676": 1,
+        "473": 1,
+        "476": 1,
+        "452": 1
+      },
+      "service_results": {
+        "0x00000000": 3
+      },
+      "status_codes": {
+        "0x00000000": 1
+      },
+      "write_response_results": {
+        "0x80730000": 1
+      },
+      "packet_numbers": [
+        150007,
+        150008,
+        150009,
+        150012,
+        150015,
+        150016,
+        150017,
+        150018,
+        150027,
+        150028
+      ],
+      "overlapping_csv_windows": [
+        {
+          "start_ms": "1788842390000",
+          "label": "BENIGN_NORMAL",
+          "episode_id": "day8_train_attacker_host_c017_BENIGN_cooldown"
+        }
+      ]
+    },
+    {
+      "episode": "day8_train_attacker_host_c018_OPCUA_INVALID_WRITE_fixed",
+      "label": "OPCUA_INVALID_WRITE",
+      "duration_ms": 56,
+      "attacker_related_packets_in_interval": 10,
+      "pipeline_scope_packets_in_interval": 10,
+      "attacker_originated_scope_payload_packets": 3,
+      "service_ids": {
+        "634": 1,
+        "673": 1,
+        "676": 1,
+        "473": 1,
+        "476": 1,
+        "452": 1
+      },
+      "service_results": {
+        "0x00000000": 3
+      },
+      "status_codes": {
+        "0x00000000": 1
+      },
+      "write_response_results": {
+        "0x80740000": 1
+      },
+      "packet_numbers": [
+        155344,
+        155345,
+        155350,
+        155351,
+        155352,
+        155353,
+        155354,
+        155355,
+        155364,
+        155365
+      ],
+      "overlapping_csv_windows": [
+        {
+          "start_ms": "1788842455000",
+          "label": "BENIGN_NORMAL",
+          "episode_id": "day8_train_attacker_host_c018_BENIGN_cooldown"
+        }
+      ]
+    },
+    {
+      "episode": "day8_train_attacker_host_c019_OPCUA_INVALID_WRITE_fixed",
+      "label": "OPCUA_INVALID_WRITE",
+      "duration_ms": 59,
+      "attacker_related_packets_in_interval": 10,
+      "pipeline_scope_packets_in_interval": 10,
+      "attacker_originated_scope_payload_packets": 3,
+      "service_ids": {
+        "634": 1,
+        "673": 1,
+        "676": 1,
+        "473": 1,
+        "476": 1,
+        "452": 1
+      },
+      "service_results": {
+        "0x00000000": 3
+      },
+      "status_codes": {
+        "0x00000000": 1
+      },
+      "write_response_results": {
+        "0x80740000": 1
+      },
+      "packet_numbers": [
+        160694,
+        160695,
+        160697,
+        160698,
+        160699,
+        160700,
+        160701,
+        160702,
+        160711,
+        160712
+      ],
+      "overlapping_csv_windows": [
+        {
+          "start_ms": "1788842520000",
+          "label": "BENIGN_NORMAL",
+          "episode_id": "day8_train_attacker_host_c019_BENIGN_cooldown"
+        }
+      ]
+    },
+    {
+      "episode": "day8_train_attacker_host_c023_OPCUA_NODE_BROWSE_fixed",
+      "label": "OPCUA_NODE_BROWSE",
+      "duration_ms": 132,
+      "attacker_related_packets_in_interval": 42,
+      "pipeline_scope_packets_in_interval": 42,
+      "attacker_originated_scope_payload_packets": 19,
+      "service_ids": {
+        "530": 4,
+        "631": 14,
+        "634": 14,
+        "527": 3,
+        "473": 1,
+        "476": 1,
+        "452": 1
+      },
+      "service_results": {
+        "0x00000000": 19
+      },
+      "status_codes": {
+        "0x00000000": 4
+      },
+      "write_response_results": {},
+      "packet_numbers": [
+        190749,
+        190752,
+        190753,
+        190754,
+        190755,
+        190756,
+        190757,
+        190758,
+        190759,
+        190760,
+        190761,
+        190762,
+        190763,
+        190764,
+        190765,
+        190766,
+        190767,
+        190768,
+        190771,
+        190772,
+        190773,
+        190774,
+        190775,
+        190776,
+        190777,
+        190778,
+        190779,
+        190780,
+        190781,
+        190782,
+        190783,
+        190784,
+        190785,
+        190786,
+        190787,
+        190788,
+        190789,
+        190790,
+        190791,
+        190792,
+        190801,
+        190804
+      ],
+      "overlapping_csv_windows": [
+        {
+          "start_ms": "1788842845000",
+          "label": "BENIGN_NORMAL",
+          "episode_id": "day8_train_attacker_host_c023_BENIGN_cooldown"
+        }
+      ]
+    },
+    {
+      "episode": "day8_train_attacker_host_c025_OPCUA_INVALID_WRITE_fixed",
+      "label": "OPCUA_INVALID_WRITE",
+      "duration_ms": 58,
+      "attacker_related_packets_in_interval": 10,
+      "pipeline_scope_packets_in_interval": 10,
+      "attacker_originated_scope_payload_packets": 3,
+      "service_ids": {
+        "634": 1,
+        "673": 1,
+        "676": 1,
+        "473": 1,
+        "476": 1,
+        "452": 1
+      },
+      "service_results": {
+        "0x00000000": 3
+      },
+      "status_codes": {
+        "0x00000000": 1
+      },
+      "write_response_results": {
+        "0x80740000": 1
+      },
+      "packet_numbers": [
+        203508,
+        203509,
+        203514,
+        203515,
+        203516,
+        203517,
+        203518,
+        203519,
+        203528,
+        203529
+      ],
+      "overlapping_csv_windows": [
+        {
+          "start_ms": "1788842995000",
+          "label": "BENIGN_NORMAL",
+          "episode_id": "day8_train_attacker_host_c025_BENIGN_cooldown"
+        }
+      ]
+    },
+    {
+      "episode": "day8_train_attacker_host_c026_OPCUA_NODE_BROWSE_fixed",
+      "label": "OPCUA_NODE_BROWSE",
+      "duration_ms": 132,
+      "attacker_related_packets_in_interval": 42,
+      "pipeline_scope_packets_in_interval": 42,
+      "attacker_originated_scope_payload_packets": 19,
+      "service_ids": {
+        "530": 4,
+        "631": 14,
+        "634": 14,
+        "527": 3,
+        "473": 1,
+        "476": 1,
+        "452": 1
+      },
+      "service_results": {
+        "0x00000000": 19
+      },
+      "status_codes": {
+        "0x00000000": 4
+      },
+      "write_response_results": {},
+      "packet_numbers": [
+        210884,
+        210885,
+        210886,
+        210887,
+        210888,
+        210889,
+        210890,
+        210891,
+        210892,
+        210893,
+        210894,
+        210895,
+        210896,
+        210897,
+        210898,
+        210899,
+        210900,
+        210901,
+        210902,
+        210903,
+        210904,
+        210905,
+        210906,
+        210907,
+        210908,
+        210909,
+        210912,
+        210913,
+        210918,
+        210919,
+        210924,
+        210925,
+        210930,
+        210931,
+        210936,
+        210937,
+        210938,
+        210939,
+        210940,
+        210945,
+        210946,
+        210947
+      ],
+      "overlapping_csv_windows": [
+        {
+          "start_ms": "1788843060000",
+          "label": "BENIGN_NORMAL",
+          "episode_id": "day8_train_attacker_host_c026_BENIGN_cooldown"
+        }
+      ]
+    },
+    {
+      "episode": "day8_train_attacker_host_c027_OPCUA_WRITE_DENIED_fixed",
+      "label": "OPCUA_WRITE_DENIED",
+      "duration_ms": 48,
+      "attacker_related_packets_in_interval": 11,
+      "pipeline_scope_packets_in_interval": 11,
+      "attacker_originated_scope_payload_packets": 4,
+      "service_ids": {
+        "631": 1,
+        "634": 1,
+        "673": 1,
+        "676": 1,
+        "473": 1,
+        "476": 1,
+        "452": 1
+      },
+      "service_results": {
+        "0x00000000": 3
+      },
+      "status_codes": {
+        "0x00000000": 1
+      },
+      "write_response_results": {
+        "0x80730000": 1
+      },
+      "packet_numbers": [
+        216242,
+        216251,
+        216252,
+        216253,
+        216254,
+        216255,
+        216256,
+        216257,
+        216258,
+        216267,
+        216268
+      ],
+      "overlapping_csv_windows": [
+        {
+          "start_ms": "1788843125000",
+          "label": "BENIGN_NORMAL",
+          "episode_id": "day8_train_attacker_host_c027_BENIGN_cooldown"
+        }
+      ]
+    }
+  ],
+  "limitation": "Packet presence and service decoding do not establish intent or successful process impact. ServiceResult is not a substitute for per-node WriteResponse results."
+}

@@ -1,0 +1,82 @@
+{
+  "rule": "Event evidence: attacker-originated payload within attack interval and PLC TCP4840 scope; SESSION_BURST also accepts SYN. No predictions are read. Evidence is traffic presence, not attack success.",
+  "datasets": [
+    {
+      "name": "harvest",
+      "n_windows": 3427,
+      "timeline_rows": 224,
+      "timeline_benign_rows": 0,
+      "timeline_attack_episodes": 224,
+      "stored_labels": {
+        "benign": 2709,
+        "OPCUA_READ_SCRAPING": 58,
+        "OPCUA_SUBSCRIPTION_FLOOD": 66,
+        "OPCUA_BEHAVIORAL_PROFILING": 189,
+        "OPCUA_PROTOCOL_FUZZ": 27,
+        "OPCUA_SESSION_BURST": 29,
+        "OPCUA_INVALID_WRITE": 22,
+        "OPCUA_ENDPOINT_DISCOVERY": 24,
+        "OPCUA_WRITE_DENIED": 28,
+        "OPCUA_NODE_BROWSE": 21,
+        "OPCUA_RECURSIVE_BROWSE": 80,
+        "OPCUA_SLOWLORIS": 174
+      },
+      "mismatches": {},
+      "pcap_only_windows": 0,
+      "csv_only_windows": 0,
+      "findings": {
+        "attack_without_in_interval_event_evidence": 16
+      },
+      "benign_with_event_evidence_by_label": {},
+      "episodes_with_no_old_attack_windows": 0,
+      "episodes_with_no_event_evidence": 0,
+      "original_sha256": {
+        "data_opc/day8_out/harvest_ot1786331948_merged.pcap": "12abee34d688678cbbc4479b067462dc7c25d73b739b72e1cea7c6b44ac3c42e",
+        "test_results/day8/timeline_harvest.csv": "f8f6e83cc1594a93e26ab7dec2211d92e0c5d3b8e7cda46de7b67aa90c4bda84",
+        "data_opc/day8_out/opcua_harvest_ext_aa.csv": "45cccda0b5bee1f47f0337bac6043349283d427146b71c04d0abf13e3d5f196b"
+      },
+      "source_files_unchanged": true
+    },
+    {
+      "name": "ood2",
+      "n_windows": 605,
+      "timeline_rows": 84,
+      "timeline_benign_rows": 56,
+      "timeline_attack_episodes": 28,
+      "stored_labels": {
+        "benign": 444,
+        "BENIGN_NORMAL": 36,
+        "OPCUA_SLOWLORIS": 31,
+        "OPCUA_RECURSIVE_BROWSE": 3,
+        "OPCUA_BEHAVIORAL_PROFILING": 76,
+        "OPCUA_PROTOCOL_FUZZ": 2,
+        "OPCUA_SESSION_BURST": 5,
+        "OPCUA_SUBSCRIPTION_FLOOD": 8
+      },
+      "mismatches": {},
+      "pcap_only_windows": 0,
+      "csv_only_windows": 0,
+      "findings": {
+        "benign_with_event_evidence": 22
+      },
+      "benign_with_event_evidence_by_label": {
+        "OPCUA_ENDPOINT_DISCOVERY": 2,
+        "OPCUA_PROTOCOL_FUZZ": 2,
+        "OPCUA_RECURSIVE_BROWSE": 1,
+        "OPCUA_BEHAVIORAL_PROFILING": 6,
+        "OPCUA_INVALID_WRITE": 4,
+        "OPCUA_SLOWLORIS": 3,
+        "OPCUA_WRITE_DENIED": 2,
+        "OPCUA_NODE_BROWSE": 2
+      },
+      "episodes_with_no_old_attack_windows": 11,
+      "episodes_with_no_event_evidence": 0,
+      "original_sha256": {
+        "data_opc/day8_out/ood2_merged.pcap": "c32db8aaf439372853214ea763c3ac6e5f651b8b31cede6aedf270fdbc275dcf",
+        "test_results/day8/timeline_ood2.csv": "ff46ba50bb441510a5eff0da832c4c4aa821c7ee2cf44edc0cfd38384db9814f",
+        "data_opc/day8_out/opcua_ood2_ext_aa.csv": "a5b335c966981ad65085d8e5f86c3001abdf64c3de619da3a28349f3342e9121"
+      },
+      "source_files_unchanged": true
+    }
+  ]
+}

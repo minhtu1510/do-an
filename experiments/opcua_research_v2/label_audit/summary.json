@@ -1,0 +1,40 @@
+{
+  "raw_csv": "data_opc/day8_out/opcua_harvest_ext.csv",
+  "activity_aware_csv": "data_opc/day8_out/opcua_harvest_ext_aa.csv",
+  "n_windows": 3427,
+  "n_changed": 29,
+  "changes": {
+    "OPCUA_PROTOCOL_FUZZ -> benign": 1,
+    "OPCUA_SESSION_BURST -> benign": 24,
+    "OPCUA_SUBSCRIPTION_FLOOD -> benign": 4
+  },
+  "raw_label_counts": {
+    "OPCUA_BEHAVIORAL_PROFILING": 189,
+    "OPCUA_ENDPOINT_DISCOVERY": 24,
+    "OPCUA_INVALID_WRITE": 22,
+    "OPCUA_NODE_BROWSE": 21,
+    "OPCUA_PROTOCOL_FUZZ": 28,
+    "OPCUA_READ_SCRAPING": 58,
+    "OPCUA_RECURSIVE_BROWSE": 80,
+    "OPCUA_SESSION_BURST": 53,
+    "OPCUA_SLOWLORIS": 174,
+    "OPCUA_SUBSCRIPTION_FLOOD": 70,
+    "OPCUA_WRITE_DENIED": 28,
+    "benign": 2680
+  },
+  "activity_aware_label_counts": {
+    "OPCUA_BEHAVIORAL_PROFILING": 189,
+    "OPCUA_ENDPOINT_DISCOVERY": 24,
+    "OPCUA_INVALID_WRITE": 22,
+    "OPCUA_NODE_BROWSE": 21,
+    "OPCUA_PROTOCOL_FUZZ": 27,
+    "OPCUA_READ_SCRAPING": 58,
+    "OPCUA_RECURSIVE_BROWSE": 80,
+    "OPCUA_SESSION_BURST": 29,
+    "OPCUA_SLOWLORIS": 174,
+    "OPCUA_SUBSCRIPTION_FLOOD": 66,
+    "OPCUA_WRITE_DENIED": 28,
+    "benign": 2709
+  },
+  "limitation": "The source feature CSV does not persist attacker_packet_count. has_attacker_traffic_inferred records only what can be inferred from the activity-aware relabeling rule."
+}

@@ -1,0 +1,21 @@
+{
+  "labels": [
+    "OPCUA_BEHAVIORAL_PROFILING",
+    "OPCUA_ENDPOINT_DISCOVERY",
+    "OPCUA_MALICIOUS_WRITE",
+    "OPCUA_NODE_BROWSE",
+    "OPCUA_PROTOCOL_FUZZ",
+    "OPCUA_READ_SCRAPING",
+    "OPCUA_RECURSIVE_BROWSE",
+    "OPCUA_SESSION_BURST",
+    "OPCUA_SLOWLORIS",
+    "OPCUA_SUBSCRIPTION_FLOOD",
+    "benign"
+  ],
+  "n_windows": 3427,
+  "n_features": 61,
+  "model": "ExtraTreesClassifier(n_estimators=400, max_depth=10)",
+  "cv_macro_f1": 0.9598513723766161,
+  "trained_at": "2026-10-06T15:52:32.701210+00:00",
+  "source_dataset": "/home/sus/do-an/data_opc/day8_out/opcua_harvest_ext_aa.csv"
+}

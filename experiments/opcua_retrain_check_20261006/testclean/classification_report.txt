@@ -1,0 +1,16 @@
+                            precision    recall  f1-score   support
+
+OPCUA_BEHAVIORAL_PROFILING       0.75      1.00      0.86         9
+     OPCUA_MALICIOUS_WRITE       1.00      1.00      1.00         4
+         OPCUA_NODE_BROWSE       1.00      1.00      1.00         3
+       OPCUA_PROTOCOL_FUZZ       1.00      1.00      1.00         1
+       OPCUA_READ_SCRAPING       1.00      1.00      1.00         9
+    OPCUA_RECURSIVE_BROWSE       1.00      0.80      0.89         5
+       OPCUA_SESSION_BURST       1.00      1.00      1.00         1
+           OPCUA_SLOWLORIS       1.00      0.90      0.95        10
+  OPCUA_SUBSCRIPTION_FLOOD       1.00      0.67      0.80         3
+                    benign       1.00      1.00      1.00       708
+
+                  accuracy                           1.00       753
+                 macro avg       0.97      0.94      0.95       753
+              weighted avg       1.00      1.00      1.00       753

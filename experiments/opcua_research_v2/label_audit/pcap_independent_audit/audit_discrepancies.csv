@@ -1,0 +1,3 @@
+window_start_ms,window_start_iso_utc,raw_label,activity_aware_label,raw_episode_id,discrepancy_type,severity,detail,pipeline_scope_attacker_related_packet_count,attacker_src_packet_count,capture_coverage
+1786331945000,2026-08-10T03:19:05+00:00,benign,benign,benign#chunk0,incomplete_capture_coverage,warning,Window is not fully bounded by PCAP timestamps.,0,0,partial_boundary
+1786349075000,2026-08-10T08:04:35+00:00,benign,benign,benign#chunk223,incomplete_capture_coverage,warning,Window is not fully bounded by PCAP timestamps.,0,0,partial_boundary

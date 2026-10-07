@@ -36,6 +36,7 @@ CONTROLLED_GATED_SCENARIOS = {
     "OPCUA_SESSION_BURST",
     "OPCUA_SUBSCRIPTION_FLOOD",
     "OPCUA_MALICIOUS_WRITE",
+    "OPCUA_WRITE_VERIFY_ROLLBACK",
     "OPCUA_CONFIG_MANIPULATION",
     "OPCUA_ALARM_FLOOD",
     "OPCUA_REPLAY_ATTEMPT",
@@ -93,6 +94,7 @@ OPCUA_SECURITY_MODE = os.getenv("OPCUA_SECURITY_MODE", "").strip() or None
 REQUIRE_IMPACT_OPT_IN_ENV = "DAY8_ALLOW_PROCESS_IMPACT"
 IMPACT_SCENARIOS = {
     "OPCUA_MALICIOUS_WRITE",
+    "OPCUA_WRITE_VERIFY_ROLLBACK",
     "OPCUA_CONFIG_MANIPULATION",
 }
 
@@ -773,6 +775,13 @@ async def opcua_malicious_write() -> list[str]:
     return evidence
 
 
+async def opcua_write_verify_rollback() -> list[str]:
+    """Verify write/read-back/restore on the Web-SCADA writable test node."""
+    evidence = await opcua_malicious_write()
+    evidence.insert(0, "purpose=verify writable node used by Web-SCADA; bounded write with mandatory rollback")
+    return evidence
+
+
 async def opcua_config_manipulation() -> list[str]:
     """Modify a real writable configuration node, if one exists, and roll back."""
     from asyncua import Client
@@ -863,6 +872,9 @@ async def execute_controlled_gated(scenario_id: str) -> list[str] | None:
     if scenario_id == "OPCUA_MALICIOUS_WRITE":
         require_impact_opt_in(scenario_id)
         return await opcua_malicious_write()
+    if scenario_id == "OPCUA_WRITE_VERIFY_ROLLBACK":
+        require_impact_opt_in(scenario_id)
+        return await opcua_write_verify_rollback()
     if scenario_id == "OPCUA_CONFIG_MANIPULATION":
         require_impact_opt_in(scenario_id)
         return await opcua_config_manipulation()

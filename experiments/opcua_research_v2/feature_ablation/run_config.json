@@ -1,0 +1,14 @@
+{
+  "train": "data_opc/day8_out/opcua_harvest_ext_aa.csv",
+  "ood": "data_opc/day8_out/opcua_ood2_ext_aa.csv",
+  "testclean": "data_opc/day8_out/opcua_testclean_ext_aa.csv",
+  "feature_source": "model_opcua/features.json",
+  "seed": 0,
+  "folds": 5,
+  "model": {
+    "class": "ExtraTreesClassifier",
+    "n_estimators": 400,
+    "max_depth": 10,
+    "class_weight": null
+  }
+}

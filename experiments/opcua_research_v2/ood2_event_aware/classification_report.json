@@ -1,0 +1,81 @@
+{
+  "OPCUA_BEHAVIORAL_PROFILING": {
+    "precision": 0.9213483146067416,
+    "recall": 1.0,
+    "f1-score": 0.9590643274853801,
+    "support": 82.0
+  },
+  "OPCUA_ENDPOINT_DISCOVERY": {
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1-score": 1.0,
+    "support": 2.0
+  },
+  "OPCUA_MALICIOUS_WRITE": {
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1-score": 1.0,
+    "support": 6.0
+  },
+  "OPCUA_NODE_BROWSE": {
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1-score": 1.0,
+    "support": 2.0
+  },
+  "OPCUA_PROTOCOL_FUZZ": {
+    "precision": 0.6666666666666666,
+    "recall": 1.0,
+    "f1-score": 0.8,
+    "support": 4.0
+  },
+  "OPCUA_READ_SCRAPING": {
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1-score": 0.0,
+    "support": 0.0
+  },
+  "OPCUA_RECURSIVE_BROWSE": {
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1-score": 1.0,
+    "support": 4.0
+  },
+  "OPCUA_SESSION_BURST": {
+    "precision": 1.0,
+    "recall": 0.4,
+    "f1-score": 0.5714285714285714,
+    "support": 5.0
+  },
+  "OPCUA_SLOWLORIS": {
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1-score": 1.0,
+    "support": 34.0
+  },
+  "OPCUA_SUBSCRIPTION_FLOOD": {
+    "precision": 1.0,
+    "recall": 0.25,
+    "f1-score": 0.4,
+    "support": 8.0
+  },
+  "benign": {
+    "precision": 0.9978165938864629,
+    "recall": 0.9978165938864629,
+    "f1-score": 0.9978165938864629,
+    "support": 458.0
+  },
+  "accuracy": 0.9834710743801653,
+  "macro avg": {
+    "precision": 0.871439234105443,
+    "recall": 0.7861651448987694,
+    "f1-score": 0.7934826811636739,
+    "support": 605.0
+  },
+  "weighted avg": {
+    "precision": 0.9854830222552388,
+    "recall": 0.9834710743801653,
+    "f1-score": 0.9800006904313124,
+    "support": 605.0
+  }
+}

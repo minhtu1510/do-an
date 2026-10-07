@@ -1,0 +1,12 @@
+profile,dataset,mode,n_features,n_rows,multiclass_macro_f1,notes,binary_precision,binary_recall,binary_f1,binary_fpr,tn,fp,fn,tp
+all_61,train,group_5_fold_cv,61,3427,0.9618314593706505,Groups are episode_id; no random-window split.,1.0,0.9763231197771588,0.9880197322057788,0.0,2709,0,17,701
+all_61,ood2,train_fit_external_eval,61,605,0.5178043349685141,,0.8435374149659864,0.992,0.9117647058823529,0.04791666666666667,457,23,1,124
+all_61,testclean,train_fit_external_eval,61,753,0.9493400167084378,,1.0,1.0,1.0,0.0,708,0,0,45
+no_client_identity_proxy,train,group_5_fold_cv,50,3427,0.9539126985089513,Groups are episode_id; no random-window split.,1.0,0.9303621169916435,0.963924963924964,0.0,2709,0,50,668
+no_client_identity_proxy,ood2,train_fit_external_eval,50,605,0.4086646988745449,,0.47346938775510206,0.928,0.6270270270270271,0.26875,351,129,9,116
+no_client_identity_proxy,testclean,train_fit_external_eval,50,753,0.9405040977853997,,1.0,0.9333333333333333,0.9655172413793104,0.0,708,0,3,42
+service_only,train,group_5_fold_cv,24,3427,0.8918157128163039,Groups are episode_id; no random-window split.,1.0,0.7771587743732591,0.8746081504702194,0.0,2709,0,160,558
+service_only,ood2,train_fit_external_eval,24,605,0.4294328264602162,,0.7333333333333333,0.44,0.55,0.041666666666666664,460,20,70,55
+service_only,testclean,train_fit_external_eval,24,753,0.9246023947798048,,1.0,0.8222222222222222,0.9024390243902439,0.0,708,0,8,37
+simple_protocol_threshold,ood2,fixed_threshold,11,605,,Thresholds are benign-training quantile 0.99.,0.5173913043478261,0.952,0.6704225352112676,0.23125,369,111,6,119
+simple_protocol_threshold,testclean,fixed_threshold,11,753,,Thresholds are benign-training quantile 0.99.,0.9767441860465116,0.9333333333333333,0.9545454545454546,0.0014124293785310734,707,1,3,42

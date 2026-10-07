@@ -1,0 +1,79 @@
+{
+  "all_checks_passed": true,
+  "n_checks": 24,
+  "checks": {
+    "label_manifest_row_count": true,
+    "label_manifest_unique_windows": true,
+    "label_changed_row_count": true,
+    "label_raw_counts": true,
+    "label_activity_aware_counts": true,
+    "label_change_breakdown": true,
+    "label_changed_file_matches_manifest": true,
+    "feature_group_sizes": true,
+    "feature_ablation_is_exact_removal": true,
+    "ablation_fixed_recipe": true,
+    "ablation_binary_metrics_recomputed": true,
+    "ablation_reports_match_confusions": true,
+    "all61_ood_matches_legacy": true,
+    "all61_testclean_matches_legacy": true,
+    "ood2_prediction_confusion": true,
+    "ood2_attack_score_matches_argmax_binary": true,
+    "warmup_phase_counts": true,
+    "warmup_fp_counts": true,
+    "warmup_fn_counts": true,
+    "episode_ids_do_not_mix_labels": true,
+    "episode_confusion_recomputed": true,
+    "episode_precision_recomputed": true,
+    "negative_episode_artifact_complete": true,
+    "model_version_markers_present": true
+  },
+  "details": {
+    "label_audit": {
+      "n_windows": 3427,
+      "n_changed": 29,
+      "raw_attack_windows": 747,
+      "activity_aware_attack_windows": 718,
+      "attacker_packet_count_persisted": false
+    },
+    "ablation": {
+      "n_result_rows": 11,
+      "feature_group_sizes": {
+        "all_61": 61,
+        "no_client_identity_proxy": 50,
+        "service_only": 24
+      },
+      "n_removed_source_structure_features": 11
+    },
+    "ood2": {
+      "n_windows": 605,
+      "window_confusion": {
+        "tp": 124,
+        "fp": 23,
+        "tn": 457,
+        "fn": 1
+      },
+      "n_episode_ids": 86,
+      "episode_confusion": {
+        "tp": 17,
+        "fp": 23,
+        "tn": 46,
+        "fn": 0
+      },
+      "episode_precision": 0.425,
+      "episode_recall": 1.0
+    },
+    "runtime_versions": {
+      "persisted_model_marker": "1.8.0",
+      "ablation_model_marker": "1.9.1"
+    }
+  },
+  "sha256": {
+    "model_opcua/classifier.joblib": "d9219111ae16027d806fbcbcd8480651580abf676b418cd304770aeafd3d40cd",
+    "experiments/opcua_research_v2/label_audit/summary.json": "36859ec44a6ce0b5d2f72399388f168e99d5395dde0b0353f7752a8d92304c8b",
+    "experiments/opcua_research_v2/label_audit/label_manifest.csv": "bc5fcabd7c76486e3a46608befc9a1322e884f61b211c593c36e74b747230d79",
+    "experiments/opcua_research_v2/feature_ablation/ablation_results.csv": "feb291facac10b027e0ce3d023f460fcdddc03d034e45b08d675688cb8114405",
+    "experiments/opcua_research_v2/warmup_ood/ood2_predictions.csv": "932952de5d8d13efd8d853781b4575d188925642665cf89c28352da1bfa6869b",
+    "experiments/opcua_research_v2/warmup_ood/ood2_episode_summary.json": "47d1f61d254bc9bd741e27bf5c5b714e7d214d509b4dd7cfec0724f112131735",
+    "experiments/opcua_research_v2/warmup_ood/ood2_negative_episode_results.csv": "8837ff23e7a529f9113eef899bc90e582dbbd2022b3adc2a53738ae97d086ea3"
+  }
+}

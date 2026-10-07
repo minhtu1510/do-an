@@ -1,0 +1,14 @@
+{
+  "phase_counts": {
+    "attack": 125,
+    "benign_steady": 444,
+    "benign_warmup": 36
+  },
+  "false_positives": {
+    "benign_warmup": 23
+  },
+  "false_negatives": {
+    "attack": 1
+  },
+  "warmup_fp_share": 1.0
+}

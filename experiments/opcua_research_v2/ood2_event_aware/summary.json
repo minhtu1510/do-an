@@ -1,0 +1,51 @@
+{
+  "rule": "Preserve old labels; prioritize attack only with attacker-originated TCP payload to PLC:4840 inside the attack timeline interval; SESSION_BURST also accepts attacker-originated SYN. No label is chosen from model predictions.",
+  "sklearn_version": "1.8.0",
+  "n_windows": 605,
+  "features_unchanged": true,
+  "changed_windows": 22,
+  "original_metrics": {
+    "tp": 124,
+    "fp": 23,
+    "tn": 457,
+    "fn": 1,
+    "attack_precision": 0.8435374149659864,
+    "attack_recall": 0.992,
+    "attack_f1": 0.9117647058823529,
+    "fpr": 0.04791666666666667,
+    "macro_f1_union": 0.5178043349685141,
+    "macro_f1_fixed_model_classes": 0.4707312136077401
+  },
+  "event_aware_metrics": {
+    "tp": 146,
+    "fp": 1,
+    "tn": 457,
+    "fn": 1,
+    "attack_precision": 0.9931972789115646,
+    "attack_recall": 0.9931972789115646,
+    "attack_f1": 0.9931972789115646,
+    "fpr": 0.002183406113537118,
+    "macro_f1_union": 0.8728309492800413,
+    "macro_f1_fixed_model_classes": 0.7934826811636739
+  },
+  "timeline_attack_episodes": 28,
+  "evidence_assessable_episodes": 28,
+  "detected_episodes_argmax": 28,
+  "detected_episodes_attack_score_05": 28,
+  "correct_subtype_episodes": 27,
+  "predictions_match_existing_artifact": true,
+  "original_sha256": {
+    "data_opc/day8_out/opcua_ood2_ext_aa.csv": "a5b335c966981ad65085d8e5f86c3001abdf64c3de619da3a28349f3342e9121",
+    "test_results/day8/timeline_ood2.csv": "ff46ba50bb441510a5eff0da832c4c4aa821c7ee2cf44edc0cfd38384db9814f",
+    "data_opc/day8_out/ood2_merged.pcap": "c32db8aaf439372853214ea763c3ac6e5f651b8b31cede6aedf270fdbc275dcf",
+    "model_opcua/classifier.joblib": "d9219111ae16027d806fbcbcd8480651580abf676b418cd304770aeafd3d40cd"
+  },
+  "source_files_unchanged": true,
+  "limitations": [
+    "Evidence denotes a declared test action with traffic, not proof of malicious intent or successful process impact.",
+    "Fuzz payload presence does not independently prove malformed content.",
+    "Model was selected using OOD2; this is a label-rule sensitivity analysis, not a final independent test.",
+    "Existing 61 features and model are frozen; no opcua.Results feature was added.",
+    "Binary argmax and summed attack probability >=0.5 are different detection rules, reported separately."
+  ]
+}

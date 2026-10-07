@@ -1,0 +1,50 @@
+<svg xmlns='http://www.w3.org/2000/svg' width='1800' height='720' viewBox='0 0 1800 720'>
+<rect width='100%' height='100%' fill='white'/>
+<style>text{font-family:Arial,Helvetica,sans-serif;} .title{font-size:28px;font-weight:700;fill:#111;} .label{font-size:21px;font-weight:700;fill:#111;} .meta{font-size:18px;fill:#222;} .tiny{font-size:16px;fill:#444;} .axis{font-size:15px;fill:#555;}</style>
+<text x='44' y='42' class='title'>Day 7 PCAP observability timeline</text>
+<text x='44' y='72' class='tiny'>Bars use actual START/END timestamps; no per-STOP timestamp is inferred.</text>
+<line x1='420' y1='610' x2='1680' y2='610' stroke='#333' stroke-width='1.5'/>
+<text x='44' y='123' class='label'>SMB_RECON_ENUM</text>
+<text x='44' y='151' class='meta'>duration 36.060s</text>
+<text x='44' y='179' class='tiny'>SMB2→HMI 65</text>
+<rect x='433.62' y='125' width='122.80' height='34' rx='6' fill='#4E79A7' opacity='0.86'/>
+<line x1='433.62' y1='112' x2='433.62' y2='616' stroke='#4E79A7' stroke-dasharray='4 6' opacity='0.55'/>
+<line x1='556.42' y1='112' x2='556.42' y2='616' stroke='#4E79A7' stroke-dasharray='4 6' opacity='0.55'/>
+<text x='433.62' y='181' class='axis'>START 17:02:22.821</text>
+<text x='564.42' y='181' class='axis'>END 17:02:58.881</text>
+<text x='44' y='278' class='label'>KILL_CHAIN</text>
+<text x='44' y='306' class='meta'>duration 7.281s</text>
+<text x='44' y='334' class='tiny'>SYN→HMI 15; S7→PLC 5</text>
+<rect x='978.45' y='280' width='24.80' height='34' rx='6' fill='#F28E2B' opacity='0.86'/>
+<line x1='978.45' y1='267' x2='978.45' y2='616' stroke='#F28E2B' stroke-dasharray='4 6' opacity='0.55'/>
+<line x1='1003.25' y1='267' x2='1003.25' y2='616' stroke='#F28E2B' stroke-dasharray='4 6' opacity='0.55'/>
+<text x='978.45' y='336' class='axis'>START 17:05:02.808</text>
+<text x='1011.25' y='336' class='axis'>END 17:05:10.089</text>
+<text x='44' y='433' class='label'>CONCEALED_STOP_ATTACK</text>
+<text x='44' y='461' class='meta'>duration 188.273s</text>
+<text x='44' y='489' class='tiny'>OPC UA→PLC 16678; S7→PLC 162</text>
+<rect x='1025.22' y='435' width='641.16' height='34' rx='6' fill='#E15759' opacity='0.86'/>
+<line x1='1025.22' y1='422' x2='1025.22' y2='616' stroke='#E15759' stroke-dasharray='4 6' opacity='0.55'/>
+<line x1='1666.38' y1='422' x2='1666.38' y2='616' stroke='#E15759' stroke-dasharray='4 6' opacity='0.55'/>
+<text x='1025.22' y='491' class='axis'>START 17:05:16.542</text>
+<text x='1530.00' y='491' class='axis'>END 17:08:24.815</text>
+<line x1='420.00' y1='602' x2='420.00' y2='618' stroke='#333'/>
+<text x='386.00' y='642' class='axis'>17:02:18</text>
+<line x1='577.50' y1='602' x2='577.50' y2='618' stroke='#333'/>
+<text x='543.50' y='642' class='axis'>17:03:05</text>
+<line x1='735.00' y1='602' x2='735.00' y2='618' stroke='#333'/>
+<text x='701.00' y='642' class='axis'>17:03:51</text>
+<line x1='892.50' y1='602' x2='892.50' y2='618' stroke='#333'/>
+<text x='858.50' y='642' class='axis'>17:04:37</text>
+<line x1='1050.00' y1='602' x2='1050.00' y2='618' stroke='#333'/>
+<text x='1016.00' y='642' class='axis'>17:05:23</text>
+<line x1='1207.50' y1='602' x2='1207.50' y2='618' stroke='#333'/>
+<text x='1173.50' y='642' class='axis'>17:06:10</text>
+<line x1='1365.00' y1='602' x2='1365.00' y2='618' stroke='#333'/>
+<text x='1331.00' y='642' class='axis'>17:06:56</text>
+<line x1='1522.50' y1='602' x2='1522.50' y2='618' stroke='#333'/>
+<text x='1488.50' y='642' class='axis'>17:07:42</text>
+<line x1='1680.00' y1='602' x2='1680.00' y2='618' stroke='#333'/>
+<text x='1646.00' y='642' class='axis'>17:08:28</text>
+<text x='44' y='680' class='tiny'>Note: packet counts are PCAP observability evidence, not application-success counts or PLC/HMI state ground truth.</text>
+</svg>

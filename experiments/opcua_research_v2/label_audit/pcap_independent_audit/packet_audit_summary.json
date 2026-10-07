@@ -1,0 +1,229 @@
+{
+  "audit_title": "Independent PCAP recount for OPC UA Day 8 activity-aware labels",
+  "generated_at_utc": "2026-09-25T00:13:16+00:00",
+  "scope": {
+    "window_interval": "[window_start, window_end)",
+    "window_size_ms": 5000,
+    "canonical_capture_only": true,
+    "segment_pcaps_ingested": false,
+    "duplicate_avoidance": "Only the canonical merged PCAP was read; source segment PCAPs were not combined with it.",
+    "attacker_presence_rule_reapplied": "Within timeline overlap, attack iff at least one packet in the original extractor display-filter scope (tcp.port==4840 and ip.addr==PLC) has attacker IP as source or destination.",
+    "attacker_originated_definition": "IPv4 packet with ip.src == 192.168.210.32.",
+    "plc_response_definition": "IPv4 packet with ip.src == 192.168.210.211 and ip.dst == 192.168.210.32."
+  },
+  "addresses": {
+    "attacker": "192.168.210.32",
+    "benign_client_hmi": "192.168.210.31",
+    "plc": "192.168.210.211",
+    "provenance": [
+      "tests/day8/collect_opcua.py module documentation: Web-SCADA .31, attacker .32",
+      "testbed.conf: HMI_IP=.31, TARGET_IP/OPC_URL=.211",
+      "testbed_diagram.html and paper testbed table: attacker .32"
+    ]
+  },
+  "inputs": {
+    "pcap": {
+      "path": "data_opc/day8_out/harvest_ot1786331948_merged.pcap",
+      "absolute_path": "/home/sus/do-an/data_opc/day8_out/harvest_ot1786331948_merged.pcap",
+      "size_bytes": 311442552,
+      "sha256": "12abee34d688678cbbc4479b067462dc7c25d73b739b72e1cea7c6b44ac3c42e"
+    },
+    "timeline": {
+      "path": "test_results/day8/timeline_harvest.csv",
+      "absolute_path": "/home/sus/do-an/test_results/day8/timeline_harvest.csv",
+      "size_bytes": 27825,
+      "sha256": "f8f6e83cc1594a93e26ab7dec2211d92e0c5d3b8e7cda46de7b67aa90c4bda84"
+    },
+    "raw_windows": {
+      "path": "data_opc/day8_out/opcua_harvest_ext.csv",
+      "absolute_path": "/home/sus/do-an/data_opc/day8_out/opcua_harvest_ext.csv",
+      "size_bytes": 1063732,
+      "sha256": "10723f3e4d01f10bd758a5bb22d927a8a1d04e7a7af3fe87d5be69c7a07343d7"
+    },
+    "activity_aware_windows": {
+      "path": "data_opc/day8_out/opcua_harvest_ext_aa.csv",
+      "absolute_path": "/home/sus/do-an/data_opc/day8_out/opcua_harvest_ext_aa.csv",
+      "size_bytes": 1063070,
+      "sha256": "45cccda0b5bee1f47f0337bac6043349283d427146b71c04d0abf13e3d5f196b"
+    },
+    "label_manifest": {
+      "path": "experiments/opcua_research_v2/label_audit/label_manifest.csv",
+      "absolute_path": "/home/sus/do-an/experiments/opcua_research_v2/label_audit/label_manifest.csv",
+      "size_bytes": 736518,
+      "sha256": "bc5fcabd7c76486e3a46608befc9a1322e884f61b211c593c36e74b747230d79"
+    },
+    "changed_windows": {
+      "path": "experiments/opcua_research_v2/label_audit/changed_windows.csv",
+      "absolute_path": "/home/sus/do-an/experiments/opcua_research_v2/label_audit/changed_windows.csv",
+      "size_bytes": 8455,
+      "sha256": "04839a27a1f1499316deff30853eb373945e7af9a3b3cde72511bf6cb586a2ea"
+    },
+    "extractor_source": {
+      "path": "extract_opcua_features_ext.py",
+      "absolute_path": "/home/sus/do-an/extract_opcua_features_ext.py",
+      "size_bytes": 18748,
+      "sha256": "2f0d30cad673b91c014effbb5b53fdca274d4383bf692fb70b7119c0b3879f39"
+    },
+    "collector_source": {
+      "path": "tests/day8/collect_opcua.py",
+      "absolute_path": "/home/sus/do-an/tests/day8/collect_opcua.py",
+      "size_bytes": 8471,
+      "sha256": "72319899a15b6637a5905509ea9beeffcb6a2c68a295885ec7cd17d84b8b4984"
+    },
+    "testbed_config": {
+      "path": "testbed.conf",
+      "absolute_path": "/home/sus/do-an/testbed.conf",
+      "size_bytes": 2848,
+      "sha256": "c260ce7133ada08a2d1cbba1fb2b75bd56cb207ffde50c75d804a2339d6b72f3"
+    },
+    "scenario_config": {
+      "path": "tests/day8/scenarios.yaml",
+      "absolute_path": "/home/sus/do-an/tests/day8/scenarios.yaml",
+      "size_bytes": 10521,
+      "sha256": "9fa5ad490bb79a20c07f0300e361e57b91afb476e5d4f1c8c112ae894a09837d"
+    }
+  },
+  "capture_metadata": {
+    "packet_count": 1660063,
+    "file_size_bytes": 311442552,
+    "capture_start_epoch": "1786331949.039861",
+    "capture_end_epoch": "1786349077.786115",
+    "capture_start_ms": 1786331949039,
+    "capture_end_ms": 1786349077786,
+    "capture_duration_seconds": "17128.746254",
+    "file_type": "pcapng",
+    "encapsulation": "ether",
+    "strict_time_order": "False",
+    "capture_application": "Mergecap (Wireshark) 4.2.2 (Git v4.2.2 packaged as 4.2.2-1.1build3)",
+    "capinfos_sha256": "12abee34d688678cbbc4479b067462dc7c25d73b739b72e1cea7c6b44ac3c42e"
+  },
+  "software": {
+    "python": "3.12.3",
+    "tshark": "TShark (Wireshark) 4.2.2 (Git v4.2.2 packaged as 4.2.2-1.1build3)."
+  },
+  "tshark_extraction": {
+    "command": [
+      "tshark",
+      "-r",
+      "/home/sus/do-an/data_opc/day8_out/harvest_ot1786331948_merged.pcap",
+      "-o",
+      "tcp.desegment_tcp_streams:TRUE",
+      "-Y",
+      "ip.addr == 192.168.210.32",
+      "-T",
+      "fields",
+      "-e",
+      "frame.time_epoch",
+      "-e",
+      "frame.number",
+      "-e",
+      "frame.len",
+      "-e",
+      "ip.src",
+      "-e",
+      "ip.dst",
+      "-e",
+      "tcp.srcport",
+      "-e",
+      "tcp.dstport",
+      "-e",
+      "tcp.len",
+      "-e",
+      "tcp.stream",
+      "-e",
+      "tcp.seq",
+      "-e",
+      "tcp.ack",
+      "-e",
+      "opcua.transport.type",
+      "-e",
+      "opcua.servicenodeid.numeric",
+      "-e",
+      "opcua.StatusCode",
+      "-e",
+      "opcua.ServiceResult",
+      "-e",
+      "opcua.transport.error",
+      "-E",
+      "separator=\t",
+      "-E",
+      "quote=n",
+      "-E",
+      "occurrence=a"
+    ],
+    "display_filter": "ip.addr == 192.168.210.32",
+    "packet_rows_matching_filter": 123004,
+    "packet_rows_in_manifest_windows": 123004,
+    "packet_rows_outside_manifest_windows": 0,
+    "first_matching_packet_epoch": "1786331950.119501000",
+    "last_matching_packet_epoch": "1786349068.890991000",
+    "stderr": ""
+  },
+  "counts": {
+    "manifest_windows": 3427,
+    "timeline_intervals": 224,
+    "changed_windows_manifest": 29,
+    "changed_verified_consistent": 29,
+    "changed_inconsistent": 0,
+    "changed_insufficient_evidence": 0,
+    "changed_with_any_attacker_originated_ip_packet": 2,
+    "changed_with_attacker_originated_tcp_payload": 1,
+    "changed_with_attacker_originated_decoded_opcua": 0,
+    "changed_with_pipeline_scope_attacker_related_packet": 0,
+    "all_windows_full_capture_coverage": 3425,
+    "all_windows_partial_boundary": 2,
+    "all_windows_outside_capture": 0,
+    "timeline_manifest_mismatches": 0,
+    "activity_rule_manifest_mismatches": 0,
+    "retained_attack_windows": 718,
+    "retained_attack_windows_with_no_pipeline_scope_attacker_packet": 0,
+    "benign_windows_with_pipeline_scope_attacker_packet": 118,
+    "windows_with_attacker_originated_ip_packets": 1253,
+    "windows_with_attacker_originated_tcp_payload": 1031,
+    "windows_with_attacker_originated_decoded_opcua": 655,
+    "changed_windows_with_same_episode_neighbor_available": 29,
+    "changed_windows_with_positive_same_episode_neighbor": 25,
+    "discrepancy_rows": 2,
+    "discrepancy_types": {
+      "incomplete_capture_coverage": 2
+    }
+  },
+  "changed_windows_with_attacker_originated_packets_outside_pipeline_scope": [
+    {
+      "window_start_ms": 1786337640000,
+      "window_start_iso_utc": "2026-08-10T04:54:00+00:00",
+      "raw_episode_id": "OPCUA_SESSION_BURST#c79",
+      "attacker_src_packet_count": 1,
+      "attacker_src_tcp_payload_packet_count": 0,
+      "attacker_src_tcp_payload_bytes": 0,
+      "attacker_src_tcp4840_packet_count": 0,
+      "attacker_src_opcua_decoded_packet_count": 0,
+      "attacker_to_plc_packet_count": 0,
+      "attacker_destination_ips": "{\"192.168.210.31\":1}",
+      "attacker_destination_tcp_ports": "{\"7680\":1}",
+      "pipeline_scope_attacker_related_packet_count": 0
+    },
+    {
+      "window_start_ms": 1786341945000,
+      "window_start_iso_utc": "2026-08-10T06:05:45+00:00",
+      "raw_episode_id": "OPCUA_SESSION_BURST#c139",
+      "attacker_src_packet_count": 7,
+      "attacker_src_tcp_payload_packet_count": 3,
+      "attacker_src_tcp_payload_bytes": 120,
+      "attacker_src_tcp4840_packet_count": 0,
+      "attacker_src_opcua_decoded_packet_count": 0,
+      "attacker_to_plc_packet_count": 0,
+      "attacker_destination_ips": "{\"192.168.210.31\":7}",
+      "attacker_destination_tcp_ports": "{\"7680\":7}",
+      "pipeline_scope_attacker_related_packet_count": 0
+    }
+  ],
+  "interpretation_boundaries": [
+    "Manifest consistency is a comparison between stored labels and the documented rule.",
+    "Packet evidence is a fresh extraction from the same captured PCAP, not an independent capture source.",
+    "Attacker traffic presence means captured packets involving the configured attacker IP; it does not prove that an attack action succeeded.",
+    "No captured packet does not prove no off-path action occurred; it is bounded by capture coverage and visibility.",
+    "OPC UA decoded counts depend on TShark dissector recognition and TCP reassembly; TCP/4840 counts are reported separately.",
+    "PLC-to-attacker replies are reported separately from attacker-originated packets."
+  ]
+}

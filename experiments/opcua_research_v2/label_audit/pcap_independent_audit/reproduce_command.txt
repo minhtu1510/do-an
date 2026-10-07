@@ -1,0 +1,1 @@
+python3 tools/opcua_pcap_independent_audit.py --attacker-ip 192.168.210.32 --client-ip 192.168.210.31 --plc-ip 192.168.210.211

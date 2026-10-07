@@ -121,6 +121,16 @@ groups:
         requires_manual_gate: true
         preconditions: [Dedicated writable test node confirmed, Baseline value captured, Mandatory rollback verified, Operator approval]
         evidence: [Write request, Confirmed value change, Rollback confirmation]
+      - id: OPCUA_WRITE_VERIFY_ROLLBACK
+        label: DAY7_OPCUA_WRITE_VERIFY_ROLLBACK
+        objective: Verify whether the Web-SCADA writable test node accepts a bounded OPC UA write, confirm the value by read-back, and restore the original value.
+        protocol: OPC UA
+        mitre_technique: T0836
+        mitre_technique_name: Modify Parameter
+        safe_to_execute: false
+        requires_manual_gate: true
+        preconditions: [Testbed only, Web-SCADA writable node confirmed, Baseline captured, Mandatory rollback verified, Operator approval]
+        evidence: [Baseline value, Write response, Read-back value, Rollback response, Restored value]
       - id: OPCUA_CERTIFICATE_REJECTED
         label: OPCUA_CERTIFICATE_REJECTED
         objective: Attempt connection with untrusted client certificate.

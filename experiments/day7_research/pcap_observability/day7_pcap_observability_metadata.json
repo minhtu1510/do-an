@@ -1,0 +1,45 @@
+{
+  "generated_at_utc": "2026-09-25T13:32:19.636210Z",
+  "repo_root": "/home/sus/do-an",
+  "inputs": {
+    "timeline": "labels/day7_final_timeline.csv",
+    "pcap_zip": "data_opc/day7/ot-capture-ot1788454936.zip",
+    "decision_report": "experiments/day7_research/DAY7_RESEARCH_DECISION_VI.md"
+  },
+  "sha256": {
+    "timeline": "bde78f9ab5845e6a0b42d2ecd5e077d8c890fcd36d527f5ed9feb948aff24ed9",
+    "pcap_zip": "3742e8251a2d99f80c36c58dace287f0b78003d3f187691ec2d2018136fa10f6",
+    "decision_report": "7329d820d65dbfa78088fcbadf14a8129e341713c07e1e086a4e9ac4f6eff2fd",
+    "script": "4639c00a6c30ae20f9162b08e9a2580225b3ff81045ca60b09ceac029d9382b9"
+  },
+  "tool_versions": {
+    "python": "3.12.3",
+    "tshark": "TShark (Wireshark) 4.2.2 (Git v4.2.2 packaged as 4.2.2-1.1build3)."
+  },
+  "ip_context": {
+    "plc_ip": "192.168.210.211",
+    "hmi_ip": "192.168.210.31",
+    "expected_attacker_ip": "192.168.210.32",
+    "attacker_ip_basis": "inferred/validated from dominant Day 7 PCAP client flows; not used as a label source"
+  },
+  "dedup_policy": {
+    "raw_frame_count": "all frames matching tshark display filter",
+    "dedup_packet_count": "raw frames minus near duplicates within 1.5 ms sharing Ethernet/IP/TCP tuple, seq/ack, tcp.len and frame.len",
+    "reason": "avoid double counting obvious multi-interface/segment duplicate captures while retaining raw counts for traceability"
+  },
+  "command": "python3 experiments/day7_research/pcap_observability/reproduce_day7_pcap_observability.py",
+  "pcap_segments": [
+    "seg-170216.pcap",
+    "seg-170316.pcap",
+    "seg-170416.pcap",
+    "seg-170516.pcap",
+    "seg-170616.pcap",
+    "seg-170716.pcap",
+    "seg-170816.pcap"
+  ],
+  "figure_outputs": {
+    "svg": "experiments/day7_research/pcap_observability/day7_three_stage_timeline.svg",
+    "png": "experiments/day7_research/pcap_observability/day7_three_stage_timeline.png",
+    "png_status": "created_with_pillow"
+  }
+}

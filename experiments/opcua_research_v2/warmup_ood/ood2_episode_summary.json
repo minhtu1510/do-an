@@ -1,0 +1,29 @@
+{
+  "n_attack_episodes": 17,
+  "n_detected_attack_episodes": 17,
+  "episode_recall": 1.0,
+  "n_benign_chunks": 69,
+  "n_false_alert_benign_chunks": 23,
+  "episode_tp": 17,
+  "episode_fp": 23,
+  "episode_tn": 46,
+  "episode_fn": 0,
+  "episode_precision": 0.425,
+  "negative_episode_fpr": 0.3333333333333333,
+  "negative_episode_phase_counts": {
+    "steady": 37,
+    "warmup": 32
+  },
+  "false_positive_episode_phase_counts": {
+    "warmup": 23
+  },
+  "negative_episode_fpr_by_phase": {
+    "steady": 0.0,
+    "warmup": 0.71875
+  },
+  "n_mixed_label_episode_ids": 0,
+  "min_alert_windows": 1,
+  "confidence_threshold": 0.5,
+  "score_column": "pred_attack_score",
+  "definition": "An attack episode is detected when at least min_alert_windows windows have score_column at or above confidence_threshold."
+}

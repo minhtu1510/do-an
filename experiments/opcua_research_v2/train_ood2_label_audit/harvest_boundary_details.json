@@ -1,0 +1,248 @@
+[
+  {
+    "window_start_ms": 1786332240000,
+    "label": "OPCUA_SUBSCRIPTION_FLOOD",
+    "episode": "OPCUA_SUBSCRIPTION_FLOOD#c4",
+    "episode_start_ms": 1786332227713,
+    "episode_end_ms": 1786332241898,
+    "counts": {
+      "inside_episode_attacker_control_no_payload": 1,
+      "inside_episode_plc_reply_control_no_payload": 1
+    },
+    "frames": [
+      31602,
+      31603
+    ]
+  },
+  {
+    "window_start_ms": 1786333975000,
+    "label": "OPCUA_SUBSCRIPTION_FLOOD",
+    "episode": "OPCUA_SUBSCRIPTION_FLOOD#c28",
+    "episode_start_ms": 1786333960960,
+    "episode_end_ms": 1786333975176,
+    "counts": {
+      "inside_episode_attacker_control_no_payload": 1,
+      "inside_episode_plc_reply_control_no_payload": 1
+    },
+    "frames": [
+      210778,
+      210779
+    ]
+  },
+  {
+    "window_start_ms": 1786337195000,
+    "label": "OPCUA_SESSION_BURST",
+    "episode": "OPCUA_SESSION_BURST#c72",
+    "episode_start_ms": 1786337186570,
+    "episode_end_ms": 1786337196513,
+    "counts": {
+      "outside_episode_plc_reply_control_no_payload": 1,
+      "outside_episode_attacker_control_no_payload": 1
+    },
+    "frames": [
+      516627,
+      516628
+    ]
+  },
+  {
+    "window_start_ms": 1786338580000,
+    "label": "OPCUA_SUBSCRIPTION_FLOOD",
+    "episode": "OPCUA_SUBSCRIPTION_FLOOD#c92",
+    "episode_start_ms": 1786338566105,
+    "episode_end_ms": 1786338580315,
+    "counts": {
+      "inside_episode_attacker_control_no_payload": 1
+    },
+    "frames": [
+      643272
+    ]
+  },
+  {
+    "window_start_ms": 1786339020000,
+    "label": "OPCUA_SUBSCRIPTION_FLOOD",
+    "episode": "OPCUA_SUBSCRIPTION_FLOOD#c98",
+    "episode_start_ms": 1786339007656,
+    "episode_end_ms": 1786339021857,
+    "counts": {
+      "inside_episode_attacker_control_no_payload": 1,
+      "inside_episode_plc_reply_control_no_payload": 1
+    },
+    "frames": [
+      684562,
+      684563
+    ]
+  },
+  {
+    "window_start_ms": 1786339335000,
+    "label": "OPCUA_SUBSCRIPTION_FLOOD",
+    "episode": "OPCUA_SUBSCRIPTION_FLOOD#c103",
+    "episode_start_ms": 1786339322199,
+    "episode_end_ms": 1786339336428,
+    "counts": {
+      "inside_episode_attacker_control_no_payload": 1,
+      "inside_episode_plc_reply_control_no_payload": 1
+    },
+    "frames": [
+      710909,
+      710910
+    ]
+  },
+  {
+    "window_start_ms": 1786339605000,
+    "label": "OPCUA_SUBSCRIPTION_FLOOD",
+    "episode": "OPCUA_SUBSCRIPTION_FLOOD#c107",
+    "episode_start_ms": 1786339591025,
+    "episode_end_ms": 1786339605234,
+    "counts": {
+      "inside_episode_attacker_control_no_payload": 1
+    },
+    "frames": [
+      733451
+    ]
+  },
+  {
+    "window_start_ms": 1786340080000,
+    "label": "OPCUA_NODE_BROWSE",
+    "episode": "OPCUA_NODE_BROWSE#c114",
+    "episode_start_ms": 1786340079869,
+    "episode_end_ms": 1786340080004,
+    "counts": {
+      "inside_episode_plc_reply_control_no_payload": 2,
+      "inside_episode_attacker_control_no_payload": 1
+    },
+    "frames": [
+      776677,
+      776678,
+      776679
+    ]
+  },
+  {
+    "window_start_ms": 1786340980000,
+    "label": "OPCUA_SESSION_BURST",
+    "episode": "OPCUA_SESSION_BURST#c127",
+    "episode_start_ms": 1786340984730,
+    "episode_end_ms": 1786340994689,
+    "counts": {
+      "outside_episode_plc_reply_control_no_payload": 1,
+      "outside_episode_attacker_control_no_payload": 1
+    },
+    "frames": [
+      860486,
+      860487
+    ]
+  },
+  {
+    "window_start_ms": 1786343290000,
+    "label": "OPCUA_SUBSCRIPTION_FLOOD",
+    "episode": "OPCUA_SUBSCRIPTION_FLOOD#c159",
+    "episode_start_ms": 1786343277802,
+    "episode_end_ms": 1786343292020,
+    "counts": {
+      "inside_episode_attacker_control_no_payload": 1,
+      "inside_episode_plc_reply_control_no_payload": 1
+    },
+    "frames": [
+      1068062,
+      1068063
+    ]
+  },
+  {
+    "window_start_ms": 1786343610000,
+    "label": "OPCUA_SUBSCRIPTION_FLOOD",
+    "episode": "OPCUA_SUBSCRIPTION_FLOOD#c164",
+    "episode_start_ms": 1786343596859,
+    "episode_end_ms": 1786343611087,
+    "counts": {
+      "inside_episode_attacker_control_no_payload": 1,
+      "inside_episode_plc_reply_control_no_payload": 1
+    },
+    "frames": [
+      1094869,
+      1094870
+    ]
+  },
+  {
+    "window_start_ms": 1786343685000,
+    "label": "OPCUA_SUBSCRIPTION_FLOOD",
+    "episode": "OPCUA_SUBSCRIPTION_FLOOD#c165",
+    "episode_start_ms": 1786343671088,
+    "episode_end_ms": 1786343685284,
+    "counts": {
+      "inside_episode_attacker_control_no_payload": 1,
+      "inside_episode_plc_reply_control_no_payload": 1
+    },
+    "frames": [
+      1102678,
+      1102679
+    ]
+  },
+  {
+    "window_start_ms": 1786343805000,
+    "label": "OPCUA_PROTOCOL_FUZZ",
+    "episode": "OPCUA_PROTOCOL_FUZZ#c167",
+    "episode_start_ms": 1786343809843,
+    "episode_end_ms": 1786343814424,
+    "counts": {
+      "outside_episode_attacker_syn": 1,
+      "outside_episode_plc_reply_syn": 1,
+      "outside_episode_attacker_control_no_payload": 3,
+      "outside_episode_attacker_payload": 1,
+      "outside_episode_plc_reply_control_no_payload": 2
+    },
+    "frames": [
+      1115201,
+      1115205,
+      1115206,
+      1115207,
+      1115208,
+      1115209,
+      1115210,
+      1115211
+    ]
+  },
+  {
+    "window_start_ms": 1786344600000,
+    "label": "OPCUA_SUBSCRIPTION_FLOOD",
+    "episode": "OPCUA_SUBSCRIPTION_FLOOD#c177",
+    "episode_start_ms": 1786344585981,
+    "episode_end_ms": 1786344600244,
+    "counts": {
+      "inside_episode_attacker_control_no_payload": 1,
+      "inside_episode_plc_reply_control_no_payload": 1
+    },
+    "frames": [
+      1206026,
+      1206027
+    ]
+  },
+  {
+    "window_start_ms": 1786347260000,
+    "label": "OPCUA_SUBSCRIPTION_FLOOD",
+    "episode": "OPCUA_SUBSCRIPTION_FLOOD#c214",
+    "episode_start_ms": 1786347246521,
+    "episode_end_ms": 1786347260757,
+    "counts": {
+      "inside_episode_attacker_control_no_payload": 1,
+      "inside_episode_plc_reply_control_no_payload": 1
+    },
+    "frames": [
+      1496699,
+      1496700
+    ]
+  },
+  {
+    "window_start_ms": 1786347595000,
+    "label": "OPCUA_SUBSCRIPTION_FLOOD",
+    "episode": "OPCUA_SUBSCRIPTION_FLOOD#c219",
+    "episode_start_ms": 1786347599126,
+    "episode_end_ms": 1786347613358,
+    "counts": {
+      "outside_episode_plc_reply_control_no_payload": 1,
+      "outside_episode_attacker_control_no_payload": 1
+    },
+    "frames": [
+      1528127,
+      1528128
+    ]
+  }
+]

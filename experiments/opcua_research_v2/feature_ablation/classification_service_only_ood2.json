@@ -1,0 +1,75 @@
+{
+  "OPCUA_BEHAVIORAL_PROFILING": {
+    "precision": 0.7096774193548387,
+    "recall": 0.2894736842105263,
+    "f1-score": 0.411214953271028,
+    "support": 76.0
+  },
+  "OPCUA_ENDPOINT_DISCOVERY": {
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1-score": 0.0,
+    "support": 0.0
+  },
+  "OPCUA_MALICIOUS_WRITE": {
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1-score": 0.0,
+    "support": 0.0
+  },
+  "OPCUA_NODE_BROWSE": {
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1-score": 0.0,
+    "support": 0.0
+  },
+  "OPCUA_PROTOCOL_FUZZ": {
+    "precision": 0.5,
+    "recall": 0.5,
+    "f1-score": 0.5,
+    "support": 2.0
+  },
+  "OPCUA_RECURSIVE_BROWSE": {
+    "precision": 0.75,
+    "recall": 1.0,
+    "f1-score": 0.8571428571428571,
+    "support": 3.0
+  },
+  "OPCUA_SESSION_BURST": {
+    "precision": 1.0,
+    "recall": 0.4,
+    "f1-score": 0.5714285714285714,
+    "support": 5.0
+  },
+  "OPCUA_SLOWLORIS": {
+    "precision": 0.92,
+    "recall": 0.7419354838709677,
+    "f1-score": 0.8214285714285714,
+    "support": 31.0
+  },
+  "OPCUA_SUBSCRIPTION_FLOOD": {
+    "precision": 1.0,
+    "recall": 0.125,
+    "f1-score": 0.2222222222222222,
+    "support": 8.0
+  },
+  "benign": {
+    "precision": 0.8679245283018868,
+    "recall": 0.9583333333333334,
+    "f1-score": 0.9108910891089109,
+    "support": 480.0
+  },
+  "accuracy": 0.8462809917355372,
+  "macro avg": {
+    "precision": 0.5747601947656726,
+    "recall": 0.4014742501414827,
+    "f1-score": 0.4294328264602162,
+    "support": 605.0
+  },
+  "weighted avg": {
+    "precision": 0.8517508387700388,
+    "recall": 0.8462809917355372,
+    "f1-score": 0.8300011473413392,
+    "support": 605.0
+  }
+}
