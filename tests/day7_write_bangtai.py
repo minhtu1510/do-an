@@ -8,12 +8,16 @@ loops writes and always attempts to restore the original value in finally.
 import asyncio
 import json
 import os
+import sys
 import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 from asyncua import Client, ua
 
+# Allow direct execution from the repository root:
+# python tests/day7_write_bangtai.py
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tests.common import OPC_URL
 
 NODE_ID = os.getenv("DAY7_BANGTAI_NODE", 'ns=3;s="BangTai"')
